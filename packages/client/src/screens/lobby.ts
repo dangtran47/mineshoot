@@ -1,4 +1,4 @@
-import { DEFAULT_DURATION_MIN, DURATION_OPTIONS_MIN, MAX_NAME_LEN } from '@mineshoot/shared';
+import { DEFAULT_DURATION_MIN, DURATION_OPTIONS_MIN, MAX_BOTS, MAX_NAME_LEN, MAX_PLAYERS } from '@mineshoot/shared';
 import { createRoom, joinRoom, listRooms } from '../net';
 import type { GameRoom, RoomListEntry } from '../net';
 import { formatTime } from '../hud/hud';
@@ -28,6 +28,7 @@ export function showLobby(opts: LobbyOptions): { dispose(): void } {
         <label>New room</label>
         <input class="roomname" maxlength="24" placeholder="Room name" />
         <select class="duration"></select>
+        <select class="bots" title="AI bots"></select>
         <button class="primary create">Create room</button>
       </div>
       <table>
@@ -43,6 +44,7 @@ export function showLobby(opts: LobbyOptions): { dispose(): void } {
   const nick = root.querySelector<HTMLInputElement>('.nick')!;
   const roomName = root.querySelector<HTMLInputElement>('.roomname')!;
   const duration = root.querySelector<HTMLSelectElement>('.duration')!;
+  const bots = root.querySelector<HTMLSelectElement>('.bots')!;
   const createBtn = root.querySelector<HTMLButtonElement>('.create')!;
   const rooms = root.querySelector<HTMLElement>('.rooms')!;
   const error = root.querySelector<HTMLElement>('.error')!;
@@ -55,6 +57,12 @@ export function showLobby(opts: LobbyOptions): { dispose(): void } {
     o.textContent = `${d} min`;
     if (d === DEFAULT_DURATION_MIN) o.selected = true;
     duration.appendChild(o);
+  }
+  for (let n = 0; n <= MAX_BOTS; n++) {
+    const o = document.createElement('option');
+    o.value = String(n);
+    o.textContent = n === 0 ? 'No bots' : `${n} bot${n > 1 ? 's' : ''}`;
+    bots.appendChild(o);
   }
   if (opts.message) error.textContent = opts.message;
 
@@ -84,6 +92,7 @@ export function showLobby(opts: LobbyOptions): { dispose(): void } {
         name: roomName.value.trim() || `${n}'s room`,
         durationMin: Number(duration.value),
         nickname: n,
+        bots: Number(bots.value),
       };
       // Dev-only: ?testDurationMs=... shortens the match (server honours it only with MINESHOOT_TEST=1).
       const testMs = import.meta.env.DEV ? Number(new URLSearchParams(location.search).get('testDurationMs')) : 0;
@@ -131,7 +140,9 @@ export function showLobby(opts: LobbyOptions): { dispose(): void } {
         const tr = document.createElement('tr');
         const left = Math.max(0, r.metadata.endsAt - Date.now());
         const full = r.clients >= r.maxClients;
-        tr.innerHTML = `<td>${escapeHtml(r.metadata.name)}</td><td>${r.clients}/${r.maxClients}</td><td>${formatTime(left)}</td>
+        const botCount = r.metadata.bots ?? 0;
+        const players = `${r.clients + botCount}/${MAX_PLAYERS}${botCount ? ` (\u{1F916} ${botCount})` : ''}`;
+        tr.innerHTML = `<td>${escapeHtml(r.metadata.name)}</td><td>${players}</td><td>${formatTime(left)}</td>
           <td><button class="join" data-id="${r.roomId}" ${full || busy ? 'disabled' : ''}>${full ? 'Full' : 'Join'}</button></td>`;
         return tr;
       }),

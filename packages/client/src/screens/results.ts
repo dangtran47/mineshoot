@@ -16,7 +16,7 @@ export function showResults(
   const rows = ranking
     .map(
       (r, i) =>
-        `<tr class="${r.id === meId ? 'me' : ''}"><td><span class="medal">${medals[i] ?? i + 1}</span></td><td>${escapeHtml(r.name)}</td><td>${r.kills}</td><td>${r.deaths}</td><td>${kdRatio(r.kills, r.deaths).toFixed(2)}</td></tr>`,
+        `<tr class="${r.id === meId ? 'me' : ''}"><td><span class="medal">${medals[i] ?? i + 1}</span></td><td>${r.isBot ? '\u{1F916} ' : ''}${escapeHtml(r.name)}</td><td>${r.kills}</td><td>${r.deaths}</td><td>${kdRatio(r.kills, r.deaths).toFixed(2)}</td></tr>`,
     )
     .join('');
   const winner = ranking[0];

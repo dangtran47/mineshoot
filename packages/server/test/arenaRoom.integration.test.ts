@@ -162,6 +162,52 @@ describe('arena room', () => {
     }
   });
 
+  it('adds bots that occupy slots, move around and hunt players', async () => {
+    const room: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, {
+      nickname: 'Human',
+      durationMin: 5,
+      bots: 2,
+      testOverrides: { respawnMs: 500 },
+    });
+    const kills: KillMsg[] = [];
+    room.onMessage(MSG.kill, (m: KillMsg) => kills.push(m));
+    room.onMessage(MSG.shot, () => {});
+    try {
+      await until(() => room.state?.players?.size === 3, 3000, 'bots in state');
+      const bot1 = room.state.players.get('bot1');
+      expect(bot1.isBot).toBe(true);
+      expect(bot1.name).toBe('Bot 1');
+      expect(room.state.players.get('bot2').isBot).toBe(true);
+      expect(me(room).isBot).toBe(false);
+
+      const rooms = (await (await fetch(`${httpUrl}/rooms`)).json()) as RoomListEntry[];
+      const listed = rooms.find((r) => r.roomId === room.roomId)!;
+      expect(listed.maxClients).toBe(6); // 8 - 2 bots
+      expect(listed.metadata.bots).toBe(2);
+
+      // Bots move under server physics.
+      const start = { x: bot1.x, z: bot1.z };
+      await until(() => Math.hypot(bot1.x - start.x, bot1.z - start.z) > 0.5, 4000, 'bot moved');
+
+      // Hover in the sky above bot1 with clear line of sight: it should turn, aim and kill us.
+      const hover = (): void => {
+        room.send(MSG.pose, { x: bot1.x, y: 18, z: bot1.z + 3, yaw: 0, pitch: 0, epoch: me(room).spawnEpoch, weapon: 0 });
+      };
+      const t = setInterval(hover, 50);
+      try {
+        await until(() => kills.some((k) => k.victimId === room.sessionId && k.killerId.startsWith('bot')), 8000, 'bot kill');
+      } finally {
+        clearInterval(t);
+      }
+      const k = kills.find((kk) => kk.victimId === room.sessionId)!;
+      expect(k.killerName).toMatch(/^Bot [12]$/);
+      await until(() => me(room).deaths === 1, 3000, 'death counted');
+      await until(() => room.state.players.get(k.killerId).kills >= 1, 3000, 'bot kill counted');
+    } finally {
+      await room.leave();
+    }
+  }, 20000);
+
   it('ends the match, locks the room and disconnects everyone after the linger', async () => {
     const room: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, {
       nickname: 'Solo',

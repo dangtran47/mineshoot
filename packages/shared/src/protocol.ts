@@ -10,6 +10,8 @@ export interface CreateOptions {
   name: string;
   durationMin: number;
   nickname: string;
+  /** Number of AI bots to add at creation (0..MAX_BOTS). */
+  bots?: number;
 }
 export interface JoinOptions {
   nickname: string;
@@ -19,6 +21,7 @@ export interface RoomMetadata {
   durationMin: number;
   /** Server epoch ms when the match ends (lobby display only). */
   endsAt: number;
+  bots: number;
 }
 
 export interface PoseMsg {

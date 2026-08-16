@@ -20,6 +20,7 @@ export const PHYSICS_DT = 1 / PHYSICS_HZ;
 
 // Networking cadence
 export const POSE_HZ = 20;
+export const SERVER_TICK_MS = 50;
 export const POSE_INTERVAL_MS = 1000 / POSE_HZ;
 export const INTERP_DELAY_MS = 100;
 
@@ -36,6 +37,7 @@ export const SWORD_SERVER_MIN_INTERVAL_MS = 450;
 // Match
 export const RESPAWN_MS = 3000;
 export const MAX_PLAYERS = 8;
+export const MAX_BOTS = 7;
 export const MAX_NAME_LEN = 12;
 export const DURATION_OPTIONS_MIN = [3, 5, 10, 15] as const;
 export const DEFAULT_DURATION_MIN = 10;

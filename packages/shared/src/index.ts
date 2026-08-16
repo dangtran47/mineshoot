@@ -13,3 +13,4 @@ export * from './gun';
 export * from './sword';
 export * from './spawn';
 export * from './ranking';
+export * from './bot';

@@ -17,6 +17,7 @@ export interface NetPlayer {
   spawnEpoch: number;
   weapon: number;
   color: number;
+  isBot: boolean;
 }
 export interface NetMap<T> {
   size: number;
@@ -101,4 +102,9 @@ function friendlyError(error: unknown, fallback: string): string {
   if (/expired|not found/i.test(message)) return 'Room not found';
   if (/failed to fetch|network|ECONNREFUSED/i.test(message)) return 'Cannot reach server';
   return message !== '' ? `${fallback}: ${message}` : fallback;
+}
+
+/** Name as shown in nametags, feeds and tables. */
+export function displayName(name: string, isBot: boolean): string {
+  return isBot ? `\u{1F916} ${name}` : name;
 }

@@ -2,6 +2,11 @@ import { Room } from 'colyseus';
 import type { Client } from 'colyseus';
 import {
   ENDED_LINGER_MS,
+  PHYSICS_DT,
+  SERVER_TICK_MS,
+  createBot,
+  createPhysState,
+  stepPlayer,
   GUN_RANGE,
   GUN_SERVER_MIN_INTERVAL_MS,
   MAX_PLAYERS,
@@ -18,9 +23,9 @@ import {
   resolveShot,
   swordVictims,
 } from '@mineshoot/shared';
-import type { KillMsg, ShotMsg, ShotTarget, SpawnPoint, Weapon, World } from '@mineshoot/shared';
+import type { Bot, BotView, KillMsg, PlayerPhysState, PlayerPose, ShotMsg, ShotTarget, SpawnPoint, Weapon, World } from '@mineshoot/shared';
 import { PlayerSchema, RoomState } from './schema';
-import { parseDurationMin, parsePose, parseShoot, parseSwing, sanitizeName, sanitizeRoomName } from './validate';
+import { parseBotCount, parseDurationMin, parsePose, parseShoot, parseSwing, sanitizeName, sanitizeRoomName } from './validate';
 
 /** Server-only per-player bookkeeping (not synced). */
 interface PlayerMeta {
@@ -36,9 +41,16 @@ interface TestOverrides {
   lingerMs?: number;
 }
 
+/** Server-side bot runtime: brain + simulated body. */
+interface BotRuntime {
+  brain: Bot;
+  phys: PlayerPhysState;
+}
+
 interface CreateOptionsRaw {
   name?: unknown;
   durationMin?: unknown;
+  bots?: unknown;
   nickname?: unknown;
   testOverrides?: TestOverrides;
 }
@@ -53,11 +65,16 @@ export class ArenaRoom extends Room<RoomState> {
   private respawnMs = RESPAWN_MS;
   private lingerMs = ENDED_LINGER_MS;
   private readonly meta = new Map<string, PlayerMeta>();
+  private readonly bots = new Map<string, BotRuntime>();
+  private botAcc = 0;
 
   onCreate(options: CreateOptionsRaw = {}): void {
     this.state = new RoomState();
     this.state.name = sanitizeRoomName(options.name, `Arena ${this.roomId.slice(0, 4)}`);
     this.state.durationMin = parseDurationMin(options.durationMin);
+    const botCount = parseBotCount(options.bots);
+    // Bots occupy player slots: humans + bots never exceed MAX_PLAYERS.
+    this.maxClients = MAX_PLAYERS - botCount;
     let durationMs = this.state.durationMin * 60_000;
     if (process.env.MINESHOOT_TEST === '1' && options.testOverrides) {
       const t = options.testOverrides;
@@ -75,7 +92,7 @@ export class ArenaRoom extends Room<RoomState> {
 
     this.endsAt = Date.now() + durationMs;
     this.state.timeLeftMs = durationMs;
-    this.setMetadata({ name: this.state.name, durationMin: this.state.durationMin, endsAt: this.endsAt });
+    this.setMetadata({ name: this.state.name, durationMin: this.state.durationMin, endsAt: this.endsAt, bots: botCount });
 
     this.onMessage(MSG.pose, (client, raw: unknown) => this.handlePose(client, raw));
     this.onMessage(MSG.shoot, (client, raw: unknown) => this.handleShoot(client, raw));
@@ -86,6 +103,53 @@ export class ArenaRoom extends Room<RoomState> {
 
     this.clock.setInterval(() => this.tickRespawns(), 50);
     this.clock.setInterval(() => this.tickTimer(), 1000);
+
+    for (let i = 0; i < botCount; i++) this.addBot(i + 1);
+    if (botCount > 0) this.setSimulationInterval((deltaMs) => this.pumpBots(deltaMs), SERVER_TICK_MS);
+  }
+
+  private addBot(n: number): void {
+    const id = `bot${n}`;
+    const p = new PlayerSchema();
+    p.name = `Bot ${n}`;
+    p.isBot = true;
+    p.color = this.freeColor();
+    this.state.players.set(id, p);
+    this.meta.set(id, { respawnAt: 0, lastShotAt: 0, lastSwingAt: 0 });
+    this.bots.set(id, { brain: createBot(createRng(this.state.seed + n * 7919), this.spawnPoints), phys: createPhysState(0, 0, 0) });
+    this.spawn(id, p);
+  }
+
+  /** Fixed-timestep bot simulation off measured elapsed time (same pattern as bomberman). */
+  private pumpBots(deltaMs: number): void {
+    this.botAcc = Math.min(this.botAcc + deltaMs, 250);
+    while (this.botAcc >= SERVER_TICK_MS) {
+      this.botAcc -= SERVER_TICK_MS;
+      this.tickBots();
+    }
+  }
+
+  private tickBots(): void {
+    if (this.state.phase !== 'playing') return;
+    const now = Date.now();
+    const dt = SERVER_TICK_MS / 1000;
+    for (const [id, rt] of this.bots) {
+      const p = this.state.players.get(id);
+      if (!p || !p.alive) continue;
+      const enemies: BotView['enemies'] = [];
+      for (const [sid, other] of this.state.players) {
+        if (sid !== id && other.alive) enemies.push({ id: sid, x: other.x, y: other.y, z: other.z });
+      }
+      const d = rt.brain.compute(this.world, { self: rt.phys, enemies, now }, dt);
+      let phys = { ...rt.phys, yaw: d.yaw, pitch: d.pitch };
+      const substeps = Math.round(dt / PHYSICS_DT);
+      for (let i = 0; i < substeps; i++) phys = stepPlayer(this.world, phys, d.input, PHYSICS_DT);
+      rt.phys = phys;
+      this.applyPose(p, phys);
+      if (p.weapon !== d.weapon) p.weapon = d.weapon;
+      if (d.shoot) this.attackShoot(id, p, phys, now);
+      if (d.swing) this.attackSwing(id, p, phys, now);
+    }
   }
 
   onJoin(client: Client, options?: { nickname?: unknown }): void {
@@ -143,22 +207,26 @@ export class ArenaRoom extends Room<RoomState> {
     if (!m) return;
     const p = this.actor(client, m.epoch);
     if (!p) return;
-    const meta = this.meta.get(client.sessionId)!;
-    const now = Date.now();
+    this.applyPose(p, m);
+    this.attackShoot(client.sessionId, p, m, Date.now());
+  }
+
+  /** Server-authoritative gun shot for humans and bots alike (rate-limited per shooter). */
+  private attackShoot(id: string, p: PlayerSchema, pose: PlayerPose, now: number): void {
+    const meta = this.meta.get(id)!;
     if (now - meta.lastShotAt < GUN_SERVER_MIN_INTERVAL_MS) return;
     meta.lastShotAt = now;
-    this.applyPose(p, m);
     if (p.weapon !== WEAPON_GUN) p.weapon = WEAPON_GUN;
 
-    const result = resolveShot(this.world, m, this.targetsExcluding(client.sessionId), GUN_RANGE);
+    const result = resolveShot(this.world, pose, this.targetsExcluding(id), GUN_RANGE);
     const shot: ShotMsg = {
-      shooterId: client.sessionId,
+      shooterId: id,
       from: result.from,
       to: result.to,
       hitPlayerId: result.hitPlayerId ?? '',
     };
     this.broadcast(MSG.shot, shot);
-    if (result.hitPlayerId) this.kill(client.sessionId, result.hitPlayerId, WEAPON_GUN);
+    if (result.hitPlayerId) this.kill(id, result.hitPlayerId, WEAPON_GUN);
   }
 
   private handleSwing(client: Client, raw: unknown): void {
@@ -166,15 +234,18 @@ export class ArenaRoom extends Room<RoomState> {
     if (!m) return;
     const p = this.actor(client, m.epoch);
     if (!p) return;
-    const meta = this.meta.get(client.sessionId)!;
-    const now = Date.now();
+    this.applyPose(p, m);
+    this.attackSwing(client.sessionId, p, m, Date.now());
+  }
+
+  private attackSwing(id: string, p: PlayerSchema, pose: PlayerPose, now: number): void {
+    const meta = this.meta.get(id)!;
     if (now - meta.lastSwingAt < SWORD_SERVER_MIN_INTERVAL_MS) return;
     meta.lastSwingAt = now;
-    this.applyPose(p, m);
     if (p.weapon !== WEAPON_SWORD) p.weapon = WEAPON_SWORD;
 
-    for (const victim of swordVictims(this.world, m, this.targetsExcluding(client.sessionId))) {
-      this.kill(client.sessionId, victim, WEAPON_SWORD);
+    for (const victim of swordVictims(this.world, pose, this.targetsExcluding(id))) {
+      this.kill(id, victim, WEAPON_SWORD);
     }
   }
 
@@ -212,6 +283,11 @@ export class ArenaRoom extends Room<RoomState> {
     p.pitch = 0;
     p.alive = true;
     p.spawnEpoch = (p.spawnEpoch + 1) & 0xffff;
+    const bot = this.bots.get(id);
+    if (bot) {
+      bot.phys = createPhysState(p.x, p.y, p.z, p.yaw);
+      bot.brain.reset();
+    }
   }
 
   private tickRespawns(): void {

@@ -137,7 +137,7 @@ export class Hud {
       const tr = el('tr', r.id === meId ? 'me' : undefined);
       tr.append(
         el('td', undefined, String(i + 1)),
-        el('td', undefined, r.name),
+        el('td', undefined, r.isBot ? `\u{1F916} ${r.name}` : r.name),
         el('td', undefined, String(r.kills)),
         el('td', undefined, String(r.deaths)),
         el('td', undefined, kdRatio(r.kills, r.deaths).toFixed(2)),

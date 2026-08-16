@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseDurationMin, parsePose, parseShoot, sanitizeName, sanitizeRoomName } from '../src/rooms/validate';
+import { parseBotCount, parseDurationMin, parsePose, parseShoot, sanitizeName, sanitizeRoomName } from '../src/rooms/validate';
 
 describe('sanitizeName', () => {
   it('trims, strips junk, limits length, falls back', () => {
@@ -47,5 +47,16 @@ describe('parsePose / parseShoot', () => {
     const s = parseShoot(good)!;
     expect(s.epoch).toBe(1);
     expect((s as { weapon?: unknown }).weapon).toBeUndefined();
+  });
+});
+
+describe('parseBotCount', () => {
+  it('clamps to 0..7 integers, default 0', () => {
+    expect(parseBotCount(undefined)).toBe(0);
+    expect(parseBotCount(3)).toBe(3);
+    expect(parseBotCount(99)).toBe(7);
+    expect(parseBotCount(-1)).toBe(0);
+    expect(parseBotCount(2.5)).toBe(0);
+    expect(parseBotCount('2')).toBe(0);
   });
 });

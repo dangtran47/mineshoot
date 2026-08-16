@@ -68,4 +68,5 @@ export interface RankRow {
   name: string;
   kills: number;
   deaths: number;
+  isBot?: boolean;
 }

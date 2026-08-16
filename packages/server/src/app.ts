@@ -12,7 +12,7 @@ export interface RoomListEntry {
   clients: number;
   maxClients: number;
   locked: boolean;
-  metadata: { name: string; durationMin: number; endsAt: number };
+  metadata: { name: string; durationMin: number; endsAt: number; bots: number };
 }
 
 export async function listRooms(): Promise<RoomListEntry[]> {
@@ -24,7 +24,7 @@ export async function listRooms(): Promise<RoomListEntry[]> {
       clients: r.clients,
       maxClients: r.maxClients,
       locked: r.locked,
-      metadata: r.metadata ?? { name: '', durationMin: 0, endsAt: 0 },
+      metadata: r.metadata ?? { name: '', durationMin: 0, endsAt: 0, bots: 0 },
     }))
     .sort((a, b) => b.metadata.endsAt - a.metadata.endsAt);
 }

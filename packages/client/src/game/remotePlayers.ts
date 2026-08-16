@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { INTERP_DELAY_MS } from '@mineshoot/shared';
 import type { Weapon } from '@mineshoot/shared';
+import { displayName } from '../net';
 import type { NetPlayer } from '../net';
 import { Humanoid } from '../render/humanoid';
 import { createNametag } from '../render/nametag';
@@ -24,7 +25,7 @@ export class RemotePlayers {
   add(id: string, p: NetPlayer): void {
     if (this.remotes.has(id)) return;
     const humanoid = new Humanoid(p.color);
-    const tag = createNametag(p.name);
+    const tag = createNametag(displayName(p.name, p.isBot));
     humanoid.group.add(tag.sprite);
     this.group.add(humanoid.group);
     const buffer = new SnapshotBuffer();

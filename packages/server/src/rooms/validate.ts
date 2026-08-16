@@ -1,4 +1,4 @@
-import { DEFAULT_DURATION_MIN, DURATION_OPTIONS_MIN, MAX_NAME_LEN, WORLD_SX, WORLD_SZ } from '@mineshoot/shared';
+import { DEFAULT_DURATION_MIN, DURATION_OPTIONS_MIN, MAX_BOTS, MAX_NAME_LEN, WORLD_SX, WORLD_SZ } from '@mineshoot/shared';
 import type { PoseMsg, ShootMsg, Weapon } from '@mineshoot/shared';
 
 export function sanitizeName(raw: unknown, fallback: string): string {
@@ -17,6 +17,12 @@ export function sanitizeRoomName(raw: unknown, fallback: string): string {
 export function parseDurationMin(raw: unknown): number {
   if (typeof raw !== 'number' || !Number.isFinite(raw)) return DEFAULT_DURATION_MIN;
   return (DURATION_OPTIONS_MIN as readonly number[]).includes(raw) ? raw : DEFAULT_DURATION_MIN;
+}
+
+/** Bot count 0..MAX_BOTS (integers only), default 0. */
+export function parseBotCount(raw: unknown): number {
+  if (typeof raw !== 'number' || !Number.isInteger(raw)) return 0;
+  return Math.max(0, Math.min(MAX_BOTS, raw));
 }
 
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);

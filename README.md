@@ -19,7 +19,7 @@ is shown.
 
 | Package | What it is |
 | --- | --- |
-| `packages/shared` | Pure TypeScript: constants, deterministic worldgen, collision, raycast, player physics, gun/sword resolution, spawn picking, ranking. No runtime deps. |
+| `packages/shared` | Pure TypeScript: constants, deterministic worldgen, collision, raycast, player physics, gun/sword resolution, spawn picking, ranking, bot AI. No runtime deps. |
 | `packages/client` | Vite + three.js client: lobby, voxel renderer, pointer-lock FPS controls, HUD, results screen. |
 | `packages/server` | Colyseus 0.16 authoritative `arena` room + `GET /rooms` lobby listing + `GET /health`. |
 
@@ -32,8 +32,8 @@ npm install
 make start        # server on :2567 + client on :5173 (Ctrl-C stops both)
 ```
 
-Open http://localhost:5173, enter a nickname, **Create room** (name + duration),
-open a second tab and **Join** it from the list. Controls: WASD move, Space
+Open http://localhost:5173, enter a nickname, **Create room** (name, duration,
+and optionally 1–7 **AI bots**), open a second tab and **Join** it from the list. Controls: WASD move, Space
 jump, mouse aim (click to lock the pointer, Esc to release), LMB attack,
 `1`/`2` or mouse wheel to switch gun/sword, hold Tab for the scoreboard.
 
@@ -63,6 +63,17 @@ make deploy-fe VITE_SERVER_URL=wss://<your-app>.fly.dev
 ```
 
 The room registry is in-process memory: keep the Fly app at a single machine.
+
+## Bots
+
+A room can be created with 0–7 bots (they take player slots, so humans + bots
+≤ 8). Bots run entirely on the server using the same shared physics and combat
+rules as humans: they wander between spawn points, hunt the nearest enemy they
+have line of sight to, keep a mid-range distance while strafing, aim with a
+reaction delay and distance-scaled error, shoot the gun, and switch to the
+sword up close. They die, respawn and rank like everyone else and show a 🤖 in
+nametags, the kill feed and the scoreboard. Tuning lives at the top of
+`packages/shared/src/bot.ts`.
 
 ## Gameplay tuning
 

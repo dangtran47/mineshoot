@@ -14,6 +14,7 @@ export class PlayerSchema extends Schema {
   @type('uint16') spawnEpoch = 0;
   @type('uint8') weapon = 0;
   @type('uint8') color = 0;
+  @type('boolean') isBot = false;
 }
 
 export class RoomState extends Schema {

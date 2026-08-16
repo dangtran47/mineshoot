@@ -11,6 +11,7 @@ import {
   rankPlayers,
 } from '@mineshoot/shared';
 import type { KillMsg, PoseMsg, RankRow, ShootMsg, ShotMsg, Weapon } from '@mineshoot/shared';
+import { displayName } from '../net';
 import type { GameRoom, NetPlayer } from '../net';
 import { createScene } from '../render/scene';
 import { buildWorldMeshes } from '../render/worldMesh';
@@ -132,7 +133,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
 
   const rankingRows = (): RankRow[] => {
     const rows: RankRow[] = [];
-    room?.state.players.forEach((p, id) => rows.push({ id, name: p.name, kills: p.kills, deaths: p.deaths }));
+    room?.state.players.forEach((p, id) => rows.push({ id, name: p.name, kills: p.kills, deaths: p.deaths, isBot: p.isBot }));
     return rankPlayers(rows);
   };
 
@@ -192,9 +193,12 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
   const onKill = (m: KillMsg): void => {
     const verb = m.weapon === WEAPON_GUN ? '🔫' : '🗡️';
     const mine = m.killerId === meId;
-    hud.pushFeed(`${m.killerName} ${verb} ${m.victimName}`, mine || m.victimId === meId);
+    const nameOf = (id: string, fallback: string): string =>
+      displayName(fallback, room?.state.players.get(id)?.isBot ?? false);
+    const killerName = nameOf(m.killerId, m.killerName);
+    hud.pushFeed(`${killerName} ${verb} ${nameOf(m.victimId, m.victimName)}`, mine || m.victimId === meId);
     if (m.victimId === meId) {
-      hud.showDeath(m.killerName, m.weapon);
+      hud.showDeath(killerName, m.weapon);
       hud.damageFlash();
     }
     if (m.weapon === WEAPON_SWORD) remotes.swing(m.killerId);
