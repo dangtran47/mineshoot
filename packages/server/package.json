@@ -1,0 +1,25 @@
+{
+  "name": "@mineshoot/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "build": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@mineshoot/shared": "*",
+    "@colyseus/schema": "3.0.76",
+    "@colyseus/ws-transport": "0.16.5",
+    "colyseus": "0.16.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "colyseus.js": "0.16.22",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4",
+    "vitest": "^2.1.9"
+  }
+}

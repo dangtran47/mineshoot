@@ -1,0 +1,25 @@
+{
+  "name": "mineshoot",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "npm run test --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present"
+  },
+  "overrides": {
+    "@colyseus/core": "0.16.24",
+    "@colyseus/auth": "0.16.6",
+    "@colyseus/timer": "1.0.3",
+    "@colyseus/clock": "1.0.1",
+    "@colyseus/redis-driver": "0.16.1",
+    "@colyseus/redis-presence": "0.16.4",
+    "@colyseus/uwebsockets-transport": "0.16.10",
+    "@colyseus/httpie": "2.0.1",
+    "@colyseus/msgpackr": "1.11.3"
+  }
+}
