@@ -10,7 +10,7 @@ export interface GeneratedWorld {
   spawnPoints: SpawnPoint[];
 }
 
-const BORDER_WALL_H = 12;
+const BORDER_WALL_H = 6;
 const PLATEAU_MIN = 25;
 const PLATEAU_MAX = 38; // inclusive
 const PLATEAU_TOP = 9;
@@ -47,15 +47,16 @@ export function generateWorld(seed: number): GeneratedWorld {
     }
   }
 
-  // Border wall
+  // Border wall (bedrock base, stone above; the world edge itself is solid for physics)
   for (let y = 0; y < BORDER_WALL_H; y++) {
+    const b = y === 0 ? Block.Bedrock : Block.Stone;
     for (let x = 0; x < world.sx; x++) {
-      setBlock(world, x, y, 0, Block.Bedrock);
-      setBlock(world, x, y, world.sz - 1, Block.Bedrock);
+      setBlock(world, x, y, 0, b);
+      setBlock(world, x, y, world.sz - 1, b);
     }
     for (let z = 0; z < world.sz; z++) {
-      setBlock(world, 0, y, z, Block.Bedrock);
-      setBlock(world, world.sx - 1, y, z, Block.Bedrock);
+      setBlock(world, 0, y, z, b);
+      setBlock(world, world.sx - 1, y, z, b);
     }
   }
 

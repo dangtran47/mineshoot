@@ -9,7 +9,8 @@
   ],
   "scripts": {
     "test": "npm run test --workspaces --if-present",
-    "build": "npm run build --workspaces --if-present"
+    "build": "npm run build --workspaces --if-present",
+    "smoke": "node scripts/smoke.mjs"
   },
   "overrides": {
     "@colyseus/core": "0.16.24",
@@ -21,5 +22,8 @@
     "@colyseus/uwebsockets-transport": "0.16.10",
     "@colyseus/httpie": "2.0.1",
     "@colyseus/msgpackr": "1.11.3"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.62.1"
   }
 }

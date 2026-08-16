@@ -20,11 +20,11 @@ describe('generateWorld', () => {
     expect(world.sz).toBe(WORLD_SZ);
     for (let x = 0; x < world.sx; x++)
       for (let z = 0; z < world.sz; z++) expect(getBlock(world, x, 0, z)).toBe(Block.Bedrock);
-    for (let y = 0; y < 12; y++) {
-      expect(getBlock(world, 0, y, 10)).toBe(Block.Bedrock);
-      expect(getBlock(world, world.sx - 1, y, 10)).toBe(Block.Bedrock);
-      expect(getBlock(world, 10, y, 0)).toBe(Block.Bedrock);
-      expect(getBlock(world, 10, y, world.sz - 1)).toBe(Block.Bedrock);
+    for (let y = 0; y < 6; y++) {
+      expect(getBlock(world, 0, y, 10)).not.toBe(Block.Air);
+      expect(getBlock(world, world.sx - 1, y, 10)).not.toBe(Block.Air);
+      expect(getBlock(world, 10, y, 0)).not.toBe(Block.Air);
+      expect(getBlock(world, 10, y, world.sz - 1)).not.toBe(Block.Air);
     }
   });
 

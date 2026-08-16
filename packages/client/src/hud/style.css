@@ -1,0 +1,88 @@
+:root {
+  --bg: #1b1f2a;
+  --panel: rgba(20, 24, 34, 0.86);
+  --border: #3b4356;
+  --text: #e8ecf5;
+  --muted: #9aa4bd;
+  --accent: #7ac943;
+  --accent2: #ffb84d;
+  --danger: #ff5c5c;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden; }
+#app { width: 100%; height: 100%; position: relative; }
+canvas.game { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+button {
+  font: inherit; color: var(--text); background: #2c3446; border: 1px solid var(--border);
+  border-radius: 6px; padding: 8px 14px; cursor: pointer;
+}
+button:hover { background: #38425a; }
+button.primary { background: var(--accent); color: #10230a; border-color: #5f9e34; font-weight: 600; }
+button.primary:hover { background: #8dd955; }
+button:disabled { opacity: 0.5; cursor: default; }
+input, select {
+  font: inherit; color: var(--text); background: #11151f; border: 1px solid var(--border);
+  border-radius: 6px; padding: 8px 10px;
+}
+
+/* Lobby */
+.lobby { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+.lobby .card { width: min(720px, 94vw); background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 24px; }
+.lobby h1 { margin: 0 0 4px; font-size: 32px; letter-spacing: 1px; }
+.lobby h1 span { color: var(--accent); }
+.lobby .sub { color: var(--muted); margin-bottom: 18px; }
+.lobby .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+.lobby label { color: var(--muted); font-size: 13px; }
+.lobby table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+.lobby th, .lobby td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); }
+.lobby th { color: var(--muted); font-weight: 500; font-size: 13px; }
+.lobby .empty { color: var(--muted); padding: 16px 6px; text-align: center; }
+.lobby .error { color: var(--danger); min-height: 1.2em; margin-top: 8px; }
+.lobby .help { color: var(--muted); font-size: 12px; margin-top: 12px; }
+
+/* HUD */
+.hud { position: absolute; inset: 0; pointer-events: none; user-select: none; }
+.hud .crosshair { position: absolute; left: 50%; top: 50%; width: 18px; height: 18px; transform: translate(-50%, -50%); }
+.hud .crosshair::before, .hud .crosshair::after { content: ''; position: absolute; background: #fff; box-shadow: 0 0 2px #000; }
+.hud .crosshair::before { left: 8px; top: 0; width: 2px; height: 18px; }
+.hud .crosshair::after { top: 8px; left: 0; width: 18px; height: 2px; }
+.hud .hitmarker { position: absolute; left: 50%; top: 50%; width: 30px; height: 30px; transform: translate(-50%, -50%) rotate(45deg); opacity: 0; transition: opacity 0.25s; }
+.hud .hitmarker::before, .hud .hitmarker::after { content: ''; position: absolute; background: var(--danger); }
+.hud .hitmarker::before { left: 14px; top: 0; width: 2px; height: 30px; }
+.hud .hitmarker::after { top: 14px; left: 0; width: 30px; height: 2px; }
+.hud .hitmarker.show { opacity: 1; transition: none; }
+.hud .top { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); text-align: center; }
+.hud .timer { font-size: 30px; font-weight: 700; text-shadow: 0 2px 4px #000; font-variant-numeric: tabular-nums; }
+.hud .timer.low { color: var(--danger); }
+.hud .roomname { color: var(--muted); font-size: 12px; text-shadow: 0 1px 2px #000; }
+.hud .stats { position: absolute; left: 14px; bottom: 14px; font-size: 16px; text-shadow: 0 1px 3px #000; }
+.hud .weapon { position: absolute; right: 14px; bottom: 14px; text-align: right; text-shadow: 0 1px 3px #000; }
+.hud .weapon .name { font-size: 20px; font-weight: 700; }
+.hud .weapon .hint { color: var(--muted); font-size: 12px; }
+.hud .ping { position: absolute; right: 14px; top: 12px; color: var(--muted); font-size: 12px; text-shadow: 0 1px 2px #000; }
+.hud .feed { position: absolute; right: 14px; top: 34px; display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
+.hud .feed div { background: rgba(0,0,0,0.45); padding: 4px 8px; border-radius: 4px; font-size: 13px; }
+.hud .feed div.hl { background: rgba(122, 201, 67, 0.35); }
+.hud .center-msg { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); text-align: center; font-size: 22px; text-shadow: 0 2px 4px #000; }
+.hud .center-msg .big { font-size: 40px; font-weight: 800; color: var(--danger); }
+.hud .overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; pointer-events: auto; cursor: pointer; }
+.hud .overlay h2 { margin: 0; font-size: 28px; }
+.hud .overlay p { margin: 0; color: var(--muted); }
+.hud .scoreboard { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; min-width: 360px; }
+.hud .scoreboard table, .results table { width: 100%; border-collapse: collapse; }
+.hud .scoreboard th, .hud .scoreboard td, .results th, .results td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+.hud .scoreboard th, .results th { color: var(--muted); font-weight: 500; font-size: 13px; }
+.hud .scoreboard tr.me td, .results tr.me td { color: var(--accent); font-weight: 600; }
+.hidden { display: none !important; }
+.dmg-flash { position: absolute; inset: 0; background: rgba(255, 0, 0, 0.35); opacity: 0; pointer-events: none; }
+.dmg-flash.show { opacity: 1; }
+
+/* Results */
+.results { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.6); }
+.results .card { width: min(560px, 94vw); background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 24px; }
+.results h1 { margin: 0 0 4px; }
+.results .sub { color: var(--muted); margin-bottom: 14px; }
+.results .actions { margin-top: 16px; display: flex; gap: 10px; align-items: center; }
+.results .medal { width: 30px; display: inline-block; }
+.lobby a { color: var(--accent2); }
