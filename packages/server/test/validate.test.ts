@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { parseBotCount, parseDurationMin, parsePose, parseShoot, sanitizeName, sanitizeRoomName } from '../src/rooms/validate';
+import {
+  parseBotCount,
+  parseCharge,
+  parseDurationMin,
+  parsePose,
+  parseReload,
+  parseShoot,
+  parseSwing,
+  parseWeaponMode,
+  sanitizeName,
+  sanitizeRoomName,
+} from '../src/rooms/validate';
 
 describe('sanitizeName', () => {
   it('trims, strips junk, limits length, falls back', () => {
@@ -48,6 +59,20 @@ describe('parsePose / parseShoot', () => {
     expect(s.epoch).toBe(1);
     expect((s as { weapon?: unknown }).weapon).toBeUndefined();
   });
+  it('parseSwing reads charged as a strict boolean (default false)', () => {
+    expect(parseSwing(good)!.charged).toBe(false);
+    expect(parseSwing({ ...good, charged: true })!.charged).toBe(true);
+    expect(parseSwing({ ...good, charged: 1 })!.charged).toBe(false);
+    expect(parseSwing({ ...good, x: 'no' })).toBeNull();
+  });
+  it('parseCharge accepts only an integer epoch', () => {
+    expect(parseCharge(3)).toBe(3);
+    expect(parseCharge(1.5)).toBeNull();
+    expect(parseCharge('1')).toBeNull();
+    expect(parseCharge(undefined)).toBeNull();
+    expect(parseReload(2)).toBe(2);
+    expect(parseReload('2')).toBeNull();
+  });
 });
 
 describe('parseBotCount', () => {
@@ -58,5 +83,14 @@ describe('parseBotCount', () => {
     expect(parseBotCount(-1)).toBe(0);
     expect(parseBotCount(2.5)).toBe(0);
     expect(parseBotCount('2')).toBe(0);
+  });
+
+  it('parseWeaponMode accepts only known modes', () => {
+    expect(parseWeaponMode('gun')).toBe('gun');
+    expect(parseWeaponMode('sword')).toBe('sword');
+    expect(parseWeaponMode('all')).toBe('all');
+    expect(parseWeaponMode('laser')).toBe('all');
+    expect(parseWeaponMode(undefined)).toBe('all');
+    expect(parseWeaponMode(1)).toBe('all');
   });
 });

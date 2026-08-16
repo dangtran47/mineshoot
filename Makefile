@@ -37,4 +37,4 @@ deploy-fe:
 	npx wrangler pages deploy packages/client/dist --project-name mineshoot
 
 deploy-be:
-	fly deploy -c packages/server/fly.toml
+	fly deploy -c packages/server/fly.toml --ha=false

@@ -2,9 +2,18 @@
 
 A Minecraft-looking, first-person, browser arena shooter. Create a timed room
 (3/5/10/15 min), friends join from the public lobby, and everyone fights with a
-**gun** (instant hitscan) or a **sword** (short-range melee). One hit kills;
-you respawn 3 s later. When the timer runs out the ranking (kills, deaths, K/D)
-is shown.
+**gun** (instant hitscan, 10-round magazine, unlimited reloads) or a **sword**
+(short-range melee). Everyone has 100 HP and damage depends on where you hit:
+gun head 100 / torso 30 / legs 15; sword **LMB** is a quick light slash (head
+45 / body 30, hits the nearest target in a 56° cone), **RMB** held ≥ 0.8 s and
+released is a **charged** swing (head 100 / body 70, narrower 40° cone but
+sweeps everyone in it; you walk 30% slower while charging, and holding longer
+than 2 s releases the swing by itself — press again to charge anew). Die and
+you respawn 3 s later at full health with 2 s of **spawn
+protection** (you can't be targeted or hurt; attacking ends it early). You are
+not in the arena at all until you **click to play**, so nobody can shoot you
+while you are still looking at the overlay. When the timer runs out the
+ranking (kills, deaths, K/D) is shown.
 
 - **Zero assets** — the block texture atlas is drawn on a canvas at boot,
   players are box humanoids, no images or audio ship in the repo.
@@ -33,9 +42,13 @@ make start        # server on :2567 + client on :5173 (Ctrl-C stops both)
 ```
 
 Open http://localhost:5173, enter a nickname, **Create room** (name, duration,
-and optionally 1–7 **AI bots**), open a second tab and **Join** it from the list. Controls: WASD move, Space
+optionally 1–7 **AI bots**, and the **allowed weapons** — Gun + Sword, Gun only
+or Sword only; the rule is enforced by the server, bots follow it too, and the
+room list shows a 🔫/🗡️ badge), open a second tab and **Join** it from the list. Controls: WASD move, Space
 jump, mouse aim (click to lock the pointer, Esc to release), LMB attack,
-`1`/`2` or mouse wheel to switch gun/sword, hold Tab for the scoreboard.
+`R` reload (automatic when the magazine is empty), `1`/`2` or mouse wheel to
+switch gun/sword (hold LMB with the sword to charge, release to swing), hold
+Tab for the scoreboard.
 
 `http://localhost:5173/?offline` runs an offline sandbox (walk around, no
 server needed). `make start LAG=50` simulates 50 ms round-trip latency.
@@ -78,8 +91,9 @@ nametags, the kill feed and the scoreboard. Tuning lives at the top of
 ## Gameplay tuning
 
 All knobs are in `packages/shared/src/constants.ts` (world size, walk/jump,
-gun cooldown/range, sword range/cone, respawn delay, room durations, max
-players).
+gun cooldown/range/magazine/reload time, sword range/cone/charge time, HP and
+per-body-part damage for gun and sword, hitbox bands, respawn delay, spawn
+protection, room durations, max players).
 
 ## Dependency notes
 

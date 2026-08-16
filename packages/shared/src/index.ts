@@ -6,6 +6,7 @@ export * from './noise';
 export * from './world';
 export * from './worldgen';
 export * from './aabb';
+export * from './hitbox';
 export * from './collision';
 export * from './raycast';
 export * from './playerPhysics';

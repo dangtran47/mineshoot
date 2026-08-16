@@ -1,6 +1,6 @@
 import { EYE_HEIGHT, GUN_RANGE, PLAYER_HEIGHT, SWORD_RANGE, WALK_SPEED } from './constants';
-import { WEAPON_GUN, WEAPON_SWORD } from './protocol';
-import type { Weapon } from './protocol';
+import { DEFAULT_WEAPON_MODE, WEAPON_GUN, WEAPON_SWORD, weaponAllowed } from './protocol';
+import type { Weapon, WeaponMode } from './protocol';
 import { raycastVoxels } from './raycast';
 import type { MoveInput, PlayerPhysState, SpawnPoint, World } from './types';
 
@@ -41,6 +41,11 @@ export interface Bot {
   reset(): void;
 }
 
+export interface BotOptions {
+  /** Room weapon rules; the bot only ever picks an allowed weapon. */
+  weapons?: WeaponMode;
+}
+
 function wrapAngle(a: number): number {
   while (a > Math.PI) a -= Math.PI * 2;
   while (a < -Math.PI) a += Math.PI * 2;
@@ -53,7 +58,10 @@ function wrapAngle(a: number): number {
  * (imperfect, reaction-delayed) aim settles. Falls back to wandering between
  * spawn points. Pure w.r.t. the world; all randomness comes from `rng`.
  */
-export function createBot(rng: () => number, waypoints: SpawnPoint[]): Bot {
+export function createBot(rng: () => number, waypoints: SpawnPoint[], options: BotOptions = {}): Bot {
+  const mode = options.weapons ?? DEFAULT_WEAPON_MODE;
+  const gunOk = weaponAllowed(mode, WEAPON_GUN);
+  const swordOk = weaponAllowed(mode, WEAPON_SWORD);
   let targetId: string | null = null;
   let acquiredAt = 0;
   let waypoint: SpawnPoint | null = null;
@@ -128,7 +136,7 @@ export function createBot(rng: () => number, waypoints: SpawnPoint[]): Bot {
       if (!best) targetId = null;
 
       const input: MoveInput = { forward: 0, strafe: 0, jump: false };
-      let weapon: Weapon = WEAPON_GUN;
+      let weapon: Weapon = gunOk ? WEAPON_GUN : WEAPON_SWORD;
       let shoot = false;
       let swing = false;
 
@@ -143,18 +151,19 @@ export function createBot(rng: () => number, waypoints: SpawnPoint[]): Bot {
         const wantPitch = Math.atan2(dy, horiz) + aimErrPitch * err;
         turnToward(wantYaw, wantPitch, dt);
 
-        // Position: close in / back off to the preferred band, strafe a bit.
-        if (best.d > PREFERRED_MAX) input.forward = 1;
+        // Position: with a gun, close in / back off to the preferred band and strafe a bit;
+        // sword-only, charge straight in.
+        if (!gunOk || best.d > PREFERRED_MAX) input.forward = 1;
         else if (best.d < PREFERRED_MIN && best.d > SWORD_RANGE) input.forward = -0.6;
         input.strafe = strafeDir * 0.8;
 
         const aligned = Math.abs(wrapAngle(wantYaw - yaw)) < AIM_TOLERANCE && Math.abs(wantPitch - pitch) < AIM_TOLERANCE;
         const reacted = now - acquiredAt >= REACTION_MS;
-        if (best.d <= SWORD_RANGE * 0.9) {
+        if (swordOk && best.d <= SWORD_RANGE * 0.9) {
           weapon = WEAPON_SWORD;
           input.forward = 1;
           swing = reacted;
-        } else {
+        } else if (gunOk) {
           shoot = aligned && reacted;
         }
       } else {

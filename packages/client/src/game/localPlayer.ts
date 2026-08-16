@@ -37,8 +37,8 @@ export class LocalPlayer {
     this.syncCamera();
   }
 
-  /** Advance by frame time; returns true if the body moved horizontally. */
-  update(dtSec: number, inputEnabled: boolean): boolean {
+  /** Advance by frame time; returns true if the body moved horizontally. `speedScale` (0..1) slows walking, e.g. while charging the sword. */
+  update(dtSec: number, inputEnabled: boolean, speedScale = 1): boolean {
     this.state.yaw = this.look.yaw;
     this.state.pitch = this.look.pitch;
     const input: MoveInput = { forward: 0, strafe: 0, jump: false };
@@ -48,6 +48,8 @@ export class LocalPlayer {
       if (this.keys.isDown('KeyD') || this.keys.isDown('ArrowRight')) input.strafe += 1;
       if (this.keys.isDown('KeyA') || this.keys.isDown('ArrowLeft')) input.strafe -= 1;
       input.jump = this.keys.isDown('Space');
+      input.forward *= speedScale;
+      input.strafe *= speedScale;
     }
     const before = { x: this.state.x, z: this.state.z };
     this.acc = Math.min(this.acc + dtSec, 0.25);

@@ -52,14 +52,36 @@ input, select {
 .hud .hitmarker::before { left: 14px; top: 0; width: 2px; height: 30px; }
 .hud .hitmarker::after { top: 14px; left: 0; width: 30px; height: 2px; }
 .hud .hitmarker.show { opacity: 1; transition: none; }
+.hud .hitmarker.head { width: 40px; height: 40px; }
+.hud .hitmarker.head::before, .hud .hitmarker.head::after { background: var(--accent2); box-shadow: 0 0 6px var(--accent2); }
+.hud .hitmarker.head::before { left: 18px; width: 4px; height: 40px; }
+.hud .hitmarker.head::after { top: 18px; width: 40px; height: 4px; }
+.hud .charge { position: absolute; left: 50%; top: calc(50% + 22px); width: 60px; height: 5px; transform: translateX(-50%); background: rgba(0,0,0,0.55); border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
+.hud .charge .fill { height: 100%; width: 0; background: var(--text); }
+.hud .charge.ready .fill { background: var(--accent2); box-shadow: 0 0 6px var(--accent2); }
+.hud .charge.hidden { display: none; }
 .hud .top { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); text-align: center; }
 .hud .timer { font-size: 30px; font-weight: 700; text-shadow: 0 2px 4px #000; font-variant-numeric: tabular-nums; }
 .hud .timer.low { color: var(--danger); }
 .hud .roomname { color: var(--muted); font-size: 12px; text-shadow: 0 1px 2px #000; }
 .hud .stats { position: absolute; left: 14px; bottom: 14px; font-size: 16px; text-shadow: 0 1px 3px #000; }
+.hud .health { position: absolute; left: 14px; bottom: 44px; display: flex; align-items: center; gap: 8px; }
+.hud .health .bar { width: 180px; height: 12px; background: rgba(0,0,0,0.55); border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
+.hud .health .fill { height: 100%; width: 100%; background: var(--accent); transition: width 0.15s ease-out, background 0.15s; }
+.hud .health .hp { font-size: 18px; font-weight: 700; min-width: 2.2em; text-shadow: 0 1px 3px #000; font-variant-numeric: tabular-nums; }
+.hud .health.low .fill { background: var(--danger); }
+.hud .health.low .hp { color: var(--danger); }
 .hud .weapon { position: absolute; right: 14px; bottom: 14px; text-align: right; text-shadow: 0 1px 3px #000; }
 .hud .weapon .name { font-size: 20px; font-weight: 700; }
 .hud .weapon .hint { color: var(--muted); font-size: 12px; }
+.lobby .badge { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; margin-left: 6px; vertical-align: middle; }
+.hud .weapon .ammo { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.hud .weapon .ammo.low { color: var(--danger); }
+.hud .weapon .ammo.reloading { color: var(--muted); font-weight: 400; }
+.hud .weapon .ammo.hidden { display: none; }
+.hud .shield { position: absolute; left: 14px; bottom: 68px; font-size: 13px; color: var(--accent2); text-shadow: 0 1px 3px #000; animation: shield-pulse 0.9s ease-in-out infinite alternate; }
+.hud .shield.hidden { display: none; }
+@keyframes shield-pulse { from { opacity: 0.55; } to { opacity: 1; } }
 .hud .ping { position: absolute; right: 14px; top: 12px; color: var(--muted); font-size: 12px; text-shadow: 0 1px 2px #000; }
 .hud .feed { position: absolute; right: 14px; top: 34px; display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
 .hud .feed div { background: rgba(0,0,0,0.45); padding: 4px 8px; border-radius: 4px; font-size: 13px; }

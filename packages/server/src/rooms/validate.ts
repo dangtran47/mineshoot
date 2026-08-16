@@ -1,5 +1,5 @@
-import { DEFAULT_DURATION_MIN, DURATION_OPTIONS_MIN, MAX_BOTS, MAX_NAME_LEN, WORLD_SX, WORLD_SZ } from '@mineshoot/shared';
-import type { PoseMsg, ShootMsg, Weapon } from '@mineshoot/shared';
+import { DEFAULT_DURATION_MIN, DEFAULT_WEAPON_MODE, DURATION_OPTIONS_MIN, MAX_BOTS, MAX_NAME_LEN, WEAPON_MODES, WORLD_SX, WORLD_SZ } from '@mineshoot/shared';
+import type { PoseMsg, ShootMsg, SwingMsg, Weapon, WeaponMode } from '@mineshoot/shared';
 
 export function sanitizeName(raw: unknown, fallback: string): string {
   if (typeof raw !== 'string') return fallback;
@@ -23,6 +23,11 @@ export function parseDurationMin(raw: unknown): number {
 export function parseBotCount(raw: unknown): number {
   if (typeof raw !== 'number' || !Number.isInteger(raw)) return 0;
   return Math.max(0, Math.min(MAX_BOTS, raw));
+}
+
+/** Allowed-weapons rule; anything unknown falls back to the default ('all'). */
+export function parseWeaponMode(raw: unknown): WeaponMode {
+  return (WEAPON_MODES as readonly unknown[]).includes(raw) ? (raw as WeaponMode) : DEFAULT_WEAPON_MODE;
 }
 
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -64,4 +69,16 @@ export function parseShoot(msg: unknown): ShootMsg | null {
   return parsePoseLike(msg);
 }
 
-export const parseSwing = parseShoot;
+export function parseSwing(msg: unknown): SwingMsg | null {
+  const p = parsePoseLike(msg);
+  if (!p) return null;
+  return { ...p, charged: (msg as Record<string, unknown>).charged === true };
+}
+
+/** Charge-start payload: the sender's spawn epoch. */
+export function parseCharge(msg: unknown): number | null {
+  return Number.isInteger(msg) ? (msg as number) : null;
+}
+
+/** Reload payload: the sender's spawn epoch. */
+export const parseReload = parseCharge;

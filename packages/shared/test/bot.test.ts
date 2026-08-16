@@ -4,7 +4,7 @@ import { createRng } from '../src/rng';
 import { Block } from '../src/types';
 import { createWorld, setBlock } from '../src/world';
 import { createPhysState, stepPlayer } from '../src/playerPhysics';
-import { WEAPON_SWORD } from '../src/protocol';
+import { WEAPON_GUN, WEAPON_SWORD } from '../src/protocol';
 
 function flat(): ReturnType<typeof createWorld> {
   const w = createWorld(64, 24, 64);
@@ -81,5 +81,35 @@ describe('bot', () => {
       return out;
     };
     expect(run()).toEqual(run());
+  });
+
+  it('gun-only room: keeps the gun and shoots even up close', () => {
+    const w = flat();
+    const bot = createBot(createRng(3), waypoints, { weapons: 'gun' });
+    const self = createPhysState(32, 1, 40, 0);
+    const enemies = [{ id: 'e', x: 32, y: 1, z: 38.5 }];
+    bot.compute(w, { self, enemies, now: 0 }, 0.05);
+    const d = bot.compute(w, { self, enemies, now: 1000 }, 0.05);
+    expect(d.weapon).toBe(WEAPON_GUN);
+    expect(d.swing).toBe(false);
+    expect(d.shoot).toBe(true);
+  });
+
+  it('sword-only room: never draws the gun, closes in and swings once in range', () => {
+    const w = flat();
+    const bot = createBot(createRng(4), waypoints, { weapons: 'sword' });
+    let self = createPhysState(32, 1, 40, Math.PI);
+    const enemies = [{ id: 'e', x: 32, y: 1, z: 30 }];
+    let swungAt = -1;
+    for (let i = 0; i < 100; i++) {
+      const now = i * 50;
+      const d = bot.compute(w, { self, enemies, now }, 0.05);
+      expect(d.weapon).toBe(WEAPON_SWORD);
+      expect(d.shoot).toBe(false);
+      self = stepPlayer(w, { ...self, yaw: d.yaw, pitch: d.pitch }, d.input, 0.05);
+      if (d.swing && swungAt < 0) swungAt = now;
+    }
+    expect(swungAt).toBeGreaterThan(0);
+    expect(Math.hypot(self.x - enemies[0].x, self.z - enemies[0].z)).toBeLessThan(3);
   });
 });

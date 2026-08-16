@@ -13,6 +13,8 @@ export class ViewModel {
   private readonly flash: THREE.Mesh;
   private recoil = 0;
   private swingT = -1;
+  private charge = 0;
+  private reload = 0;
   private bob = 0;
 
   constructor(camera: THREE.Camera) {
@@ -61,6 +63,17 @@ export class ViewModel {
 
   swing(): void {
     this.swingT = 0;
+    this.charge = 0;
+  }
+
+  /** 0..1 sword charge: the blade is drawn back and raised as it fills. */
+  setCharge(fraction: number | null): void {
+    this.charge = fraction ?? 0;
+  }
+
+  /** 0..1 gun reload: the gun dips out of view and tilts, then comes back up. */
+  setReload(fraction: number | null): void {
+    this.reload = fraction ?? 0;
   }
 
   update(dt: number, moving: boolean): void {
@@ -68,8 +81,11 @@ export class ViewModel {
     this.recoil = Math.max(0, this.recoil - dt * 8);
     const flashMat = this.flash.material as THREE.MeshBasicMaterial;
     flashMat.opacity = Math.max(0, flashMat.opacity - dt * 14);
+    const dip = Math.sin(Math.min(1, this.reload) * Math.PI); // 0 → 1 → 0 across the reload
     this.gun.position.z = this.recoil * 0.12;
-    this.gun.rotation.x = this.recoil * 0.25;
+    this.gun.position.y = -dip * 0.22;
+    this.gun.rotation.x = this.recoil * 0.25 - dip * 0.6;
+    this.gun.rotation.z = dip * 0.5;
 
     // Sword swing arc (~250 ms)
     if (this.swingT >= 0) {
@@ -79,6 +95,11 @@ export class ViewModel {
       this.sword.rotation.set(-0.5 - arc * 1.6, 0.2 - arc * 0.9, 0.15);
       this.sword.position.set(-arc * 0.25, 0, -arc * 0.15);
       if (p >= 1) this.swingT = -1;
+    } else {
+      // Rest pose, wound back while charging.
+      const c = this.charge;
+      this.sword.rotation.set(-0.5 + c * 0.9, 0.2 + c * 0.5, 0.15 - c * 0.3);
+      this.sword.position.set(c * 0.12, c * 0.08, c * 0.1);
     }
 
     // Walk bob

@@ -1,6 +1,6 @@
 # fly.toml for the mineshoot Colyseus server.
 # Once: fly launch --no-deploy -c packages/server/fly.toml  (pick your own app name/region and edit below)
-# Deploy from the REPO ROOT: fly deploy -c packages/server/fly.toml
+# Deploy from the REPO ROOT: fly deploy -c packages/server/fly.toml --ha=false  (single machine: room registry is in-memory)
 
 app = 'mineshoot-server-prd'
 primary_region = 'sin'

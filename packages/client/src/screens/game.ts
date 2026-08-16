@@ -1,16 +1,19 @@
 import * as THREE from 'three';
 import {
   EYE_HEIGHT,
+  GUN_MAG_SIZE,
   MSG,
   POSE_INTERVAL_MS,
   RESPAWN_MS,
+  SWORD_CHARGE_SPEED_SCALE,
   WEAPON_GUN,
   WEAPON_SWORD,
+  allowedWeapons,
   forwardVector,
   generateWorld,
   rankPlayers,
 } from '@mineshoot/shared';
-import type { KillMsg, PoseMsg, RankRow, ShootMsg, ShotMsg, Weapon } from '@mineshoot/shared';
+import type { HitMsg, KillMsg, PoseMsg, RankRow, ShootMsg, ShotMsg, SwingMsg, Weapon } from '@mineshoot/shared';
 import { displayName } from '../net';
 import type { GameRoom, NetPlayer } from '../net';
 import { createScene } from '../render/scene';
@@ -61,7 +64,9 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
   let epoch = initial?.spawnEpoch ?? 1;
   let diedAt = 0;
   let ended = false;
+  const weaponMode = room?.state.weapons ?? 'all';
   hud.setRoomName(room ? room.state.name : 'Offline sandbox');
+  hud.setWeaponRules(weaponMode);
 
   // --- weapons ---
   const currentPose = (): ShootMsg => ({
@@ -90,29 +95,50 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
         tracers.spawn(m, { x: m.x + f.x * 40, y: m.y + f.y * 40, z: m.z + f.z * 40 });
       }
     },
-    onSwing() {
+    onChargeStart() {
+      room?.send(MSG.charge, epoch);
+    },
+    onSwing(charged: boolean) {
       viewModel.swing();
-      room?.send(MSG.swing, currentPose());
+      const m: SwingMsg = { ...currentPose(), charged };
+      room?.send(MSG.swing, m);
     },
     onSwitch(w: Weapon) {
       viewModel.setWeapon(w);
       hud.setWeapon(w);
     },
-  });
+    onReload() {
+      room?.send(MSG.reload, epoch);
+    },
+  }, allowedWeapons(weaponMode));
+  viewModel.setWeapon(weapons.current);
+  hud.setWeapon(weapons.current);
 
   // --- input wiring ---
   look.onMouseDown = (b) => {
-    if (b === 0 && local.alive) weapons.mouseDown(performance.now());
+    if (!local.alive) return;
+    if (b === 0) weapons.mouseDown(performance.now());
+    else if (b === 2) weapons.altDown(performance.now());
   };
   look.onMouseUp = (b) => {
-    if (b === 0) weapons.mouseUp();
+    if (b === 0) weapons.mouseUp(performance.now());
+    else if (b === 2) weapons.altUp(performance.now());
   };
   look.onWheel = () => weapons.toggle();
+  // "Click to play": the server spawns us only once we have locked the pointer for the first time,
+  // so nobody can be hurt while still staring at the overlay. Later re-locks (after Esc) don't re-arm it.
+  let readySent = false;
+  const sendReady = (): void => {
+    if (readySent) return;
+    readySent = true;
+    room?.send(MSG.ready);
+  };
   look.onLockChange = (locked) => {
     hud.setOverlay(!locked);
-    if (!locked) {
+    if (locked) sendReady();
+    else {
       keys.clear();
-      weapons.mouseUp();
+      weapons.cancel();
     }
   };
   hud.onOverlayClick = () => look.request();
@@ -165,13 +191,17 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
         epoch = me.spawnEpoch;
         local.teleport(me.x, me.y, me.z, me.yaw);
         local.alive = true;
+        weapons.resetAmmo();
         hud.hideDeath();
       } else if (!me.alive && local.alive) {
+        // Either killed, or (epoch 0) not yet spawned because we haven't clicked to play.
         local.alive = false;
-        diedAt = now;
-        weapons.mouseUp();
+        diedAt = epoch > 0 ? now : 0;
+        weapons.cancel();
       }
       hud.setStats(me.kills, me.deaths);
+      hud.setHealth(me.hp);
+      hud.setShield(me.alive && me.shielded);
     }
     if (state.timeLeftMs !== lastTimeLeft) {
       lastTimeLeft = state.timeLeftMs;
@@ -187,8 +217,13 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
   const onShot = (m: ShotMsg): void => {
     const from = m.shooterId === meId ? muzzle() : m.from;
     tracers.spawn(from, m.to, m.shooterId === meId ? 0xfff2a8 : 0xffb46b);
-    if (m.shooterId === meId && m.hitPlayerId) hud.hitmark();
+    if (m.shooterId === meId && m.hitPlayerId) hud.hitmark(m.part === 'head');
     if (m.hitPlayerId === meId) hud.damageFlash();
+  };
+  const onHit = (m: HitMsg): void => {
+    if (m.attackerId === meId) hud.hitmark(m.part === 'head');
+    else remotes.swing(m.attackerId);
+    if (m.victimId === meId) hud.damageFlash();
   };
   const onKill = (m: KillMsg): void => {
     const verb = m.weapon === WEAPON_GUN ? '🔫' : '🗡️';
@@ -201,7 +236,6 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
       hud.showDeath(killerName, m.weapon);
       hud.damageFlash();
     }
-    if (m.weapon === WEAPON_SWORD) remotes.swing(m.killerId);
   };
   const onPong = (t: number): void => {
     rtt = performance.now() - t;
@@ -218,6 +252,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
   let pingTimer = 0;
   if (room) {
     room.onMessage(MSG.shot, onShot);
+    room.onMessage(MSG.hit, onHit);
     room.onMessage(MSG.kill, onKill);
     room.onMessage(MSG.pong, onPong);
     room.onStateChange(onPatch);
@@ -244,16 +279,23 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     if (inputEnabled) {
       if (keys.wasPressed('Digit1')) weapons.select(WEAPON_GUN);
       if (keys.wasPressed('Digit2')) weapons.select(WEAPON_SWORD);
+      if (keys.wasPressed('KeyR') && local.alive) weapons.reload(now);
     }
-    const moving = local.update(dt, inputEnabled);
+    const moving = local.update(dt, inputEnabled, weapons.charging ? SWORD_CHARGE_SPEED_SCALE : 1);
     if (local.alive) weapons.update(now);
+    const charge = weapons.chargeFraction(now);
+    viewModel.setCharge(charge);
+    hud.setCharge(charge);
+    const reload = weapons.reloadFraction(now);
+    viewModel.setReload(reload);
+    hud.setAmmo(weapons.ammo, GUN_MAG_SIZE, reload !== null);
     viewModel.update(dt, moving && local.state.onGround);
     remotes.update(now);
     tracers.update(now);
     hud.update(now);
     if (room) {
       hud.setTimer(Math.max(0, lastTimeLeft - (now - lastTimeLeftAt)));
-      if (!local.alive) hud.setRespawnCountdown(RESPAWN_MS - (now - diedAt));
+      if (!local.alive && diedAt > 0) hud.setRespawnCountdown(RESPAWN_MS - (now - diedAt));
       hud.setScoreboard(keys.isDown('Tab'), rankingRows(), meId);
     } else {
       hud.setTimer(0);
@@ -289,7 +331,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
 
   if (import.meta.env.DEV) {
     // Dev-only hook for the headless smoke test (scripts/smoke.mjs); stripped from production builds.
-    (window as unknown as { __mineshoot?: unknown }).__mineshoot = { room, local, look, weapons };
+    (window as unknown as { __mineshoot?: unknown }).__mineshoot = { room, local, look, weapons, ready: sendReady };
   }
 
   return { dispose: finish };

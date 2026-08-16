@@ -1,5 +1,5 @@
-import { WEAPON_GUN } from '@mineshoot/shared';
-import type { RankRow, Weapon } from '@mineshoot/shared';
+import { GUN_MAG_SIZE, MAX_HP, WEAPON_GUN } from '@mineshoot/shared';
+import type { RankRow, Weapon, WeaponMode } from '@mineshoot/shared';
 import { KillFeedModel } from './killFeed';
 import { kdRatio } from '@mineshoot/shared';
 
@@ -21,13 +21,21 @@ export class Hud {
   private readonly timer = el('div', 'timer', '0:00');
   private readonly roomName = el('div', 'roomname');
   private readonly stats = el('div', 'stats');
+  private readonly health = el('div', 'health');
+  private readonly healthFill = el('div', 'fill');
+  private readonly healthText = el('div', 'hp', String(MAX_HP));
   private readonly weaponName = el('div', 'name');
+  private readonly weaponHint = el('div', 'hint');
+  private readonly ammo = el('div', 'ammo');
+  private readonly shield = el('div', 'shield hidden', '🛡 Spawn protection');
   private readonly ping = el('div', 'ping');
   private readonly feedEl = el('div', 'feed');
   private readonly centerMsg = el('div', 'center-msg hidden');
   private readonly overlay = el('div', 'overlay');
   private readonly scoreboard = el('div', 'scoreboard hidden');
   private readonly hitmarker = el('div', 'hitmarker');
+  private readonly charge = el('div', 'charge hidden');
+  private readonly chargeFill = el('div', 'fill');
   private readonly flash = el('div', 'dmg-flash');
   private readonly feed = new KillFeedModel();
   private hitTimer = 0;
@@ -39,10 +47,14 @@ export class Hud {
     const top = el('div', 'top');
     top.append(this.timer, this.roomName);
     const weapon = el('div', 'weapon');
-    weapon.append(this.weaponName, el('div', 'hint', '1 Gun · 2 Sword · wheel to switch'));
+    weapon.append(this.weaponName, this.ammo, this.weaponHint);
+    const bar = el('div', 'bar');
+    bar.append(this.healthFill);
+    this.health.append(bar, this.healthText);
+    this.charge.append(this.chargeFill);
 
     const title = el('h2', undefined, 'Click to play');
-    const help = el('p', undefined, 'WASD move · Space jump · Mouse aim · LMB attack · Tab scoreboard · Esc unlock');
+    const help = el('p', undefined, 'WASD move · Space jump · Mouse aim · LMB attack · RMB charge sword · Tab scoreboard · Esc unlock');
     const leaveBtn = el('button', undefined, 'Leave match');
     leaveBtn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -55,7 +67,10 @@ export class Hud {
       this.flash,
       el('div', 'crosshair'),
       this.hitmarker,
+      this.charge,
       top,
+      this.health,
+      this.shield,
       this.stats,
       weapon,
       this.ping,
@@ -66,6 +81,19 @@ export class Hud {
     );
     parent.appendChild(this.root);
     this.setWeapon(WEAPON_GUN);
+    this.setWeaponRules('all');
+    this.setHealth(MAX_HP);
+    this.setAmmo(GUN_MAG_SIZE, GUN_MAG_SIZE, false);
+  }
+
+  /** Controls hint under the weapon name, tailored to what the room allows. */
+  setWeaponRules(mode: WeaponMode): void {
+    this.weaponHint.textContent =
+      mode === 'gun'
+        ? 'Gun only · R reload'
+        : mode === 'sword'
+          ? 'Sword only · LMB slash · hold RMB to charge'
+          : '1 Gun · 2 Sword · wheel to switch · R reload · sword: LMB slash, hold RMB to charge';
   }
 
   setRoomName(name: string): void {
@@ -81,8 +109,36 @@ export class Hud {
     this.stats.textContent = `K ${kills}  ·  D ${deaths}`;
   }
 
+  setHealth(hp: number): void {
+    const clamped = Math.max(0, Math.min(MAX_HP, hp));
+    this.healthFill.style.width = `${(clamped / MAX_HP) * 100}%`;
+    this.healthText.textContent = String(clamped);
+    this.health.classList.toggle('low', clamped <= 30);
+  }
+
+  /** Sword charge meter under the crosshair: 0..1 while holding, null hides it. */
+  setCharge(fraction: number | null): void {
+    this.charge.classList.toggle('hidden', fraction === null);
+    if (fraction === null) return;
+    this.chargeFill.style.width = `${Math.round(fraction * 100)}%`;
+    this.charge.classList.toggle('ready', fraction >= 1);
+  }
+
   setWeapon(w: Weapon): void {
     this.weaponName.textContent = w === WEAPON_GUN ? 'GUN' : 'SWORD';
+    this.ammo.classList.toggle('hidden', w !== WEAPON_GUN);
+  }
+
+  /** Magazine readout under the weapon name ("7 / 10", or "RELOADING…"). */
+  setAmmo(ammo: number, mag: number, reloading: boolean): void {
+    this.ammo.textContent = reloading ? 'RELOADING…' : `${ammo} / ${mag}`;
+    this.ammo.classList.toggle('reloading', reloading);
+    this.ammo.classList.toggle('low', !reloading && ammo <= Math.ceil(mag / 4));
+  }
+
+  /** Spawn-protection badge next to the health bar. */
+  setShield(on: boolean): void {
+    this.shield.classList.toggle('hidden', !on);
   }
 
   setPing(ms: number | null): void {
@@ -116,7 +172,9 @@ export class Hud {
     this.centerMsg.classList.add('hidden');
   }
 
-  hitmark(): void {
+  /** Crosshair hit marker; headshots get the accented variant. */
+  hitmark(headshot = false): void {
+    this.hitmarker.classList.toggle('head', headshot);
     this.hitmarker.classList.add('show');
     this.hitTimer = performance.now() + 120;
   }
