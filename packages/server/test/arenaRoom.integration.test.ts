@@ -11,10 +11,11 @@ import {
   PLAYER_HALF_W,
   ROOM_NAME,
   SWORD_CHARGE_MS,
+  SWORD_SERVER_MIN_INTERVAL_MS,
   WEAPON_GUN,
   WEAPON_SWORD,
 } from '@mineshoot/shared';
-import type { HitMsg, KillMsg, ShotMsg } from '@mineshoot/shared';
+import type { HitMsg, KillMsg, ShotMsg, SwungMsg } from '@mineshoot/shared';
 import { createApp } from '../src/app';
 import type { RoomListEntry } from '../src/app';
 
@@ -167,6 +168,11 @@ describe('arena room', () => {
         victimId: bob.sessionId,
         victimName: 'Bob',
         weapon: WEAPON_GUN,
+        headshot: true,
+        multi: 1,
+        streak: 1,
+        revenge: false,
+        shutdown: false,
       });
       await until(() => bobKills.length === 1, 3000, 'bob got kill msg');
       await until(() => me(alice).kills === 1, 3000, 'alice kills');
@@ -197,7 +203,17 @@ describe('arena room', () => {
       bob.send(MSG.swing, { ...poseOf(bob, 32, 42, 0, WEAPON_SWORD, pitchToHeight(1.0, 2)), charged: true });
       await until(() => kills.length === 2, 3000, 'sword kill');
       expect(hits[1]).toMatchObject({ victimId: alice.sessionId, part: 'body', damage: 70, charged: true });
-      expect(kills[1]).toMatchObject({ killerId: bob.sessionId, victimId: alice.sessionId, weapon: WEAPON_SWORD });
+      // Body hit, and Bob was last killed by Alice → revenge.
+      expect(kills[1]).toMatchObject({
+        killerId: bob.sessionId,
+        victimId: alice.sessionId,
+        weapon: WEAPON_SWORD,
+        headshot: false,
+        multi: 1,
+        streak: 1,
+        revenge: true,
+        shutdown: false,
+      });
       await until(() => me(alice).deaths === 1 && me(bob!).kills === 1, 3000, 'counters');
       await until(() => me(alice).alive && me(alice).spawnEpoch === 2, 3000, 'alice respawned');
 
@@ -312,6 +328,7 @@ describe('arena room', () => {
       // Once the shield lapses, the same shot connects.
       await until(() => bobView().shielded === false, PROTECT + 1000, 'bob protection expired');
       alice.send(MSG.shoot, poseOf(alice, 32, 40, 0));
+      const secondShotAt = Date.now();
       await until(() => shots.length === 2, 3000, 'second shot');
       expect(shots[1]).toMatchObject({ hitPlayerId: bob.sessionId, part: 'head', damage: 100 });
       await until(() => bobView().alive === false, 3000, 'bob killed');
@@ -323,6 +340,8 @@ describe('arena room', () => {
       // While the respawn shield holds, Alice's headshot passes straight through again.
       bob.send(MSG.pose, poseOf(bob, 32, 30, 0));
       await until(() => Math.abs(bobView().x - 32) < 0.01 && Math.abs(bobView().z - 30) < 0.01, 3000, 'bob back in line');
+      // Respawn (200ms) can beat the gun cooldown (300ms): wait it out so the shot is not rate-limited.
+      await sleep(Math.max(0, secondShotAt + GUN_SERVER_MIN_INTERVAL_MS + 20 - Date.now()));
       alice.send(MSG.shoot, poseOf(alice, 32, 40, 0));
       await until(() => shots.length === 3, 3000, 'third shot');
       expect(shots[2]).toMatchObject({ hitPlayerId: '', damage: 0 });
@@ -371,6 +390,56 @@ describe('arena room', () => {
       await sleep(50);
       await fireOnce();
       expect(shots).toHaveLength(GUN_MAG_SIZE + 2);
+    } finally {
+      await alice.leave();
+    }
+  }, 15000);
+
+  it('exposes charging / reloading in state and broadcasts every swing, hit or miss', async () => {
+    const alice: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, {
+      nickname: 'Alice',
+      durationMin: 3,
+      testOverrides: { spawnProtectMs: 0 },
+    });
+    const swings: SwungMsg[] = [];
+    alice.onMessage(MSG.swung, (m: SwungMsg) => swings.push(m));
+    alice.onMessage(MSG.shot, () => {});
+    alice.onMessage(MSG.hit, () => {});
+    alice.onMessage(MSG.kill, () => {});
+    try {
+      await ready(alice);
+      expect(me(alice).charging).toBe(false);
+      expect(me(alice).reloading).toBe(false);
+
+      // Charge start is visible to everyone; releasing the swing (into thin air) clears it and is broadcast.
+      // The charge may race ahead of the pose that switches to the sword: it must survive that pose.
+      alice.send(MSG.charge, me(alice).spawnEpoch);
+      alice.send(MSG.pose, poseOf(alice, 32, 40, 0, WEAPON_SWORD));
+      await until(() => me(alice).charging === true, 2000, 'charging flag');
+      await sleep(SWORD_CHARGE_MS + 100);
+      alice.send(MSG.swing, { ...poseOf(alice, 32, 40, 0, WEAPON_SWORD), charged: true });
+      await until(() => swings.length === 1, 2000, 'swung broadcast');
+      expect(swings[0]).toEqual({ attackerId: alice.sessionId, charged: true });
+      await until(() => me(alice).charging === false, 2000, 'charging cleared');
+
+      // A light (uncharged) miss is broadcast too.
+      await sleep(SWORD_SERVER_MIN_INTERVAL_MS + 20);
+      alice.send(MSG.swing, { ...poseOf(alice, 32, 40, 0, WEAPON_SWORD), charged: false });
+      await until(() => swings.length === 2, 2000, 'second swung');
+      expect(swings[1]).toEqual({ attackerId: alice.sessionId, charged: false });
+
+      // Switching to the gun cancels a pending charge.
+      alice.send(MSG.charge, me(alice).spawnEpoch);
+      await until(() => me(alice).charging === true, 2000, 'charging again');
+      alice.send(MSG.pose, poseOf(alice, 32, 40, 0, WEAPON_GUN));
+      await until(() => me(alice).charging === false, 2000, 'charge cancelled by weapon switch');
+
+      // Reload: flag is up for the reload window, then drops by itself.
+      alice.send(MSG.shoot, poseOf(alice, 32, 40, 0));
+      await sleep(50);
+      alice.send(MSG.reload, me(alice).spawnEpoch);
+      await until(() => me(alice).reloading === true, 2000, 'reloading flag');
+      await until(() => me(alice).reloading === false, GUN_RELOAD_SERVER_MIN_MS + 1000, 'reloading cleared');
     } finally {
       await alice.leave();
     }

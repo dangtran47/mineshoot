@@ -15,3 +15,4 @@ export * from './sword';
 export * from './spawn';
 export * from './ranking';
 export * from './bot';
+export * from './kills';

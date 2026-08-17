@@ -3,6 +3,7 @@ import {
   EYE_HEIGHT,
   GUN_MAG_SIZE,
   MSG,
+  PLAYER_HEIGHT,
   POSE_INTERVAL_MS,
   RESPAWN_MS,
   SWORD_CHARGE_SPEED_SCALE,
@@ -13,12 +14,13 @@ import {
   generateWorld,
   rankPlayers,
 } from '@mineshoot/shared';
-import type { HitMsg, KillMsg, PoseMsg, RankRow, ShootMsg, ShotMsg, SwingMsg, Weapon } from '@mineshoot/shared';
+import type { HitMsg, KillMsg, PoseMsg, RankRow, ShootMsg, ShotMsg, SwingMsg, SwungMsg, Weapon } from '@mineshoot/shared';
 import { displayName } from '../net';
 import type { GameRoom, NetPlayer } from '../net';
 import { createScene } from '../render/scene';
 import { buildWorldMeshes } from '../render/worldMesh';
 import { Tracers } from '../render/tracers';
+import { BloodFx } from '../render/bloodFx';
 import { ViewModel } from '../render/viewmodel';
 import { Keyboard } from '../input/keyboard';
 import { PointerLook } from '../input/pointerLock';
@@ -26,6 +28,7 @@ import { LocalPlayer } from '../game/localPlayer';
 import { RemotePlayers } from '../game/remotePlayers';
 import { Weapons } from '../game/weapons';
 import { Hud } from '../hud/hud';
+import { awardBadges } from '../hud/icons';
 
 export interface GameScreenOptions {
   container: HTMLElement;
@@ -48,6 +51,8 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
   scene.add(worldMesh.group);
   const tracers = new Tracers();
   scene.add(tracers.group);
+  const blood = new BloodFx();
+  scene.add(blood.mesh);
   const remotes = new RemotePlayers();
   scene.add(remotes.group);
   scene.add(camera); // so the view model (child of camera) renders
@@ -218,23 +223,41 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     const from = m.shooterId === meId ? muzzle() : m.from;
     tracers.spawn(from, m.to, m.shooterId === meId ? 0xfff2a8 : 0xffb46b);
     if (m.shooterId === meId && m.hitPlayerId) hud.hitmark(m.part === 'head');
-    if (m.hitPlayerId === meId) hud.damageFlash();
+    if (m.hitPlayerId === meId) hud.damageFlash(m.damage);
+    if (m.hitPlayerId && m.hitPlayerId !== meId) {
+      blood.burst(m.to, m.damage, { x: m.to.x - from.x, y: m.to.y - from.y, z: m.to.z - from.z });
+    }
+    if (m.shooterId !== meId) remotes.shot(m.shooterId, performance.now());
+  };
+  const onSwung = (m: SwungMsg): void => {
+    if (m.attackerId !== meId) remotes.swing(m.attackerId, m.charged, performance.now());
   };
   const onHit = (m: HitMsg): void => {
     if (m.attackerId === meId) hud.hitmark(m.part === 'head');
-    else remotes.swing(m.attackerId);
-    if (m.victimId === meId) hud.damageFlash();
+    if (m.victimId === meId) hud.damageFlash(m.damage);
+    // Sword hits carry no impact point: spray from the victim's rendered body, away from the attacker.
+    const victim = m.victimId === meId ? null : remotes.position(m.victimId);
+    if (victim) {
+      const attacker = m.attackerId === meId ? local.state : remotes.position(m.attackerId);
+      const wound = { x: victim.x, y: victim.y + (m.part === 'head' ? PLAYER_HEIGHT * 0.9 : PLAYER_HEIGHT * 0.55), z: victim.z };
+      const dir = attacker ? { x: victim.x - attacker.x, y: 0, z: victim.z - attacker.z } : { x: 0, y: 1, z: 0 };
+      blood.burst(wound, m.damage, dir);
+    }
   };
   const onKill = (m: KillMsg): void => {
-    const verb = m.weapon === WEAPON_GUN ? '🔫' : '🗡️';
     const mine = m.killerId === meId;
     const nameOf = (id: string, fallback: string): string =>
       displayName(fallback, room?.state.players.get(id)?.isBot ?? false);
     const killerName = nameOf(m.killerId, m.killerName);
-    hud.pushFeed(`${killerName} ${verb} ${nameOf(m.victimId, m.victimName)}`, mine || m.victimId === meId);
+    const badges = awardBadges(m);
+    hud.pushFeed(
+      { ...m, killer: killerName, victim: nameOf(m.victimId, m.victimName) },
+      mine ? 'good' : m.victimId === meId ? 'bad' : 'neutral',
+    );
+    if (mine) hud.announce(badges);
     if (m.victimId === meId) {
-      hud.showDeath(killerName, m.weapon);
-      hud.damageFlash();
+      hud.showDeath(killerName, m.weapon, m.headshot, badges);
+      hud.deathFlash();
     }
   };
   const onPong = (t: number): void => {
@@ -252,6 +275,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
   let pingTimer = 0;
   if (room) {
     room.onMessage(MSG.shot, onShot);
+    room.onMessage(MSG.swung, onSwung);
     room.onMessage(MSG.hit, onHit);
     room.onMessage(MSG.kill, onKill);
     room.onMessage(MSG.pong, onPong);
@@ -292,6 +316,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     viewModel.update(dt, moving && local.state.onGround);
     remotes.update(now);
     tracers.update(now);
+    blood.update(now);
     hud.update(now);
     if (room) {
       hud.setTimer(Math.max(0, lastTimeLeft - (now - lastTimeLeftAt)));
@@ -322,6 +347,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     viewModel.dispose();
     remotes.dispose();
     tracers.dispose();
+    blood.dispose();
     worldMesh.dispose();
     bundle.dispose();
   };
@@ -331,7 +357,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
 
   if (import.meta.env.DEV) {
     // Dev-only hook for the headless smoke test (scripts/smoke.mjs); stripped from production builds.
-    (window as unknown as { __mineshoot?: unknown }).__mineshoot = { room, local, look, weapons, ready: sendReady };
+    (window as unknown as { __mineshoot?: unknown }).__mineshoot = { room, local, look, weapons, hud, ready: sendReady };
   }
 
   return { dispose: finish };

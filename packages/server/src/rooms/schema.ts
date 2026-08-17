@@ -19,6 +19,10 @@ export class PlayerSchema extends Schema {
   @type('boolean') isBot = false;
   /** Spawn protection: cannot be targeted or damaged (ends after SPAWN_PROTECT_MS or on the first attack). */
   @type('boolean') shielded = false;
+  /** Holding a sword charge (wind-up visible to everyone). */
+  @type('boolean') charging = false;
+  /** Reloading the gun. */
+  @type('boolean') reloading = false;
 }
 
 export class RoomState extends Schema {

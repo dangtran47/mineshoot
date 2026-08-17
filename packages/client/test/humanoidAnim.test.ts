@@ -1,0 +1,107 @@
+import { describe, expect, it } from 'vitest';
+import { SWORD_CHARGE_MS, WEAPON_GUN, WEAPON_SWORD } from '@mineshoot/shared';
+import {
+  CHARGE_PITCH,
+  GUN_IDLE_PITCH,
+  HumanoidAnim,
+  MUZZLE_FLASH_MS,
+  RELOAD_PITCH,
+  SHOT_KICK_MS,
+  SWING_MS,
+  SWORD_IDLE_PITCH,
+} from '../src/render/humanoidAnim';
+
+describe('HumanoidAnim', () => {
+  it('holds the gun and the sword at visibly different arm angles', () => {
+    const a = new HumanoidAnim();
+    a.setWeapon(WEAPON_GUN);
+    expect(a.pose(0).armPitch).toBe(GUN_IDLE_PITCH);
+    a.setWeapon(WEAPON_SWORD);
+    expect(a.pose(0).armPitch).toBe(SWORD_IDLE_PITCH);
+    expect(Math.abs(GUN_IDLE_PITCH - SWORD_IDLE_PITCH)).toBeGreaterThan(0.5);
+  });
+
+  it('winds the sword arm back and glows while charging, reaching full at SWORD_CHARGE_MS', () => {
+    const a = new HumanoidAnim();
+    a.setWeapon(WEAPON_SWORD);
+    a.setCharging(true, 1000);
+    const start = a.pose(1000);
+    const mid = a.pose(1000 + SWORD_CHARGE_MS / 2);
+    const full = a.pose(1000 + SWORD_CHARGE_MS);
+    expect(start.swordGlow).toBe(0);
+    expect(mid.swordGlow).toBeGreaterThan(0.3);
+    expect(mid.swordGlow).toBeLessThan(0.7);
+    expect(full.swordGlow).toBe(1);
+    expect(a.pose(1000 + SWORD_CHARGE_MS * 3).swordGlow).toBe(1);
+    // Arm travels from idle towards the wind-up angle.
+    expect(Math.abs(mid.armPitch - CHARGE_PITCH)).toBeLessThan(Math.abs(start.armPitch - CHARGE_PITCH));
+    expect(full.armPitch).toBeCloseTo(CHARGE_PITCH, 5);
+    // Letting go returns to idle.
+    a.setCharging(false, 5000);
+    expect(a.pose(5000).armPitch).toBe(SWORD_IDLE_PITCH);
+    expect(a.pose(5000).swordGlow).toBe(0);
+  });
+
+  it('sweeps the arm forward over SWING_MS then returns to idle', () => {
+    const a = new HumanoidAnim();
+    a.setWeapon(WEAPON_SWORD);
+    a.swing(2000, false);
+    const p0 = a.pose(2000);
+    const p1 = a.pose(2000 + SWING_MS / 2);
+    const p2 = a.pose(2000 + SWING_MS - 1);
+    // Starts wound back, ends swept forward-down (pitch increases monotonically).
+    expect(p0.armPitch).toBeLessThan(p1.armPitch);
+    expect(p1.armPitch).toBeLessThan(p2.armPitch);
+    expect(p2.armPitch).toBeGreaterThan(SWORD_IDLE_PITCH);
+    expect(a.pose(2000 + SWING_MS + 1).armPitch).toBe(SWORD_IDLE_PITCH);
+  });
+
+  it('gives a charged swing a wider arc than a light one', () => {
+    const light = new HumanoidAnim();
+    light.setWeapon(WEAPON_SWORD);
+    light.swing(0, false);
+    const heavy = new HumanoidAnim();
+    heavy.setWeapon(WEAPON_SWORD);
+    heavy.swing(0, true);
+    const arc = (a: HumanoidAnim): number => a.pose(SWING_MS - 1).armPitch - a.pose(0).armPitch;
+    expect(arc(heavy)).toBeGreaterThan(arc(light));
+    expect(heavy.pose(0).swordGlow).toBe(1);
+    expect(light.pose(0).swordGlow).toBe(0);
+  });
+
+  it('a swing takes precedence over a still-set charging flag', () => {
+    const a = new HumanoidAnim();
+    a.setWeapon(WEAPON_SWORD);
+    a.setCharging(true, 0);
+    a.swing(SWORD_CHARGE_MS, true);
+    const during = a.pose(SWORD_CHARGE_MS + SWING_MS - 1);
+    expect(during.armPitch).toBeGreaterThan(CHARGE_PITCH + 0.5);
+  });
+
+  it('kicks the gun and flashes the muzzle briefly after a shot', () => {
+    const a = new HumanoidAnim();
+    a.setWeapon(WEAPON_GUN);
+    a.shot(3000);
+    const p0 = a.pose(3000);
+    expect(p0.gunKick).toBeGreaterThan(0);
+    expect(p0.muzzleFlash).toBe(true);
+    expect(a.pose(3000 + MUZZLE_FLASH_MS + 1).muzzleFlash).toBe(false);
+    expect(a.pose(3000 + SHOT_KICK_MS / 2).gunKick).toBeLessThan(p0.gunKick);
+    const after = a.pose(3000 + SHOT_KICK_MS + 1);
+    expect(after.gunKick).toBe(0);
+    expect(after.armPitch).toBe(GUN_IDLE_PITCH);
+  });
+
+  it('lowers the gun while reloading and bobs it', () => {
+    const a = new HumanoidAnim();
+    a.setWeapon(WEAPON_GUN);
+    a.setReloading(true);
+    const p0 = a.pose(0);
+    const p1 = a.pose(120);
+    expect(RELOAD_PITCH).toBeGreaterThan(GUN_IDLE_PITCH); // arm hangs lower than the aiming pose
+    expect(Math.abs(p0.armPitch - RELOAD_PITCH)).toBeLessThan(0.3);
+    expect(p0.armPitch).not.toBe(p1.armPitch);
+    a.setReloading(false);
+    expect(a.pose(200).armPitch).toBe(GUN_IDLE_PITCH);
+  });
+});

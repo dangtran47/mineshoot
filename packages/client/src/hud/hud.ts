@@ -1,7 +1,11 @@
 import { GUN_MAG_SIZE, MAX_HP, WEAPON_GUN } from '@mineshoot/shared';
 import type { RankRow, Weapon, WeaponMode } from '@mineshoot/shared';
-import { KillFeedModel } from './killFeed';
+import { KillFeedModel, killFeedLine } from './killFeed';
+import type { FeedKind, KillLineInput } from './killFeed';
+import { awardBadges, iconSvg, weaponIcon } from './icons';
+import type { AwardBadge } from './icons';
 import { kdRatio } from '@mineshoot/shared';
+import { damageFlashParams } from './damageFx';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -9,6 +13,24 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   if (text !== undefined) e.textContent = text;
   return e;
 }
+
+/** A span whose content is trusted SVG markup from icons.ts (never user text). */
+function svgSpan(className: string, html: string): HTMLSpanElement {
+  const e = el('span', className);
+  e.innerHTML = html;
+  return e;
+}
+
+/** Icon + caption badge, e.g. [💀💀 ×2] or [🔥 5]. */
+function badgeEl(b: AwardBadge, className = 'badge'): HTMLSpanElement {
+  const e = svgSpan(className, b.html);
+  e.title = b.label;
+  if (b.caption) e.append(el('span', 'cap', b.caption));
+  return e;
+}
+
+/** How long an award banner stays on screen. */
+export const ANNOUNCE_MS = 2200;
 
 export function formatTime(ms: number): string {
   const s = Math.max(0, Math.ceil(ms / 1000));
@@ -30,6 +52,7 @@ export class Hud {
   private readonly shield = el('div', 'shield hidden', '🛡 Spawn protection');
   private readonly ping = el('div', 'ping');
   private readonly feedEl = el('div', 'feed');
+  private readonly announceEl = el('div', 'announce hidden');
   private readonly centerMsg = el('div', 'center-msg hidden');
   private readonly overlay = el('div', 'overlay');
   private readonly scoreboard = el('div', 'scoreboard hidden');
@@ -37,9 +60,11 @@ export class Hud {
   private readonly charge = el('div', 'charge hidden');
   private readonly chargeFill = el('div', 'fill');
   private readonly flash = el('div', 'dmg-flash');
+  private readonly dmgNumbers = el('div', 'dmg-numbers');
   private readonly feed = new KillFeedModel();
   private hitTimer = 0;
   private flashTimer = 0;
+  private announceTimer = 0;
   onOverlayClick: (() => void) | null = null;
   onLeave: (() => void) | null = null;
 
@@ -50,7 +75,7 @@ export class Hud {
     weapon.append(this.weaponName, this.ammo, this.weaponHint);
     const bar = el('div', 'bar');
     bar.append(this.healthFill);
-    this.health.append(bar, this.healthText);
+    this.health.append(bar, this.healthText, this.dmgNumbers);
     this.charge.append(this.chargeFill);
 
     const title = el('h2', undefined, 'Click to play');
@@ -75,6 +100,7 @@ export class Hud {
       weapon,
       this.ping,
       this.feedEl,
+      this.announceEl,
       this.centerMsg,
       this.scoreboard,
       this.overlay,
@@ -125,7 +151,8 @@ export class Hud {
   }
 
   setWeapon(w: Weapon): void {
-    this.weaponName.textContent = w === WEAPON_GUN ? 'GUN' : 'SWORD';
+    this.weaponName.innerHTML = weaponIcon(w);
+    this.weaponName.title = w === WEAPON_GUN ? 'Gun' : 'Sword';
     this.ammo.classList.toggle('hidden', w !== WEAPON_GUN);
   }
 
@@ -149,17 +176,36 @@ export class Hud {
     this.overlay.classList.toggle('hidden', !visible);
   }
 
-  pushFeed(text: string, highlight = false): void {
-    this.feed.push(text, performance.now(), highlight);
+  pushFeed(line: KillLineInput, kind: FeedKind = 'neutral'): void {
+    this.feed.push(line, performance.now(), kind);
     this.renderFeed();
   }
 
-  showDeath(killerName: string, weapon: Weapon): void {
-    this.centerMsg.replaceChildren(
-      el('div', 'big', 'YOU DIED'),
-      el('div', undefined, `Killed by ${killerName} (${weapon === WEAPON_GUN ? 'gun' : 'sword'})`),
-      el('div', 'countdown', ''),
+  /** Big centre banner for the local player's own awards (skulls for a multi kill, crossed swords for revenge...); first badge is the headline. */
+  announce(badges: AwardBadge[]): void {
+    if (badges.length === 0) return;
+    const [head, ...rest] = badges;
+    const big = badgeEl(head, 'big');
+    big.append(el('div', 'label', head.label));
+    this.announceEl.replaceChildren(big, ...rest.map((b) => badgeEl(b, 'sub')));
+    this.announceEl.classList.remove('hidden');
+    // Restart the pop animation even if a banner is already showing.
+    this.announceEl.classList.remove('pop');
+    void this.announceEl.offsetWidth;
+    this.announceEl.classList.add('pop');
+    this.announceTimer = performance.now() + ANNOUNCE_MS;
+  }
+
+  showDeath(killerName: string, weapon: Weapon, headshot = false, badges: AwardBadge[] = []): void {
+    const by = el('div', 'by');
+    by.append(
+      'Killed by ',
+      el('b', undefined, killerName),
+      svgSpan('icons', weaponIcon(weapon) + (headshot ? iconSvg('headshot', 'red') : '')),
     );
+    const tags = el('div', 'tags');
+    tags.append(...badges.map((b) => badgeEl(b)));
+    this.centerMsg.replaceChildren(el('div', 'big', 'YOU DIED'), by, ...(badges.length ? [tags] : []), el('div', 'countdown', ''));
     this.centerMsg.classList.remove('hidden');
   }
 
@@ -179,9 +225,33 @@ export class Hud {
     this.hitTimer = performance.now() + 120;
   }
 
-  damageFlash(): void {
+  /**
+   * Screen-edge blood vignette plus a floating "-N" by the health bar. Both scale with the
+   * HP lost so a graze and a near-death hit read differently at a glance.
+   */
+  damageFlash(damage: number): void {
+    const { opacity, durationMs } = damageFlashParams(damage);
+    this.showFlash(opacity, durationMs);
+    if (damage > 0) {
+      const n = el('div', 'dmg-number', `-${Math.round(damage)}`);
+      if (damage >= 50) n.classList.add('big');
+      this.dmgNumbers.append(n);
+      n.addEventListener('animationend', () => n.remove());
+    }
+  }
+
+  /** Full-strength vignette on death; the lethal shot/hit already posted its "-N". */
+  deathFlash(): void {
+    const { opacity, durationMs } = damageFlashParams(MAX_HP);
+    this.showFlash(opacity, durationMs);
+  }
+
+  private showFlash(opacity: number, durationMs: number): void {
+    // Don't let a small hit dim a bigger flash that is still on screen.
+    const current = this.flashTimer ? Number(this.flash.style.opacity) || 0 : 0;
+    this.flash.style.opacity = String(Math.max(current, opacity));
     this.flash.classList.add('show');
-    this.flashTimer = performance.now() + 150;
+    this.flashTimer = Math.max(this.flashTimer, performance.now() + durationMs);
   }
 
   setScoreboard(visible: boolean, rows?: RankRow[], meId?: string): void {
@@ -211,14 +281,32 @@ export class Hud {
       this.hitTimer = 0;
     }
     if (this.flashTimer && now > this.flashTimer) {
+      // Fade out through the CSS transition rather than snapping off.
       this.flash.classList.remove('show');
+      this.flash.style.opacity = '0';
       this.flashTimer = 0;
+    }
+    if (this.announceTimer && now > this.announceTimer) {
+      this.announceEl.classList.add('hidden');
+      this.announceTimer = 0;
     }
     if (this.feed.prune(now)) this.renderFeed();
   }
 
   private renderFeed(): void {
-    this.feedEl.replaceChildren(...this.feed.entries.map((e) => el('div', e.highlight ? 'hl' : undefined, e.text)));
+    this.feedEl.replaceChildren(
+      ...this.feed.entries.map((e) => {
+        const row = el('div', e.kind === 'neutral' ? undefined : e.kind);
+        row.title = killFeedLine(e.line);
+        row.append(
+          el('span', 'name', e.line.killer),
+          svgSpan('icons', weaponIcon(e.line.weapon) + (e.line.headshot ? iconSvg('headshot', 'red') : '')),
+          el('span', 'name', e.line.victim),
+          ...awardBadges(e.line).map((b) => badgeEl(b)),
+        );
+        return row;
+      }),
+    );
   }
 
   dispose(): void {

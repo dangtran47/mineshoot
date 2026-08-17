@@ -20,6 +20,8 @@ export interface NetPlayer {
   color: number;
   isBot: boolean;
   shielded: boolean;
+  charging: boolean;
+  reloading: boolean;
 }
 export interface NetMap<T> {
   size: number;

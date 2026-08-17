@@ -8,6 +8,7 @@ import {
   createPhysState,
   stepPlayer,
   GUN_MAG_SIZE,
+  KillTracker,
   GUN_RANGE,
   GUN_RELOAD_MS,
   GUN_RELOAD_SERVER_MIN_MS,
@@ -32,7 +33,7 @@ import {
   swordVictims,
   weaponAllowed,
 } from '@mineshoot/shared';
-import type { Bot, BotView, HitMsg, KillMsg, PlayerPhysState, PlayerPose, ShotMsg, ShotTarget, SpawnPoint, Weapon, WeaponMode, World } from '@mineshoot/shared';
+import type { Bot, BotView, HitMsg, KillMsg, PlayerPhysState, PlayerPose, ShotMsg, ShotTarget, SpawnPoint, SwungMsg, Weapon, WeaponMode, World } from '@mineshoot/shared';
 import { PlayerSchema, RoomState } from './schema';
 import {
   parseBotCount,
@@ -111,6 +112,7 @@ export class ArenaRoom extends Room<RoomState> {
   private weaponMode: WeaponMode = 'all';
   private readonly meta = new Map<string, PlayerMeta>();
   private readonly bots = new Map<string, BotRuntime>();
+  private readonly killTracker = new KillTracker();
   private botAcc = 0;
 
   onCreate(options: CreateOptionsRaw = {}): void {
@@ -240,6 +242,7 @@ export class ArenaRoom extends Room<RoomState> {
   onLeave(client: Client): void {
     this.state.players.delete(client.sessionId);
     this.meta.delete(client.sessionId);
+    this.killTracker.remove(client.sessionId);
   }
 
   // --- messages ---
@@ -266,7 +269,25 @@ export class ArenaRoom extends Room<RoomState> {
     const p = this.actor(client, m.epoch);
     if (!p) return;
     this.applyPose(p, m);
-    if (weaponAllowed(this.weaponMode, m.weapon) && p.weapon !== m.weapon) p.weapon = m.weapon;
+    if (weaponAllowed(this.weaponMode, m.weapon) && p.weapon !== m.weapon) {
+      p.weapon = m.weapon;
+      // Putting the sword away drops a pending charge. (A charge may legitimately arrive
+      // before the pose that switches to the sword, so only the gun cancels it.)
+      if (m.weapon !== WEAPON_SWORD) {
+        this.meta.get(client.sessionId)!.chargeStartAt = 0;
+        this.syncFlags(client.sessionId, p, Date.now());
+      }
+    }
+  }
+
+  /** Mirror transient meta timers into the synced schema (charging / reloading). */
+  private syncFlags(id: string, p: PlayerSchema, now: number): void {
+    const meta = this.meta.get(id);
+    if (!meta) return;
+    const charging = p.alive && meta.chargeStartAt > 0;
+    const reloading = p.alive && meta.reloadDoneAt > 0 && now < meta.reloadDoneAt;
+    if (p.charging !== charging) p.charging = charging;
+    if (p.reloading !== reloading) p.reloading = reloading;
   }
 
   /** Alive and not under spawn protection. */
@@ -323,7 +344,9 @@ export class ArenaRoom extends Room<RoomState> {
     if (!p) return;
     const meta = this.meta.get(client.sessionId)!;
     if (meta.reloadDoneAt || meta.ammo >= GUN_MAG_SIZE) return;
-    meta.reloadDoneAt = Date.now() + GUN_RELOAD_SERVER_MIN_MS;
+    const now = Date.now();
+    meta.reloadDoneAt = now + GUN_RELOAD_SERVER_MIN_MS;
+    this.syncFlags(client.sessionId, p, now);
   }
 
   private handleShoot(client: Client, raw: unknown): void {
@@ -340,7 +363,9 @@ export class ArenaRoom extends Room<RoomState> {
   private attackShoot(id: string, p: PlayerSchema, pose: PlayerPose, now: number): void {
     const meta = this.meta.get(id)!;
     if (now - meta.lastShotAt < GUN_SERVER_MIN_INTERVAL_MS) return;
-    if (!this.takeRound(id, meta, now)) return;
+    const fired = this.takeRound(id, meta, now);
+    this.syncFlags(id, p, now);
+    if (!fired) return;
     meta.lastShotAt = now;
     if (p.weapon !== WEAPON_GUN) p.weapon = WEAPON_GUN;
     this.dropProtection(p, meta);
@@ -355,7 +380,7 @@ export class ArenaRoom extends Room<RoomState> {
       damage: result.damage,
     };
     this.broadcast(MSG.shot, shot);
-    if (result.hitPlayerId) this.damage(id, result.hitPlayerId, result.damage, WEAPON_GUN);
+    if (result.hitPlayerId) this.damage(id, result.hitPlayerId, result.damage, WEAPON_GUN, result.part === 'head');
   }
 
   /** Player started holding the sword button: remember when, so a later swing can be verified as charged. */
@@ -365,7 +390,10 @@ export class ArenaRoom extends Room<RoomState> {
     if (epoch === null) return;
     const p = this.actor(client, epoch);
     if (!p) return;
-    this.meta.get(client.sessionId)!.chargeStartAt = Date.now();
+    const now = Date.now();
+    this.meta.get(client.sessionId)!.chargeStartAt = now;
+    if (p.weapon !== WEAPON_SWORD) p.weapon = WEAPON_SWORD;
+    this.syncFlags(client.sessionId, p, now);
   }
 
   private handleSwing(client: Client, raw: unknown): void {
@@ -386,44 +414,51 @@ export class ArenaRoom extends Room<RoomState> {
     const meta = this.meta.get(id)!;
     const charged = wantsCharged && meta.chargeStartAt > 0 && now - meta.chargeStartAt >= SWORD_CHARGE_MS;
     meta.chargeStartAt = 0;
+    this.syncFlags(id, p, now);
     if (now - meta.lastSwingAt < SWORD_SERVER_MIN_INTERVAL_MS) return;
     meta.lastSwingAt = now;
     if (p.weapon !== WEAPON_SWORD) p.weapon = WEAPON_SWORD;
     this.dropProtection(p, meta);
+    const swung: SwungMsg = { attackerId: id, charged };
+    this.broadcast(MSG.swung, swung);
 
     for (const victim of swordVictims(this.world, pose, this.targetsExcluding(id, now), charged)) {
       const dmg = swordDamage(victim.part, charged);
       const hit: HitMsg = { attackerId: id, victimId: victim.id, part: victim.part, damage: dmg, charged };
       this.broadcast(MSG.hit, hit);
-      this.damage(id, victim.id, dmg, WEAPON_SWORD);
+      this.damage(id, victim.id, dmg, WEAPON_SWORD, victim.part === 'head');
     }
   }
 
   // --- combat / lifecycle ---
 
   /** Subtract HP from a living victim; a drop to 0 is a kill credited to the attacker. */
-  private damage(attackerId: string, victimId: string, amount: number, weapon: Weapon): void {
+  private damage(attackerId: string, victimId: string, amount: number, weapon: Weapon, headshot: boolean): void {
     const victim = this.state.players.get(victimId);
     if (!victim || !this.targetable(victimId, victim, Date.now())) return;
     victim.hp = Math.max(0, victim.hp - amount);
-    if (victim.hp === 0) this.kill(attackerId, victimId, weapon);
+    if (victim.hp === 0) this.kill(attackerId, victimId, weapon, headshot);
   }
 
-  private kill(killerId: string, victimId: string, weapon: Weapon): void {
+  private kill(killerId: string, victimId: string, weapon: Weapon, headshot: boolean): void {
     const victim = this.state.players.get(victimId);
     if (!victim || !victim.alive) return;
     const killer = this.state.players.get(killerId);
+    const now = Date.now();
     victim.alive = false;
     victim.deaths++;
     if (killer) killer.kills++;
     const meta = this.meta.get(victimId);
-    if (meta) meta.respawnAt = Date.now() + this.respawnMs;
+    if (meta) meta.respawnAt = now + this.respawnMs;
+    const awards = this.killTracker.recordKill(killerId, victimId, now);
     const msg: KillMsg = {
+      ...awards,
       killerId,
       killerName: killer?.name ?? '?',
       victimId,
       victimName: victim.name,
       weapon,
+      headshot,
     };
     this.broadcast(MSG.kill, msg);
   }
@@ -470,6 +505,7 @@ export class ArenaRoom extends Room<RoomState> {
       } else if (p.shielded && now >= meta.protectedUntil) {
         p.shielded = false;
       }
+      this.syncFlags(id, p, now);
     }
   }
 

@@ -71,6 +71,11 @@ console.log('alice stats:', await a.textContent('.stats'), '| ammo:', await a.te
 await b.waitForFunction(() => !document.querySelector('.center-msg').classList.contains('hidden'), null, { timeout: 4000 });
 console.log('bob death msg:', (await b.textContent('.center-msg')).replace(/\s+/g, ' ').trim());
 console.log('bob feed:', (await b.textContent('.feed')).trim());
+// Bob's own death is red and shows the headshot icon; Alice's own kill is green.
+console.log('bob feed class / gun+headshot icons:', await b.evaluate(() => document.querySelector('.feed div').className),
+  await b.evaluate(() => !!document.querySelector('.feed .icon-gun') && !!document.querySelector('.feed .icon-headshot')),
+  '| alice feed class:', await a.evaluate(() => document.querySelector('.feed div').className),
+  '| death panel icons:', await b.evaluate(() => [...document.querySelectorAll('.center-msg .icon')].map((e) => e.getAttribute('aria-label')).join(',')));
 await shot(b, 'bob-dead.png');
 await shot(a, 'alice-after-kill.png');
 // Bob respawns (1s test override) → death message hides.
@@ -84,11 +89,23 @@ await tp(a, 32.5, 36.5, 0);
 await tp(b, 32.5, 34.5, Math.PI);
 await a.waitForTimeout(250);
 await b.evaluate(() => { const g = window.__mineshoot; g.weapons.select(1); g.weapons.altDown(performance.now()); });
+// Alice sees Bob's charge: synced flag + wound-up humanoid arm / glowing blade.
+// (Checked before the screenshots: a charge auto-releases after SWORD_CHARGE_MAX_MS and headless screenshots are slow.)
+await a.waitForFunction(() => { let c = false; const me = window.__mineshoot.room.sessionId; window.__mineshoot.room.state.players.forEach((pl, id) => { if (id !== me && pl.charging) c = true; }); return c; }, null, { timeout: 2000 });
+console.log('alice sees bob charging: true');
 await b.waitForFunction(() => document.querySelector('.charge').classList.contains('ready'), null, { timeout: 4000 });
+await shot(a, 'alice-sees-bob-charging.png');
 await shot(b, 'bob-charging.png');
 await b.evaluate(() => window.__mineshoot.weapons.altUp(performance.now()));
 await b.waitForFunction(() => document.querySelector('.stats').textContent.includes('K 1'), null, { timeout: 4000 });
 console.log('bob stats after sword:', await b.textContent('.stats'));
+// Bob was last killed by Alice → this kill is REVENGE: banner on Bob, tag in everyone's feed.
+console.log('bob announce:', (await b.textContent('.announce')).replace(/\s+/g, ' ').trim(),
+  '| icons:', await b.evaluate(() => [...document.querySelectorAll('.announce .icon')].map((e) => e.getAttribute('aria-label')).join(',')),
+  '| hidden:', await b.evaluate(() => document.querySelector('.announce').classList.contains('hidden')));
+console.log('alice feed after sword kill:', await a.evaluate(() => [...document.querySelectorAll('.feed div')].map((d) => d.title).join(' | ')));
+console.log('bob weapon hud icon:', await b.evaluate(() => document.querySelector('.weapon .name .icon')?.getAttribute('aria-label')));
+await shot(b, 'bob-revenge.png');
 
 // Match ends at 9s → results on both.
 await a.waitForSelector('.results', { timeout: 15000 });

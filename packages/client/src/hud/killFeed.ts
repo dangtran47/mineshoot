@@ -1,8 +1,21 @@
+import { WEAPON_GUN, killTags } from '@mineshoot/shared';
+import type { KillAwards, Weapon } from '@mineshoot/shared';
+
+/** How a feed line relates to the local player: their kill, their death, or neither. */
+export type FeedKind = 'neutral' | 'good' | 'bad';
+
 export interface FeedEntry {
-  text: string;
+  line: KillLineInput;
   /** Milliseconds timestamp when it should disappear. */
   expiresAt: number;
-  highlight: boolean;
+  kind: FeedKind;
+}
+
+export interface KillLineInput extends KillAwards {
+  killer: string;
+  victim: string;
+  weapon: Weapon;
+  headshot: boolean;
 }
 
 export const FEED_MAX = 5;
@@ -12,8 +25,8 @@ export const FEED_TTL_MS = 6000;
 export class KillFeedModel {
   readonly entries: FeedEntry[] = [];
 
-  push(text: string, now: number, highlight = false): void {
-    this.entries.push({ text, expiresAt: now + FEED_TTL_MS, highlight });
+  push(line: KillLineInput, now: number, kind: FeedKind = 'neutral'): void {
+    this.entries.push({ line, expiresAt: now + FEED_TTL_MS, kind });
     while (this.entries.length > FEED_MAX) this.entries.shift();
   }
 
@@ -23,4 +36,10 @@ export class KillFeedModel {
     for (let i = this.entries.length - 1; i >= 0; i--) if (this.entries[i].expiresAt <= now) this.entries.splice(i, 1);
     return this.entries.length !== before;
   }
+}
+
+/** "Alice 🔫🎯 Bob · DOUBLE KILL" — plain-text form of a feed line (accessible name / tooltip). */
+export function killFeedLine(k: KillLineInput): string {
+  const icon = (k.weapon === WEAPON_GUN ? '🔫' : '🗡️') + (k.headshot ? '🎯' : '');
+  return [`${k.killer} ${icon} ${k.victim}`, ...killTags(k)].join(' · ');
 }

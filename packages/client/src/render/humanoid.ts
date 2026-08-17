@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { PLAYER_COLOR_COUNT, WEAPON_SWORD } from '@mineshoot/shared';
 import type { Weapon } from '@mineshoot/shared';
+import { HumanoidAnim } from './humanoidAnim';
 
 export const PLAYER_COLORS: readonly number[] = [
   0xe74c3c, 0x3498db, 0x2ecc71, 0xf1c40f, 0x9b59b6, 0xe67e22, 0x1abc9c, 0xecf0f1,
@@ -23,8 +24,11 @@ export class Humanoid {
   private readonly legR: THREE.Mesh;
   private readonly armL: THREE.Mesh;
   private readonly armR: THREE.Group;
-  private readonly gun: THREE.Mesh;
-  private readonly sword: THREE.Mesh;
+  private readonly gun: THREE.Group;
+  private readonly muzzle: THREE.Mesh;
+  private readonly sword: THREE.Group;
+  private readonly blade: THREE.MeshLambertMaterial;
+  private readonly anim = new HumanoidAnim();
   private walkPhase = 0;
   private lastX = 0;
   private lastZ = 0;
@@ -48,12 +52,39 @@ export class Humanoid {
     const armMesh = box(0.2, 0.6, 0.2, color);
     armMesh.position.set(0, -0.3, 0);
     this.armR.add(armMesh);
-    this.gun = box(0.08, 0.1, 0.5, 0x333333);
-    this.gun.position.set(0, -0.6, -0.25);
-    this.sword = box(0.05, 0.08, 0.9, 0xd8dde6);
-    this.sword.position.set(0, -0.6, -0.45);
+    // Props are modelled along -z and the holder groups are rotated so -z runs along the
+    // arm (local -y): a level arm points the weapon forward, a raised arm points it up.
+    // Gun: chunky dark body + barrel + a muzzle flash that only shows for a frame or two.
+    this.gun = new THREE.Group();
+    this.gun.position.set(0, -0.6, 0);
+    this.gun.rotation.x = -Math.PI / 2;
+    const gunBody = box(0.12, 0.16, 0.45, 0x2b2b2b);
+    gunBody.position.set(0, 0, -0.15);
+    const barrel = box(0.06, 0.06, 0.4, 0x555555);
+    barrel.position.set(0, 0.03, -0.55);
+    const grip = box(0.08, 0.16, 0.08, 0x3a2a1a);
+    grip.position.set(0, -0.14, 0.02);
+    this.muzzle = new THREE.Mesh(
+      new THREE.BoxGeometry(0.22, 0.22, 0.22),
+      new THREE.MeshBasicMaterial({ color: 0xffd36b, transparent: true, opacity: 0.95 }),
+    );
+    this.muzzle.position.set(0, 0.03, -0.85);
+    this.muzzle.visible = false;
+    this.gun.add(gunBody, barrel, grip, this.muzzle);
+
+    // Sword: long bright blade + guard + handle; the blade glows while charging.
+    this.sword = new THREE.Group();
+    this.sword.position.set(0, -0.6, 0);
+    this.sword.rotation.x = -Math.PI / 2;
+    this.blade = new THREE.MeshLambertMaterial({ color: 0xe8edf5, emissive: 0xff8c1a, emissiveIntensity: 0 });
+    const bladeMesh = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.1, 1.1), this.blade);
+    bladeMesh.position.set(0, 0, -0.7);
+    const guard = box(0.3, 0.06, 0.06, 0x8a6b2f);
+    guard.position.set(0, 0, -0.12);
+    const handle = box(0.06, 0.06, 0.2, 0x3a2a1a);
+    handle.position.set(0, 0, 0);
+    this.sword.add(bladeMesh, guard, handle);
     this.armR.add(this.gun, this.sword);
-    this.armR.rotation.x = -Math.PI / 2 + 0.3; // raised, pointing forward
 
     this.head = box(0.45, 0.45, 0.45, SKIN);
     this.head.position.set(0, 1.575, 0);
@@ -72,6 +103,36 @@ export class Humanoid {
   setWeapon(w: Weapon): void {
     this.gun.visible = w !== WEAPON_SWORD;
     this.sword.visible = w === WEAPON_SWORD;
+    this.anim.setWeapon(w);
+  }
+
+  /** Sword charge held (server-synced flag). */
+  setCharging(on: boolean, now: number): void {
+    this.anim.setCharging(on, now);
+  }
+
+  /** Gun reload in progress (server-synced flag). */
+  setReloading(on: boolean): void {
+    this.anim.setReloading(on);
+  }
+
+  /** Sword swing (hit or miss). */
+  swing(now: number, charged: boolean): void {
+    this.anim.swing(now, charged);
+  }
+
+  /** Gun fired: recoil kick + muzzle flash. */
+  shot(now: number): void {
+    this.anim.shot(now);
+  }
+
+  /** Apply the time-driven weapon-arm animation; call once per frame. */
+  update(now: number): void {
+    const p = this.anim.pose(now);
+    this.armR.rotation.x = p.armPitch;
+    this.blade.emissiveIntensity = p.swordGlow * 1.5;
+    this.gun.position.y = -0.6 + p.gunKick * 0.12; // recoil: gun jolts back up the arm
+    this.muzzle.visible = p.muzzleFlash;
   }
 
   setPose(x: number, y: number, z: number, yaw: number, pitch: number, dt: number): void {
@@ -90,12 +151,6 @@ export class Humanoid {
     // Legs pivot at the hip: rotate around their top by offsetting.
     this.legL.position.y = 0.35;
     this.legR.position.y = 0.35;
-  }
-
-  /** Brief swing animation on the weapon arm. */
-  swing(): void {
-    this.armR.rotation.x = -Math.PI / 2 - 0.9;
-    setTimeout(() => (this.armR.rotation.x = -Math.PI / 2 + 0.3), 180);
   }
 
   dispose(): void {

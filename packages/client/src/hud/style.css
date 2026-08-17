@@ -85,7 +85,29 @@ input, select {
 .hud .ping { position: absolute; right: 14px; top: 12px; color: var(--muted); font-size: 12px; text-shadow: 0 1px 2px #000; }
 .hud .feed { position: absolute; right: 14px; top: 34px; display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
 .hud .feed div { background: rgba(0,0,0,0.45); padding: 4px 8px; border-radius: 4px; font-size: 13px; }
-.hud .feed div.hl { background: rgba(122, 201, 67, 0.35); }
+.hud .feed div.good { background: rgba(122, 201, 67, 0.35); }
+.hud .feed div.bad { background: rgba(224, 64, 64, 0.45); }
+.hud .feed div { display: flex; align-items: center; gap: 6px; }
+.hud .feed .icons { display: inline-flex; gap: 2px; }
+.hud .feed .badge { display: inline-flex; align-items: center; gap: 2px; margin-left: 4px; padding-left: 6px; border-left: 1px solid rgba(255,255,255,0.25); }
+/* Pixel-art icons (icons.ts): scale with font size, tint via color. */
+.icon { display: inline-block; width: 1.25em; height: 1.25em; vertical-align: -0.28em; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.6)); }
+.icon.red { color: var(--danger); }
+.badge .cap { font-size: 0.85em; font-weight: 700; font-variant-numeric: tabular-nums; }
+.hud .weapon .name .icon { width: 42px; height: 42px; vertical-align: middle; }
+.hud .announce { position: absolute; left: 50%; top: 24%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 6px; text-shadow: 0 2px 6px #000; pointer-events: none; }
+.hud .announce .big { display: flex; flex-direction: column; align-items: center; color: var(--accent2); font-size: 22px; font-weight: 900; letter-spacing: 2px; }
+.hud .announce .big .icon { width: 56px; height: 56px; margin: 0 -2px; }
+.hud .announce .big .cap { font-size: 30px; margin-left: 8px; }
+.hud .announce .big .label { font-size: 13px; font-weight: 800; letter-spacing: 3px; color: var(--text); opacity: 0.85; }
+.hud .announce .sub { display: inline-flex; align-items: center; gap: 4px; margin: 0 8px; font-size: 16px; font-weight: 700; color: var(--text); }
+.hud .announce .sub .icon { width: 28px; height: 28px; }
+.hud .announce.pop { animation: announce-pop 0.35s cubic-bezier(0.2, 1.4, 0.4, 1); }
+@keyframes announce-pop { from { transform: translate(-50%, -50%) scale(0.5); opacity: 0; } to { transform: translate(-50%, -50%) scale(1); opacity: 1; } }
+.hud .center-msg .by { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.hud .center-msg .by .icons { display: inline-flex; gap: 2px; }
+.hud .center-msg .tags { display: flex; justify-content: center; gap: 12px; margin-top: 4px; font-size: 16px; color: var(--accent2); }
+.hud .center-msg .tags .badge { display: inline-flex; align-items: center; gap: 3px; }
 .hud .center-msg { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); text-align: center; font-size: 22px; text-shadow: 0 2px 4px #000; }
 .hud .center-msg .big { font-size: 40px; font-weight: 800; color: var(--danger); }
 .hud .overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; pointer-events: auto; cursor: pointer; }
@@ -97,8 +119,18 @@ input, select {
 .hud .scoreboard th, .results th { color: var(--muted); font-weight: 500; font-size: 13px; }
 .hud .scoreboard tr.me td, .results tr.me td { color: var(--accent); font-weight: 600; }
 .hidden { display: none !important; }
-.dmg-flash { position: absolute; inset: 0; background: rgba(255, 0, 0, 0.35); opacity: 0; pointer-events: none; }
-.dmg-flash.show { opacity: 1; }
+.dmg-flash { position: absolute; inset: 0; opacity: 0; pointer-events: none; transition: opacity 0.4s ease-out;
+  background: radial-gradient(ellipse at center, rgba(255,0,0,0) 45%, rgba(200,0,0,0.55) 75%, rgba(120,0,0,0.95) 100%); }
+.dmg-flash.show { transition: opacity 0.03s; }
+.hud .dmg-numbers { position: absolute; left: 100%; bottom: 0; margin-left: 10px; pointer-events: none; }
+.hud .dmg-number { position: absolute; left: 0; bottom: 0; color: var(--danger); font-size: 20px; font-weight: 800; white-space: nowrap;
+  text-shadow: 0 1px 3px #000, 0 0 6px rgba(255,0,0,0.6); animation: dmg-float 0.8s ease-out forwards; }
+.hud .dmg-number.big { font-size: 28px; }
+@keyframes dmg-float {
+  0% { opacity: 1; transform: translateY(0) scale(1.25); }
+  20% { transform: translateY(-6px) scale(1); }
+  100% { opacity: 0; transform: translateY(-34px) scale(1); }
+}
 
 /* Results */
 .results { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.6); }

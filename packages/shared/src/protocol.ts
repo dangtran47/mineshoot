@@ -1,6 +1,7 @@
 import type { Vec3 } from './types';
 import type { HitPart } from './hitbox';
 import type { SwordPart } from './sword';
+import type { KillAwards } from './kills';
 
 export const WEAPON_GUN = 0;
 export const WEAPON_SWORD = 1;
@@ -82,6 +83,11 @@ export interface ShotMsg {
   /** Damage dealt (0 on a miss). */
   damage: number;
 }
+/** A sword swing was performed (hit or miss); drives the attacker's animation on other clients. */
+export interface SwungMsg {
+  attackerId: string;
+  charged: boolean;
+}
 /** A sword swing connected (lethal or not). */
 export interface HitMsg {
   attackerId: string;
@@ -90,12 +96,14 @@ export interface HitMsg {
   damage: number;
   charged: boolean;
 }
-export interface KillMsg {
+export interface KillMsg extends KillAwards {
   killerId: string;
   killerName: string;
   victimId: string;
   victimName: string;
   weapon: Weapon;
+  /** The killing blow landed on the head. */
+  headshot: boolean;
 }
 
 export const MSG = {
@@ -108,6 +116,7 @@ export const MSG = {
   ping: 'ping',
   pong: 'pong',
   shot: 'shot',
+  swung: 'swung',
   hit: 'hit',
   kill: 'kill',
 } as const;

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { INTERP_DELAY_MS } from '@mineshoot/shared';
-import type { Weapon } from '@mineshoot/shared';
+import type { Vec3, Weapon } from '@mineshoot/shared';
 import { displayName } from '../net';
 import type { NetPlayer } from '../net';
 import { Humanoid } from '../render/humanoid';
@@ -14,6 +14,8 @@ interface Remote {
   lastEpoch: number;
   weapon: Weapon;
   visible: boolean;
+  charging: boolean;
+  reloading: boolean;
 }
 
 /** Renders every other player as an interpolated blocky humanoid. */
@@ -31,7 +33,19 @@ export class RemotePlayers {
     const buffer = new SnapshotBuffer();
     buffer.push({ t: performance.now(), x: p.x, y: p.y, z: p.z, yaw: p.yaw, pitch: p.pitch });
     humanoid.setPose(p.x, p.y, p.z, p.yaw, p.pitch, 0);
-    this.remotes.set(id, { humanoid, tag, buffer, lastEpoch: p.spawnEpoch, weapon: p.weapon as Weapon, visible: p.alive });
+    humanoid.setWeapon(p.weapon as Weapon);
+    humanoid.setCharging(p.charging, performance.now());
+    humanoid.setReloading(p.reloading);
+    this.remotes.set(id, {
+      humanoid,
+      tag,
+      buffer,
+      lastEpoch: p.spawnEpoch,
+      weapon: p.weapon as Weapon,
+      visible: p.alive,
+      charging: p.charging,
+      reloading: p.reloading,
+    });
     humanoid.group.visible = p.alive;
   }
 
@@ -62,10 +76,30 @@ export class RemotePlayers {
       r.visible = p.alive;
       r.humanoid.group.visible = p.alive;
     }
+    if (p.charging !== r.charging) {
+      r.charging = p.charging;
+      r.humanoid.setCharging(p.charging, now);
+    }
+    if (p.reloading !== r.reloading) {
+      r.reloading = p.reloading;
+      r.humanoid.setReloading(p.reloading);
+    }
   }
 
-  swing(id: string): void {
-    this.remotes.get(id)?.humanoid.swing();
+  swing(id: string, charged: boolean, now: number): void {
+    this.remotes.get(id)?.humanoid.swing(now, charged);
+  }
+
+  shot(id: string, now: number): void {
+    this.remotes.get(id)?.humanoid.shot(now);
+  }
+
+  /** Feet position as currently rendered (interpolated), or null if we don't know that player. */
+  position(id: string): Vec3 | null {
+    const r = this.remotes.get(id);
+    if (!r) return null;
+    const p = r.humanoid.group.position;
+    return { x: p.x, y: p.y, z: p.z };
   }
 
   update(now: number): void {
@@ -75,6 +109,7 @@ export class RemotePlayers {
     for (const r of this.remotes.values()) {
       const s = r.buffer.sample(renderT);
       if (s) r.humanoid.setPose(s.x, s.y, s.z, s.yaw, s.pitch, dt);
+      r.humanoid.update(now);
     }
   }
 
