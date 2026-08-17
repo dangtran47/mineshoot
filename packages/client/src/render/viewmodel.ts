@@ -4,8 +4,40 @@ import type { MeleeKind, SwingAnim, Weapon } from '@mineshoot/shared';
 import { buildMeleeProp, disposeProp } from './meleeProps';
 import type { MeleeProp } from './meleeProps';
 
-/** Melee rest tilt (rotation.x): leaning forward so the tip points ahead rather than straight up. */
-const REST_PITCH = -0.75;
+/*
+ * Melee rest pose (sword slot rotation): a slight forward lean plus an outward yaw/roll so the weapon
+ * stands up in the hand at the bottom-right with its tip well above the horizon. A steeper lean puts
+ * the tip at eye level, which reads as "lying flat on the ground, pointing at the crosshair".
+ */
+const REST_PITCH = -0.25;
+const REST_YAW = -0.35;
+const REST_ROLL = -0.3;
+
+const X_AXIS = new THREE.Vector3(1, 0, 0);
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
+const Q_A = new THREE.Quaternion();
+const Q_B = new THREE.Quaternion();
+const Q_C = new THREE.Quaternion();
+const Q_D = new THREE.Quaternion();
+const TMP_V = new THREE.Vector3();
+const easeIn = (t: number): number => t * t;
+const easeOut = (t: number): number => 1 - (1 - t) * (1 - t);
+
+/** Rest / overhead key poses (sword-slot local): wound up behind the shoulder, then chopped down through the centre. */
+const REST_POS = new THREE.Vector3(0, 0, 0);
+const WINDUP_Q = new THREE.Quaternion().setFromAxisAngle(X_AXIS, REST_PITCH + 1.0)
+  .multiply(new THREE.Quaternion().setFromAxisAngle(Y_AXIS, REST_YAW * 0.5));
+const WINDUP_POS = new THREE.Vector3(0.1, 0.16, 0.12);
+const CHOP_Q = new THREE.Quaternion().setFromAxisAngle(Y_AXIS, 0.5)
+  .multiply(new THREE.Quaternion().setFromAxisAngle(X_AXIS, -2.45));
+/*
+ * Wind-up → chop is a >180° turn; a single slerp would take the short way round (backwards over the
+ * head), so the chop passes through this forward-pointing midpoint.
+ */
+const CHOP_MID_Q = new THREE.Quaternion().setFromAxisAngle(Y_AXIS, 0.25)
+  .multiply(new THREE.Quaternion().setFromAxisAngle(X_AXIS, -0.85));
+const CHOP_MID_POS = new THREE.Vector3(-0.1, 0.06, -0.15);
+const CHOP_POS = new THREE.Vector3(-0.32, -0.12, -0.28);
 
 const box = (w: number, h: number, d: number, color: number): THREE.Mesh =>
   new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshLambertMaterial({ color }));
@@ -18,10 +50,16 @@ export class ViewModel {
   private readonly sword = new THREE.Group();
   private prop: MeleeProp;
   private melee: MeleeKind = MELEE_SWORD;
+  private readonly restQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(REST_PITCH, REST_YAW, REST_ROLL));
   private readonly flash: THREE.Mesh;
   private recoil = 0;
   private swingT = -1;
   private swingAnim: SwingAnim = 'overhead';
+  /** Pose the current swing started from (so a charged wind-up flows straight into the chop). */
+  private readonly startQ = new THREE.Quaternion();
+  private readonly startPos = new THREE.Vector3();
+  /** Fraction of the overhead swing spent winding up; shrinks with the charge already held. */
+  private swingWindup = 0.25;
   /** Which way the next slash goes (+1 = right-to-left, -1 = left-to-right); flips every slash. */
   private slashSide = 1;
   private charge = 0;
@@ -46,13 +84,13 @@ export class ViewModel {
     // Melee prop (modelled along -Z at humanoid scale): stand it up (+Y) and shrink it for the hand.
     this.prop = buildMeleeProp(MELEE_SWORD);
     this.sword.add(this.mount(this.prop));
-    this.sword.rotation.set(REST_PITCH, 0.2, 0.15);
+    this.sword.rotation.set(REST_PITCH, REST_YAW, REST_ROLL);
 
     // Local light so Lambert materials on the view model read well.
     const light = new THREE.PointLight(0xffffff, 1.5, 3);
     light.position.set(-0.3, 0.6, 0.4);
     this.group.add(this.gun, this.sword, light);
-    this.group.position.set(0.3, -0.26, -0.6);
+    this.group.position.set(0.34, -0.22, -0.55);
     this.group.scale.setScalar(0.55);
     camera.add(this.group);
     this.setWeapon(0);
@@ -60,9 +98,10 @@ export class ViewModel {
 
   private mount(prop: MeleeProp): THREE.Group {
     const holder = new THREE.Group();
-    // Roll a quarter turn first (props keep their edge / head profile in the Y/Z plane, edge on -Y),
-    // then stand the prop up: tip up, edge toward the screen centre, broad side facing the camera.
-    holder.rotation.set(Math.PI / 2, 0, -Math.PI / 2); // Rz: -Y → -X, then Rx: -Z → +Y
+    // Stand the prop up: tip (-Z) → +Y, edge / head (-Y) → -Z, i.e. the cutting edge, axe bit and
+    // pick point face forward, toward whatever we are about to hit; the flat of the blade is seen
+    // three-quarter on thanks to the rest yaw/roll.
+    holder.rotation.set(Math.PI / 2, 0, 0);
     holder.scale.setScalar(0.5);
     holder.add(prop.group);
     return holder;
@@ -93,6 +132,9 @@ export class ViewModel {
     this.swingT = 0;
     this.swingAnim = anim;
     if (anim === 'slash') this.slashSide = -this.slashSide;
+    this.startQ.copy(this.sword.quaternion);
+    this.startPos.copy(this.sword.position);
+    this.swingWindup = Math.max(0.02, 0.25 * (1 - easeOut(this.charge)));
     this.charge = 0;
   }
 
@@ -117,33 +159,63 @@ export class ViewModel {
     this.gun.rotation.x = this.recoil * 0.25 - dip * 0.6;
     this.gun.rotation.z = dip * 0.5;
 
-    // Melee attack animation (~250 ms)
+    // Melee attack animation (~250 ms). Poses are built as quaternions: the holder gives tip = +Y,
+    // edge = -Z, so Ry is a roll about the blade, Rx tips it forward, and an outer Ry sweeps it
+    // around the vertical axis. Every swing starts from wherever the weapon currently is
+    // (`startQ`/`startPos`, e.g. the charged wind-up), never from the rest pose.
     if (this.swingT >= 0) {
       this.swingT += dt / 0.25;
       const p = Math.min(1, this.swingT);
-      const arc = Math.sin(p * Math.PI);
       if (this.swingAnim === 'slash') {
-        // Horizontal cut: sweeps across the view, side alternating each swing.
-        const sweep = Math.cos(p * Math.PI) * this.slashSide; // +side → -side
-        this.sword.rotation.set(REST_PITCH - arc * 0.5, 0.2 + sweep * 1.1, 0.15 - sweep * 0.9);
-        this.sword.position.set(sweep * 0.3, -arc * 0.05, -arc * 0.15);
+        // Horizontal cut: blade laid forward with its edge leading, swept wide across the view
+        // around the vertical axis (~170°); side alternates each swing.
+        const side = this.slashSide;
+        const sweep = -side * 1.5 * Math.cos(p * Math.PI); // outboard → across the centre → far side
+        const q = Q_A.setFromAxisAngle(Y_AXIS, sweep)
+          .multiply(Q_B.setFromAxisAngle(X_AXIS, -1.35))
+          .multiply(Q_C.setFromAxisAngle(Y_AXIS, side * Math.PI / 2));
+        const w = p < 0.2 ? easeOut(p / 0.2) : p > 0.75 ? 1 - easeIn((p - 0.75) / 0.25) : 1;
+        this.sword.quaternion.copy(p < 0.2 ? this.startQ : this.restQ).slerp(q, w);
+        const from = p < 0.2 ? this.startPos : REST_POS;
+        this.sword.position.lerpVectors(from, TMP_V.set(-0.28 + sweep * 0.12, 0.05, -0.2), w);
       } else {
-        this.sword.rotation.set(REST_PITCH - arc * 1.6, 0.2 - arc * 0.9, 0.15);
-        this.sword.position.set(-arc * 0.25, 0, -arc * 0.15);
+        // Overhead chop: wind up high over the shoulder (skipped when already charged), then bring
+        // the edge down hard through the centre and recover.
+        const wind = this.swingWindup;
+        const chopEnd = wind + 0.4;
+        if (p < wind) {
+          const t = easeOut(p / wind);
+          this.sword.quaternion.copy(this.startQ).slerp(WINDUP_Q, t);
+          this.sword.position.lerpVectors(this.startPos, WINDUP_POS, t);
+        } else if (p < chopEnd) {
+          const t = easeIn((p - wind) / 0.4);
+          if (t < 0.5) {
+            this.sword.quaternion.copy(WINDUP_Q).slerp(CHOP_MID_Q, t * 2);
+            this.sword.position.lerpVectors(WINDUP_POS, CHOP_MID_POS, t * 2);
+          } else {
+            this.sword.quaternion.copy(CHOP_MID_Q).slerp(CHOP_Q, t * 2 - 1);
+            this.sword.position.lerpVectors(CHOP_MID_POS, CHOP_POS, t * 2 - 1);
+          }
+        } else {
+          const t = easeOut((p - chopEnd) / (1 - chopEnd));
+          this.sword.quaternion.copy(CHOP_Q).slerp(this.restQ, t);
+          this.sword.position.lerpVectors(CHOP_POS, REST_POS, t);
+        }
       }
       if (p >= 1) this.swingT = -1;
     } else {
-      // Rest pose, wound back while charging.
-      const c = this.charge;
-      this.sword.rotation.set(REST_PITCH + c * 0.9, 0.2 + c * 0.5, 0.15 - c * 0.3);
-      this.sword.position.set(c * 0.12, c * 0.08, c * 0.1);
+      // Rest pose; while charging the weapon is drawn up into the overhead wind-up so the release
+      // continues straight into the chop.
+      const c = easeOut(this.charge);
+      this.sword.quaternion.copy(this.restQ).slerp(WINDUP_Q, c);
+      this.sword.position.lerpVectors(REST_POS, WINDUP_POS, c);
     }
 
     // Walk bob
     if (moving) this.bob += dt * 9;
     const bobAmt = moving ? 1 : 0;
-    this.group.position.x = 0.3 + Math.sin(this.bob) * 0.012 * bobAmt;
-    this.group.position.y = -0.26 + Math.abs(Math.cos(this.bob)) * 0.015 * bobAmt;
+    this.group.position.x = 0.34 + Math.sin(this.bob) * 0.012 * bobAmt;
+    this.group.position.y = -0.22 + Math.abs(Math.cos(this.bob)) * 0.015 * bobAmt;
   }
 
   dispose(): void {
