@@ -34,10 +34,10 @@ export const GUN_RELOAD_MS = 1500;
 /** Server accepts a post-reload shot slightly early to absorb network jitter. */
 export const GUN_RELOAD_SERVER_MIN_MS = 1400;
 export const SWORD_RANGE = 3;
-/** Light (LMB) swing cone half-angle; a light swing hits only the nearest target inside it. */
+/** Light (LMB tap) slash cone half-angle; a light slash hits only the nearest target inside it. */
 export const SWORD_HALF_ANGLE_DEG = 28;
 export const SWORD_HALF_ANGLE_COS = Math.cos((SWORD_HALF_ANGLE_DEG * Math.PI) / 180);
-/** Charged (RMB) swing cone half-angle: narrower, but sweeps every target inside it. */
+/** Heavy (RMB held, then released) overhead cone half-angle: narrower, but sweeps every target inside it. */
 export const SWORD_HEAVY_HALF_ANGLE_DEG = 20;
 export const SWORD_HEAVY_HALF_ANGLE_COS = Math.cos((SWORD_HEAVY_HALF_ANGLE_DEG * Math.PI) / 180);
 export const SWORD_COOLDOWN_MS = 500;
@@ -45,6 +45,8 @@ export const SWORD_SERVER_MIN_INTERVAL_MS = 450;
 
 // Match
 export const RESPAWN_MS = 3000;
+/** Respawn delay in training rooms (dummies and players alike): the range refills almost at once. */
+export const TRAINING_RESPAWN_MS = 1000;
 /** Damage immunity after every (re)spawn; ends early when the player attacks. */
 export const SPAWN_PROTECT_MS = 2000;
 export const MAX_PLAYERS = 8;
@@ -57,12 +59,12 @@ export const PLAYER_COLOR_COUNT = 8;
 
 // Health / damage
 export const MAX_HP = 100;
-/** Sword damage by swing type (light LMB tap vs. charged RMB hold) and hit location (head vs. anywhere else). */
+/** Sword damage by swing type (light LMB vs. heavy RMB hold) and hit location (head vs. anywhere else). */
 export const SWORD_DAMAGE = {
   normal: { head: 45, body: 30 },
   charged: { head: 100, body: 70 },
 } as const;
-/** Hold RMB with the sword at least this long before releasing for a charged swing. */
+/** Hold RMB with the sword at least this long before releasing for the heavy swing. */
 export const SWORD_CHARGE_MS = 800;
 /** Holding the sword this long releases the (charged) swing automatically; press again to charge anew. */
 export const SWORD_CHARGE_MAX_MS = 2000;

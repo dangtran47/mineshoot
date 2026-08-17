@@ -3,6 +3,8 @@ import type { AddressInfo } from 'node:net';
 import { Client } from 'colyseus.js';
 import type { Room } from 'colyseus.js';
 import {
+  ATTACK_HEAVY,
+  ATTACK_LIGHT,
   EYE_HEIGHT,
   GUN_MAG_SIZE,
   GUN_RELOAD_SERVER_MIN_MS,
@@ -15,7 +17,8 @@ import {
   WEAPON_GUN,
   WEAPON_SWORD,
 } from '@mineshoot/shared';
-import type { HitMsg, KillMsg, ShotMsg, SwungMsg } from '@mineshoot/shared';
+import type { HitMsg, KillMsg, PickupMsg, ShotMsg, SwungMsg } from '@mineshoot/shared';
+import { DROP_MAX_ACTIVE, MELEE_KATANA, MELEE_STATS, MELEE_SWORD, PLATEAU_MAX, PLATEAU_MIN } from '@mineshoot/shared';
 import { createApp } from '../src/app';
 import type { RoomListEntry } from '../src/app';
 
@@ -86,9 +89,11 @@ describe('arena room', () => {
     const shots: ShotMsg[] = [];
     const hits: HitMsg[] = [];
     const kills: KillMsg[] = [];
+    const swings: SwungMsg[] = [];
     alice.onMessage(MSG.shot, (m: ShotMsg) => shots.push(m));
     alice.onMessage(MSG.hit, (m: HitMsg) => hits.push(m));
     alice.onMessage(MSG.kill, (m: KillMsg) => kills.push(m));
+    alice.onMessage(MSG.swung, (m: SwungMsg) => swings.push(m));
 
     let bob: AnyRoom | null = null;
     try {
@@ -190,19 +195,19 @@ describe('arena room', () => {
       alice.send(MSG.pose, poseOf(alice, 32, 40, 0));
       bob.send(MSG.pose, poseOf(bob, 32, 42, 0, WEAPON_SWORD)); // 2 blocks behind Alice, facing -Z toward her
       await until(() => Math.abs(bobView().z - 42) < 0.01, 3000, 'bob repositioned');
-      // Claiming `charged` without having announced a charge is treated as a normal swing.
-      bob.send(MSG.swing, { ...poseOf(bob, 32, 42, 0), charged: true });
+      // Claiming the heavy without having announced a charge lands as a light slash.
+      bob.send(MSG.swing, { ...poseOf(bob, 32, 42, 0), attack: ATTACK_HEAVY });
       await until(() => hits.length === 1, 3000, 'sword hit');
-      expect(hits[0]).toMatchObject({ attackerId: bob.sessionId, victimId: alice.sessionId, part: 'head', damage: 45, charged: false });
+      expect(hits[0]).toMatchObject({ attackerId: bob.sessionId, victimId: alice.sessionId, part: 'head', damage: 45, attack: ATTACK_LIGHT });
       await until(() => me(alice).hp === 55, 3000, 'alice hp 55');
       expect(kills).toHaveLength(1);
 
-      // Charged swing: announce the charge, hold ≥ SWORD_CHARGE_MS, release aiming at the chest → 70 → kill.
+      // Heavy swing: announce the charge, hold ≥ SWORD_CHARGE_MS, release aiming at the chest → 70 → kill.
       bob.send(MSG.charge, me(bob).spawnEpoch);
       await sleep(SWORD_CHARGE_MS + 100);
-      bob.send(MSG.swing, { ...poseOf(bob, 32, 42, 0, WEAPON_SWORD, pitchToHeight(1.0, 2)), charged: true });
+      bob.send(MSG.swing, { ...poseOf(bob, 32, 42, 0, WEAPON_SWORD, pitchToHeight(1.0, 2)), attack: ATTACK_HEAVY });
       await until(() => kills.length === 2, 3000, 'sword kill');
-      expect(hits[1]).toMatchObject({ victimId: alice.sessionId, part: 'body', damage: 70, charged: true });
+      expect(hits[1]).toMatchObject({ victimId: alice.sessionId, part: 'body', damage: 70, attack: ATTACK_HEAVY });
       // Body hit, and Bob was last killed by Alice → revenge.
       expect(kills[1]).toMatchObject({
         killerId: bob.sessionId,
@@ -216,6 +221,23 @@ describe('arena room', () => {
       });
       await until(() => me(alice).deaths === 1 && me(bob!).kills === 1, 3000, 'counters');
       await until(() => me(alice).alive && me(alice).spawnEpoch === 2, 3000, 'alice respawned');
+
+      // Light swings repeat while LMB is held; the light's own recovery gates each one server-side.
+      alice.send(MSG.pose, poseOf(alice, 32, 40, 0));
+      bob.send(MSG.pose, poseOf(bob, 32, 42, 0, WEAPON_SWORD));
+      await until(() => Math.abs(bobView().z - 42) < 0.01, 3000, 'bob back behind alice');
+      await sleep(SWORD_SERVER_MIN_INTERVAL_MS);
+      const swungBefore = swings.length;
+      bob.send(MSG.swing, { ...poseOf(bob, 32, 42, 0, WEAPON_SWORD), attack: ATTACK_LIGHT });
+      bob.send(MSG.swing, { ...poseOf(bob, 32, 42, 0, WEAPON_SWORD), attack: ATTACK_LIGHT }); // too soon: dropped
+      await until(() => hits.length === 3, 3000, 'third hit');
+      await sleep(100);
+      expect(swings).toHaveLength(swungBefore + 1);
+      expect(hits[2]).toMatchObject({ victimId: alice.sessionId, part: 'head', damage: 45, attack: ATTACK_LIGHT, melee: MELEE_SWORD });
+      await sleep(SWORD_SERVER_MIN_INTERVAL_MS + 20);
+      bob.send(MSG.swing, { ...poseOf(bob, 32, 42, 0, WEAPON_SWORD), attack: ATTACK_LIGHT });
+      await until(() => hits.length === 4, 3000, 'fourth hit');
+      expect(swings).toHaveLength(swungBefore + 2);
 
       // ping/pong
       let pong = -1;
@@ -231,6 +253,99 @@ describe('arena room', () => {
     } finally {
       await bob?.leave();
       await alice.leave();
+    }
+  });
+
+  it('drops melee weapons mid-arena; walking over one arms you until you die', async () => {
+    const alice: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, {
+      nickname: 'Alice',
+      durationMin: 3,
+      testOverrides: { respawnMs: 200, spawnProtectMs: 0, dropIntervalMs: 100 },
+    });
+    const pickups: PickupMsg[] = [];
+    const hits: HitMsg[] = [];
+    const kills: KillMsg[] = [];
+    alice.onMessage(MSG.pickup, (m: PickupMsg) => pickups.push(m));
+    alice.onMessage(MSG.hit, (m: HitMsg) => hits.push(m));
+    alice.onMessage(MSG.kill, (m: KillMsg) => kills.push(m));
+    alice.onMessage(MSG.shot, () => {});
+    alice.onMessage(MSG.swung, () => {});
+    let bob: AnyRoom | null = null;
+    try {
+      await ready(alice);
+      expect(me(alice).melee).toBe(MELEE_SWORD);
+      // Drops appear on the central plateau and are capped.
+      await until(() => alice.state.drops.size >= 1, 3000, 'first drop');
+      await sleep(600);
+      expect(alice.state.drops.size).toBeLessThanOrEqual(DROP_MAX_ACTIVE);
+      let dropId = '';
+      let drop: any = null;
+      alice.state.drops.forEach((d: any, id: string) => {
+        if (!drop) {
+          drop = d;
+          dropId = id;
+        }
+      });
+      expect(drop.kind).not.toBe(MELEE_SWORD);
+      expect(drop.x).toBeGreaterThanOrEqual(PLATEAU_MIN);
+      expect(drop.x).toBeLessThanOrEqual(PLATEAU_MAX + 1);
+      expect(drop.z).toBeGreaterThanOrEqual(PLATEAU_MIN);
+      expect(drop.z).toBeLessThanOrEqual(PLATEAU_MAX + 1);
+      const kind = drop.kind as number;
+
+      // Walk onto it: picked up, gone from the state, everyone told.
+      alice.send(MSG.pose, { x: drop.x, y: drop.y, z: drop.z, yaw: 0, pitch: 0, epoch: me(alice).spawnEpoch, weapon: WEAPON_SWORD });
+      await until(() => pickups.length === 1, 3000, 'pickup broadcast');
+      expect(pickups[0]).toEqual({ playerId: alice.sessionId, melee: kind });
+      await until(() => me(alice).melee === kind, 3000, 'melee synced');
+      expect(alice.state.drops.has(dropId)).toBe(false);
+
+      // The new weapon's own damage table applies: Bob stands 2 blocks ahead in the sky, light swing to the head.
+      bob = await new Client(wsUrl).joinById(alice.roomId, { nickname: 'Bob' });
+      bob.onMessage(MSG.shot, () => {});
+      bob.onMessage(MSG.hit, () => {});
+      bob.onMessage(MSG.kill, () => {});
+      bob.onMessage(MSG.swung, () => {});
+      bob.onMessage(MSG.pickup, () => {});
+      await until(() => me(bob!) !== undefined && alice.state.players.has(bob!.sessionId), 3000, 'bob in state');
+      await ready(bob);
+      const bobView = (): any => alice.state.players.get(bob!.sessionId);
+      bob.send(MSG.pose, poseOf(bob, 32, 40, 0));
+      await until(() => Math.abs(bobView().x - 32) < 0.01 && Math.abs(bobView().y - SKY_Y) < 0.01, 3000, 'bob in the sky');
+      alice.send(MSG.pose, poseOf(alice, 32, 42, 0, WEAPON_SWORD));
+      await until(() => Math.abs(me(alice).z - 42) < 0.01, 3000, 'alice behind bob');
+      alice.send(MSG.swing, { ...poseOf(alice, 32, 42, 0, WEAPON_SWORD), attack: ATTACK_LIGHT });
+      await until(() => hits.length === 1, 3000, 'melee hit');
+      const expected = MELEE_STATS[kind as keyof typeof MELEE_STATS].attacks[ATTACK_LIGHT].damage.head;
+      expect(hits[0]).toMatchObject({ attackerId: alice.sessionId, victimId: bob.sessionId, part: 'head', damage: expected, attack: ATTACK_LIGHT, melee: kind });
+      // Kill messages carry the melee kind (Bob's gun kill reports the sword slot as MELEE_SWORD).
+      bob.send(MSG.pose, poseOf(bob, 32, 44, 0)); // turn around: 2 blocks behind Alice, facing -Z at her
+      await until(() => Math.abs(bobView().z - 44) < 0.01, 3000, 'bob repositioned');
+      bob.send(MSG.shoot, poseOf(bob, 32, 44, 0));
+      await until(() => kills.length === 1, 3000, 'alice killed');
+      expect(kills[0]).toMatchObject({ killerId: bob.sessionId, victimId: alice.sessionId, weapon: WEAPON_GUN, melee: MELEE_SWORD });
+      // Death loses the drop weapon.
+      await until(() => me(alice).alive && me(alice).spawnEpoch === 2, 3000, 'alice respawned');
+      expect(me(alice).melee).toBe(MELEE_SWORD);
+    } finally {
+      await bob?.leave();
+      await alice.leave();
+    }
+  }, 15000);
+
+  it('gun-only rooms never spawn drops', async () => {
+    const room: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, {
+      nickname: 'Solo',
+      durationMin: 3,
+      weapons: 'gun',
+      testOverrides: { dropIntervalMs: 50 },
+    });
+    try {
+      await ready(room);
+      await sleep(400);
+      expect(room.state.drops.size).toBe(0);
+    } finally {
+      await room.leave();
     }
   });
 
@@ -417,16 +532,24 @@ describe('arena room', () => {
       alice.send(MSG.pose, poseOf(alice, 32, 40, 0, WEAPON_SWORD));
       await until(() => me(alice).charging === true, 2000, 'charging flag');
       await sleep(SWORD_CHARGE_MS + 100);
-      alice.send(MSG.swing, { ...poseOf(alice, 32, 40, 0, WEAPON_SWORD), charged: true });
+      alice.send(MSG.swing, { ...poseOf(alice, 32, 40, 0, WEAPON_SWORD), attack: ATTACK_HEAVY });
       await until(() => swings.length === 1, 2000, 'swung broadcast');
-      expect(swings[0]).toEqual({ attackerId: alice.sessionId, charged: true });
+      expect(swings[0]).toEqual({ attackerId: alice.sessionId, attack: ATTACK_HEAVY, melee: MELEE_SWORD });
       await until(() => me(alice).charging === false, 2000, 'charging cleared');
 
-      // A light (uncharged) miss is broadcast too.
+      // A light miss is broadcast too.
       await sleep(SWORD_SERVER_MIN_INTERVAL_MS + 20);
-      alice.send(MSG.swing, { ...poseOf(alice, 32, 40, 0, WEAPON_SWORD), charged: false });
+      alice.send(MSG.swing, { ...poseOf(alice, 32, 40, 0, WEAPON_SWORD), attack: ATTACK_LIGHT });
       await until(() => swings.length === 2, 2000, 'second swung');
-      expect(swings[1]).toEqual({ attackerId: alice.sessionId, charged: false });
+      expect(swings[1]).toEqual({ attackerId: alice.sessionId, attack: ATTACK_LIGHT, melee: MELEE_SWORD });
+
+      // Letting go of LMB early cancels the charge without a swing.
+      alice.send(MSG.charge, me(alice).spawnEpoch);
+      await until(() => me(alice).charging === true, 2000, 'charging (to cancel)');
+      alice.send(MSG.chargeCancel, me(alice).spawnEpoch);
+      await until(() => me(alice).charging === false, 2000, 'charge cancelled');
+      await sleep(100);
+      expect(swings).toHaveLength(2);
 
       // Switching to the gun cancels a pending charge.
       alice.send(MSG.charge, me(alice).spawnEpoch);
@@ -485,7 +608,7 @@ describe('arena room', () => {
       // The sword still works.
       swordRoom.send(MSG.pose, poseOf(swordRoom, 32, 32, 0, WEAPON_SWORD));
       await until(() => Math.abs(me(swordRoom).z - 32) < 0.01, 3000, 'alice repositioned');
-      swordRoom.send(MSG.swing, { ...poseOf(swordRoom, 32, 32, 0, WEAPON_SWORD), charged: false });
+      swordRoom.send(MSG.swing, { ...poseOf(swordRoom, 32, 32, 0, WEAPON_SWORD), attack: ATTACK_LIGHT });
       await until(() => hits.length === 1, 3000, 'sword hit');
       expect(hits[0].victimId).toBe(bob.sessionId);
 
@@ -503,7 +626,9 @@ describe('arena room', () => {
       gunRoom.onMessage(MSG.kill, () => {});
       await ready(gunRoom);
       expect(gunRoom.state.weapons).toBe('gun');
-      gunRoom.send(MSG.swing, { ...poseOf(gunRoom, 32, 40, 0, WEAPON_SWORD), charged: false });
+      gunRoom.send(MSG.charge, me(gunRoom).spawnEpoch);
+      gunRoom.send(MSG.chargeCancel, me(gunRoom).spawnEpoch);
+      gunRoom.send(MSG.swing, { ...poseOf(gunRoom, 32, 40, 0, WEAPON_SWORD), attack: ATTACK_HEAVY });
       gunRoom.send(MSG.shoot, poseOf(gunRoom, 32, 40, 0));
       await until(() => gunShots.length === 1, 3000, 'gun shot');
       await sleep(100);
@@ -515,6 +640,96 @@ describe('arena room', () => {
       await swordRoom.leave();
     }
   });
+
+  it('training room: dummies stand on the plateau and never attack; melee is picked directly', async () => {
+    const alice: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, {
+      nickname: 'Alice',
+      durationMin: 3,
+      mode: 'training',
+      bots: 2,
+      testOverrides: { spawnProtectMs: 0 },
+    });
+    const hits: HitMsg[] = [];
+    const swings: SwungMsg[] = [];
+    const kills: KillMsg[] = [];
+    alice.onMessage(MSG.hit, (m: HitMsg) => hits.push(m));
+    alice.onMessage(MSG.swung, (m: SwungMsg) => swings.push(m));
+    alice.onMessage(MSG.kill, (m: KillMsg) => kills.push(m));
+    alice.onMessage(MSG.shot, () => {});
+    alice.onMessage(MSG.pickup, () => {});
+    let match: AnyRoom | null = null;
+    try {
+      await ready(alice);
+      expect(alice.state.mode).toBe('training');
+      const listed = ((await (await fetch(`${httpUrl}/rooms`)).json()) as RoomListEntry[]).find((r) => r.roomId === alice.roomId)!;
+      expect(listed.metadata.mode).toBe('training');
+      expect(listed.metadata.bots).toBe(2);
+
+      // Dummies: alive, parked on the central plateau, and they stay put.
+      const dummies = (): [string, any][] => {
+        const out: [string, any][] = [];
+        alice.state.players.forEach((p: any, id: string) => {
+          if (p.isBot) out.push([id, p]);
+        });
+        return out;
+      };
+      expect(dummies()).toHaveLength(2);
+      const before = dummies().map(([, p]) => ({ x: p.x, z: p.z }));
+      for (const { x, z } of before) {
+        expect(x).toBeGreaterThanOrEqual(PLATEAU_MIN);
+        expect(x).toBeLessThanOrEqual(PLATEAU_MAX + 1);
+        expect(z).toBeGreaterThanOrEqual(PLATEAU_MIN);
+        expect(z).toBeLessThanOrEqual(PLATEAU_MAX + 1);
+      }
+      await sleep(400);
+      dummies().forEach(([, p], i) => {
+        expect(p.alive).toBe(true);
+        expect(Math.hypot(p.x - before[i].x, p.z - before[i].z)).toBeLessThan(0.05);
+      });
+      expect(me(alice).hp).toBe(100);
+      expect(hits).toHaveLength(0);
+
+      // Pick the katana directly, then hit a dummy with it three times: it dies and is back within a second.
+      alice.send(MSG.selectMelee, { epoch: me(alice).spawnEpoch, melee: MELEE_KATANA });
+      await until(() => me(alice).melee === MELEE_KATANA, 3000, 'katana selected');
+      const [dummyId, dummy] = dummies()[0];
+      const stand = { x: dummy.x, y: dummy.y, z: dummy.z + 2 };
+      const swingAt = (): void =>
+        alice.send(MSG.swing, { x: stand.x, y: stand.y, z: stand.z, yaw: 0, pitch: 0, epoch: me(alice).spawnEpoch, attack: ATTACK_LIGHT });
+      alice.send(MSG.pose, { ...stand, yaw: 0, pitch: 0, epoch: me(alice).spawnEpoch, weapon: WEAPON_SWORD });
+      await until(() => Math.abs(me(alice).z - stand.z) < 0.01, 3000, 'alice next to dummy');
+      const light = MELEE_STATS[MELEE_KATANA].attacks[ATTACK_LIGHT];
+      for (let i = 0; i < 3; i++) {
+        swingAt();
+        await sleep(light.cooldownMs + 50);
+      }
+      await until(() => kills.length === 1, 3000, 'dummy killed');
+      expect(swings[0].melee).toBe(MELEE_KATANA);
+      expect(hits[0].victimId).toBe(dummyId);
+      expect(hits[0].melee).toBe(MELEE_KATANA);
+      expect(kills[0].victimId).toBe(dummyId);
+      expect(kills[0].melee).toBe(MELEE_KATANA);
+      const t0 = Date.now();
+      await until(() => alice.state.players.get(dummyId).alive === true, 3000, 'dummy respawned');
+      expect(Date.now() - t0).toBeLessThan(1500);
+
+      // A normal match ignores selectMelee: the sword stays until you find a drop.
+      match = await new Client(wsUrl).create(ROOM_NAME, { nickname: 'Carol', durationMin: 3 });
+      match.onMessage(MSG.shot, () => {});
+      match.onMessage(MSG.hit, () => {});
+      match.onMessage(MSG.kill, () => {});
+      match.onMessage(MSG.swung, () => {});
+      match.onMessage(MSG.pickup, () => {});
+      await ready(match);
+      expect(match.state.mode).toBe('match');
+      match.send(MSG.selectMelee, { epoch: me(match).spawnEpoch, melee: MELEE_KATANA });
+      await sleep(200);
+      expect(me(match).melee).toBe(MELEE_SWORD);
+    } finally {
+      await match?.leave();
+      await alice.leave();
+    }
+  }, 15000);
 
   it('ends the match, locks the room and disconnects everyone after the linger', async () => {
     const room: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, {

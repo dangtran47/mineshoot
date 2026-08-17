@@ -1,5 +1,5 @@
-import { GUN_MAG_SIZE, MAX_HP, WEAPON_GUN } from '@mineshoot/shared';
-import type { RankRow, Weapon, WeaponMode } from '@mineshoot/shared';
+import { ATTACK_HEAVY, GUN_MAG_SIZE, MAX_HP, MELEE_KINDS, MELEE_SWORD, WEAPON_GUN, meleeSelectable, meleeStats } from '@mineshoot/shared';
+import type { MeleeKind, RankRow, RoomMode, Weapon, WeaponMode } from '@mineshoot/shared';
 import { KillFeedModel, killFeedLine } from './killFeed';
 import type { FeedKind, KillLineInput } from './killFeed';
 import { awardBadges, iconSvg, weaponIcon } from './icons';
@@ -47,7 +47,10 @@ export class Hud {
   private readonly healthFill = el('div', 'fill');
   private readonly healthText = el('div', 'hp', String(MAX_HP));
   private readonly weaponName = el('div', 'name');
+  private readonly weaponLabel = el('div', 'label');
   private readonly weaponHint = el('div', 'hint');
+  private readonly toastEl = el('div', 'toast hidden');
+  private toastTimer = 0;
   private readonly ammo = el('div', 'ammo');
   private readonly shield = el('div', 'shield hidden', '🛡 Spawn protection');
   private readonly ping = el('div', 'ping');
@@ -72,14 +75,14 @@ export class Hud {
     const top = el('div', 'top');
     top.append(this.timer, this.roomName);
     const weapon = el('div', 'weapon');
-    weapon.append(this.weaponName, this.ammo, this.weaponHint);
+    weapon.append(this.weaponName, this.weaponLabel, this.ammo, this.weaponHint);
     const bar = el('div', 'bar');
     bar.append(this.healthFill);
     this.health.append(bar, this.healthText, this.dmgNumbers);
     this.charge.append(this.chargeFill);
 
     const title = el('h2', undefined, 'Click to play');
-    const help = el('p', undefined, 'WASD move · Space jump · Mouse aim · LMB attack · RMB charge sword · Tab scoreboard · Esc unlock');
+    const help = el('p', undefined, 'WASD move · Space jump · Mouse aim · LMB attack (hold to keep slashing) · hold RMB to charge the heavy melee blow · walk over a glowing weapon drop to take it · Tab scoreboard · Esc unlock');
     const leaveBtn = el('button', undefined, 'Leave match');
     leaveBtn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -101,6 +104,7 @@ export class Hud {
       this.ping,
       this.feedEl,
       this.announceEl,
+      this.toastEl,
       this.centerMsg,
       this.scoreboard,
       this.overlay,
@@ -112,14 +116,17 @@ export class Hud {
     this.setAmmo(GUN_MAG_SIZE, GUN_MAG_SIZE, false);
   }
 
-  /** Controls hint under the weapon name, tailored to what the room allows. */
-  setWeaponRules(mode: WeaponMode): void {
+  /** Controls hint under the weapon name, tailored to what the room allows (and to the training range's free melee choice). */
+  setWeaponRules(mode: WeaponMode, roomMode: RoomMode = 'match'): void {
+    const pick = meleeSelectable(roomMode, mode)
+      ? `3–7 pick melee: ${MELEE_KINDS.map((k) => meleeStats(k).name).join(' / ')}`
+      : 'grab weapon drops mid-arena';
     this.weaponHint.textContent =
       mode === 'gun'
         ? 'Gun only · R reload'
         : mode === 'sword'
-          ? 'Sword only · LMB slash · hold RMB to charge'
-          : '1 Gun · 2 Sword · wheel to switch · R reload · sword: LMB slash, hold RMB to charge';
+          ? `Melee only · LMB slash (hold to repeat) · hold RMB to charge · ${pick}`
+          : `1 Gun · 2 Melee · wheel to switch · R reload · melee: LMB slash (hold to repeat), hold RMB to charge · ${pick}`;
   }
 
   setRoomName(name: string): void {
@@ -150,10 +157,23 @@ export class Hud {
     this.charge.classList.toggle('ready', fraction >= 1);
   }
 
-  setWeapon(w: Weapon): void {
-    this.weaponName.innerHTML = weaponIcon(w);
-    this.weaponName.title = w === WEAPON_GUN ? 'Gun' : 'Sword';
+  /** Current slot (gun / melee) and the melee weapon in the melee slot; drop weapons get their name shown. */
+  setWeapon(w: Weapon, melee: MeleeKind = MELEE_SWORD): void {
+    this.weaponName.innerHTML = weaponIcon(w, melee);
+    const label = w === WEAPON_GUN ? 'Gun' : meleeStats(melee).name;
+    this.weaponName.title = label;
+    // Melee: name the charged (RMB) blow (drop weapons also show their own name).
+    const rmb = w === WEAPON_GUN ? '' : `RMB ${meleeStats(melee).attacks[ATTACK_HEAVY].name}`;
+    this.weaponLabel.textContent = w !== WEAPON_GUN && melee !== MELEE_SWORD ? `${label} · ${rmb}` : rmb;
+    this.weaponLabel.classList.toggle('special', w !== WEAPON_GUN && melee !== MELEE_SWORD);
     this.ammo.classList.toggle('hidden', w !== WEAPON_GUN);
+  }
+
+  /** Short bottom-centre notice ("Picked up Battle Axe"). */
+  toast(text: string, ms = 2200): void {
+    this.toastEl.textContent = text;
+    this.toastEl.classList.remove('hidden');
+    this.toastTimer = performance.now() + ms;
   }
 
   /** Magazine readout under the weapon name ("7 / 10", or "RELOADING…"). */
@@ -196,12 +216,12 @@ export class Hud {
     this.announceTimer = performance.now() + ANNOUNCE_MS;
   }
 
-  showDeath(killerName: string, weapon: Weapon, headshot = false, badges: AwardBadge[] = []): void {
+  showDeath(killerName: string, weapon: Weapon, headshot = false, badges: AwardBadge[] = [], melee: MeleeKind = MELEE_SWORD): void {
     const by = el('div', 'by');
     by.append(
       'Killed by ',
       el('b', undefined, killerName),
-      svgSpan('icons', weaponIcon(weapon) + (headshot ? iconSvg('headshot', 'red') : '')),
+      svgSpan('icons', weaponIcon(weapon, melee) + (headshot ? iconSvg('headshot', 'red') : '')),
     );
     const tags = el('div', 'tags');
     tags.append(...badges.map((b) => badgeEl(b)));
@@ -290,6 +310,10 @@ export class Hud {
       this.announceEl.classList.add('hidden');
       this.announceTimer = 0;
     }
+    if (this.toastTimer && now > this.toastTimer) {
+      this.toastEl.classList.add('hidden');
+      this.toastTimer = 0;
+    }
     if (this.feed.prune(now)) this.renderFeed();
   }
 
@@ -300,7 +324,7 @@ export class Hud {
         row.title = killFeedLine(e.line);
         row.append(
           el('span', 'name', e.line.killer),
-          svgSpan('icons', weaponIcon(e.line.weapon) + (e.line.headshot ? iconSvg('headshot', 'red') : '')),
+          svgSpan('icons', weaponIcon(e.line.weapon, e.line.melee ?? MELEE_SWORD) + (e.line.headshot ? iconSvg('headshot', 'red') : '')),
           el('span', 'name', e.line.victim),
           ...awardBadges(e.line).map((b) => badgeEl(b)),
         );

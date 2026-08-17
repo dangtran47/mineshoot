@@ -1,5 +1,5 @@
 import { MapSchema, Schema, type } from '@colyseus/schema';
-import { MAX_HP } from '@mineshoot/shared';
+import { MAX_HP, MELEE_SWORD } from '@mineshoot/shared';
 
 export class PlayerSchema extends Schema {
   @type('string') name = '';
@@ -15,6 +15,8 @@ export class PlayerSchema extends Schema {
   /** Bumped on every (re)spawn; the owning client teleports to x/y/z when it changes. */
   @type('uint16') spawnEpoch = 0;
   @type('uint8') weapon = 0;
+  /** Melee weapon in slot 2 (MeleeKind): the sword, or a picked-up drop. Reset on every spawn. */
+  @type('uint8') melee = MELEE_SWORD;
   @type('uint8') color = 0;
   @type('boolean') isBot = false;
   /** Spawn protection: cannot be targeted or damaged (ends after SPAWN_PROTECT_MS or on the first attack). */
@@ -25,6 +27,14 @@ export class PlayerSchema extends Schema {
   @type('boolean') reloading = false;
 }
 
+/** A melee weapon lying on the ground, waiting to be picked up. */
+export class DropSchema extends Schema {
+  @type('uint8') kind = MELEE_SWORD;
+  @type('float32') x = 0;
+  @type('float32') y = 0;
+  @type('float32') z = 0;
+}
+
 export class RoomState extends Schema {
   @type('string') phase = 'playing';
   @type('string') name = '';
@@ -32,7 +42,10 @@ export class RoomState extends Schema {
   @type('uint8') durationMin = 10;
   /** Allowed weapons: 'all' | 'gun' | 'sword'. */
   @type('string') weapons = 'all';
+  /** Room kind: 'match' | 'training' (practice range with passive dummies and free melee choice). */
+  @type('string') mode = 'match';
   /** Server-authoritative countdown, refreshed once per second. */
   @type('uint32') timeLeftMs = 0;
   @type({ map: PlayerSchema }) players = new MapSchema<PlayerSchema>();
+  @type({ map: DropSchema }) drops = new MapSchema<DropSchema>();
 }

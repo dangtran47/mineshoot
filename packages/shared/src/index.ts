@@ -11,6 +11,8 @@ export * from './collision';
 export * from './raycast';
 export * from './playerPhysics';
 export * from './gun';
+export * from './melee';
+export * from './drops';
 export * from './sword';
 export * from './spawn';
 export * from './ranking';

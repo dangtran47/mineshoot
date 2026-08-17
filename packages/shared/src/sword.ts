@@ -1,12 +1,14 @@
-import { PLAYER_HEIGHT, SWORD_DAMAGE, SWORD_HALF_ANGLE_COS, SWORD_HEAVY_HALF_ANGLE_COS, SWORD_RANGE } from './constants';
+import { PLAYER_HEIGHT } from './constants';
 import { eyePosition } from './gun';
 import { playerHitboxes } from './hitbox';
+import { ATTACK_LIGHT, MELEE_SWORD, attackSpec } from './melee';
+import type { AttackKind, MeleeKind } from './melee';
 import { flatForward, forwardVector } from './playerPhysics';
 import { raycastVoxels, segmentVsAABB } from './raycast';
 import type { PlayerPose, Vec3, World } from './types';
 import type { ShotTarget } from './gun';
 
-/** Where a sword swing lands: the head box, or anywhere else on the body. */
+/** Where a melee swing lands: the head box, or anywhere else on the body. */
 export type SwordPart = 'head' | 'body';
 
 export interface SwordHit {
@@ -14,25 +16,37 @@ export interface SwordHit {
   part: SwordPart;
 }
 
-export function swordDamage(part: SwordPart, charged: boolean): number {
-  return SWORD_DAMAGE[charged ? 'charged' : 'normal'][part];
+/** Damage of `attack` with `kind` (default: the plain sword) by part. */
+export function swordDamage(part: SwordPart, attack: AttackKind = ATTACK_LIGHT, kind: MeleeKind = MELEE_SWORD): number {
+  return attackSpec(kind, attack).damage[part];
 }
 
+const cosDeg = (deg: number): number => Math.cos((deg * Math.PI) / 180);
+
 /**
- * Targets within SWORD_RANGE of the attacker's eye, inside the forward cone
- * (measured in the horizontal plane, so looking up/down at a close target
- * never misses), and with an unobstructed line to the target's chest. A light swing
- * (`charged` false) uses the wider cone but hits only the nearest such
- * target; a charged swing uses the narrower heavy cone and sweeps every
- * target in it. A hit lands on the head only when the attacker's aim ray goes
- * through the head box; any other cone hit counts as body.
+ * Targets within the attack's range of the attacker's eye, inside its forward
+ * cone (measured in the horizontal plane, so looking up/down at a close target
+ * never misses), and with an unobstructed
+ * line to the target's chest. A sweeping attack hits everyone in the cone,
+ * otherwise only the nearest target. A hit lands on the head only when the
+ * attacker's aim ray goes through the head box; any other cone hit counts as
+ * body.
  */
-export function swordVictims(world: World, attacker: PlayerPose, targets: ShotTarget[], charged = false): SwordHit[] {
+export function swordVictims(
+  world: World,
+  attacker: PlayerPose,
+  targets: ShotTarget[],
+  attack: AttackKind = ATTACK_LIGHT,
+  kind: MeleeKind = MELEE_SWORD,
+): SwordHit[] {
+  const spec = attackSpec(kind, attack);
+  const range = spec.range;
   const eye = eyePosition(attacker);
   const dir = forwardVector(attacker.yaw, attacker.pitch);
   const flat = flatForward(attacker.yaw);
-  const reach: Vec3 = { x: eye.x + dir.x * SWORD_RANGE, y: eye.y + dir.y * SWORD_RANGE, z: eye.z + dir.z * SWORD_RANGE };
-  const minCos = charged ? SWORD_HEAVY_HALF_ANGLE_COS : SWORD_HALF_ANGLE_COS;
+  const reach: Vec3 = { x: eye.x + dir.x * range, y: eye.y + dir.y * range, z: eye.z + dir.z * range };
+  const minCos = cosDeg(spec.halfAngleDeg);
+  const sweep = spec.sweep;
   const out: SwordHit[] = [];
   let nearest: SwordHit | null = null;
   let nearestDist = Infinity;
@@ -42,7 +56,7 @@ export function swordVictims(world: World, attacker: PlayerPose, targets: ShotTa
     const dy = chest.y - eye.y;
     const dz = chest.z - eye.z;
     const dist = Math.hypot(dx, dy, dz);
-    if (dist > SWORD_RANGE) continue;
+    if (dist > range) continue;
     const horiz = Math.hypot(dx, dz);
     if (horiz > 1e-6 && (dx * flat.x + dz * flat.z) / horiz < minCos) continue;
     if (dist > 1e-6) {
@@ -50,13 +64,13 @@ export function swordVictims(world: World, attacker: PlayerPose, targets: ShotTa
       if (los.hit) continue;
     }
     const hit: SwordHit = { id: target.id, part: aimedPart(eye, reach, target.pose) };
-    if (charged) out.push(hit);
+    if (sweep) out.push(hit);
     else if (dist < nearestDist) {
       nearestDist = dist;
       nearest = hit;
     }
   }
-  return charged ? out : nearest ? [nearest] : [];
+  return sweep ? out : nearest ? [nearest] : [];
 }
 
 /** 'head' if the aim segment first enters the head box, else 'body'. */

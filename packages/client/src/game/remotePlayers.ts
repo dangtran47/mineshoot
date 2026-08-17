@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { INTERP_DELAY_MS } from '@mineshoot/shared';
-import type { Vec3, Weapon } from '@mineshoot/shared';
+import { ATTACK_HEAVY, INTERP_DELAY_MS, attackSpec } from '@mineshoot/shared';
+import type { AttackKind, MeleeKind, Vec3, Weapon } from '@mineshoot/shared';
 import { displayName } from '../net';
 import type { NetPlayer } from '../net';
 import { Humanoid } from '../render/humanoid';
@@ -13,6 +13,7 @@ interface Remote {
   buffer: SnapshotBuffer;
   lastEpoch: number;
   weapon: Weapon;
+  melee: MeleeKind;
   visible: boolean;
   charging: boolean;
   reloading: boolean;
@@ -34,6 +35,7 @@ export class RemotePlayers {
     buffer.push({ t: performance.now(), x: p.x, y: p.y, z: p.z, yaw: p.yaw, pitch: p.pitch });
     humanoid.setPose(p.x, p.y, p.z, p.yaw, p.pitch, 0);
     humanoid.setWeapon(p.weapon as Weapon);
+    humanoid.setMelee(p.melee as MeleeKind);
     humanoid.setCharging(p.charging, performance.now());
     humanoid.setReloading(p.reloading);
     this.remotes.set(id, {
@@ -42,6 +44,7 @@ export class RemotePlayers {
       buffer,
       lastEpoch: p.spawnEpoch,
       weapon: p.weapon as Weapon,
+      melee: p.melee as MeleeKind,
       visible: p.alive,
       charging: p.charging,
       reloading: p.reloading,
@@ -72,6 +75,10 @@ export class RemotePlayers {
       r.weapon = p.weapon as Weapon;
       r.humanoid.setWeapon(r.weapon);
     }
+    if (p.melee !== r.melee) {
+      r.melee = p.melee as MeleeKind;
+      r.humanoid.setMelee(r.melee);
+    }
     if (p.alive !== r.visible) {
       r.visible = p.alive;
       r.humanoid.group.visible = p.alive;
@@ -86,8 +93,9 @@ export class RemotePlayers {
     }
   }
 
-  swing(id: string, charged: boolean, now: number): void {
-    this.remotes.get(id)?.humanoid.swing(now, charged);
+  /** A remote player attacked with `melee`: play the attack's animation. */
+  swing(id: string, attack: AttackKind, melee: MeleeKind, now: number): void {
+    this.remotes.get(id)?.humanoid.swing(now, attackSpec(melee, attack).anim, attack === ATTACK_HEAVY);
   }
 
   shot(id: string, now: number): void {

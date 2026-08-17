@@ -42,28 +42,28 @@ describe('HumanoidAnim', () => {
     expect(a.pose(5000).swordGlow).toBe(0);
   });
 
-  it('sweeps the arm forward over SWING_MS then returns to idle', () => {
+  it('overhead: sweeps the arm forward over SWING_MS then returns to idle', () => {
     const a = new HumanoidAnim();
     a.setWeapon(WEAPON_SWORD);
-    a.swing(2000, false);
+    a.swing(2000, 'overhead', false);
     const p0 = a.pose(2000);
     const p1 = a.pose(2000 + SWING_MS / 2);
     const p2 = a.pose(2000 + SWING_MS - 1);
-    // Starts wound back, ends swept forward-down (pitch increases monotonically).
-    expect(p0.armPitch).toBeLessThan(p1.armPitch);
-    expect(p1.armPitch).toBeLessThan(p2.armPitch);
-    expect(p2.armPitch).toBeGreaterThan(SWORD_IDLE_PITCH);
+    // Starts wound back, ends swept forward-down (pitch decreases monotonically).
+    expect(p0.armPitch).toBeGreaterThan(p1.armPitch);
+    expect(p1.armPitch).toBeGreaterThan(p2.armPitch);
+    expect(p2.armPitch).toBeLessThan(SWORD_IDLE_PITCH);
     expect(a.pose(2000 + SWING_MS + 1).armPitch).toBe(SWORD_IDLE_PITCH);
   });
 
-  it('gives a charged swing a wider arc than a light one', () => {
+  it('overhead: gives a heavy swing a wider arc than a light one', () => {
     const light = new HumanoidAnim();
     light.setWeapon(WEAPON_SWORD);
-    light.swing(0, false);
+    light.swing(0, 'overhead', false);
     const heavy = new HumanoidAnim();
     heavy.setWeapon(WEAPON_SWORD);
-    heavy.swing(0, true);
-    const arc = (a: HumanoidAnim): number => a.pose(SWING_MS - 1).armPitch - a.pose(0).armPitch;
+    heavy.swing(0, 'overhead', true);
+    const arc = (a: HumanoidAnim): number => a.pose(0).armPitch - a.pose(SWING_MS - 1).armPitch;
     expect(arc(heavy)).toBeGreaterThan(arc(light));
     expect(heavy.pose(0).swordGlow).toBe(1);
     expect(light.pose(0).swordGlow).toBe(0);
@@ -73,9 +73,28 @@ describe('HumanoidAnim', () => {
     const a = new HumanoidAnim();
     a.setWeapon(WEAPON_SWORD);
     a.setCharging(true, 0);
-    a.swing(SWORD_CHARGE_MS, true);
+    a.swing(SWORD_CHARGE_MS, 'overhead', true);
     const during = a.pose(SWORD_CHARGE_MS + SWING_MS - 1);
-    expect(during.armPitch).toBeGreaterThan(CHARGE_PITCH + 0.5);
+    expect(during.armPitch).toBeLessThan(CHARGE_PITCH - 0.5);
+  });
+
+  it('slash: rolls the arm sideways, alternating direction on consecutive slashes, then rests', () => {
+    const a = new HumanoidAnim();
+    a.setWeapon(WEAPON_SWORD);
+    expect(a.pose(0).armRoll).toBe(0);
+    a.swing(1000, 'slash', false);
+    const first = a.pose(1000);
+    const mid = a.pose(1000 + SWING_MS / 2);
+    expect(Math.abs(first.armRoll)).toBeGreaterThan(0.3);
+    expect(Math.sign(first.armRoll)).not.toBe(Math.sign(a.pose(1000 + SWING_MS - 1).armRoll)); // sweeps across
+    expect(Math.abs(mid.armRoll)).toBeLessThan(Math.abs(first.armRoll));
+    expect(a.pose(1000 + SWING_MS + 1).armRoll).toBe(0);
+    expect(a.pose(1000 + SWING_MS + 1).armPitch).toBe(SWORD_IDLE_PITCH);
+    a.swing(2000, 'slash', false);
+    expect(Math.sign(a.pose(2000).armRoll)).toBe(-Math.sign(first.armRoll));
+    a.swing(3000, 'slash', true); // a heavy slash starts glowing
+    expect(a.pose(3000).swordGlow).toBe(1);
+    expect(Math.sign(a.pose(3000).armRoll)).toBe(Math.sign(first.armRoll));
   });
 
   it('kicks the gun and flashes the muzzle briefly after a shot', () => {
@@ -98,7 +117,7 @@ describe('HumanoidAnim', () => {
     a.setReloading(true);
     const p0 = a.pose(0);
     const p1 = a.pose(120);
-    expect(RELOAD_PITCH).toBeGreaterThan(GUN_IDLE_PITCH); // arm hangs lower than the aiming pose
+    expect(RELOAD_PITCH).toBeLessThan(GUN_IDLE_PITCH); // arm hangs lower than the aiming pose
     expect(Math.abs(p0.armPitch - RELOAD_PITCH)).toBeLessThan(0.3);
     expect(p0.armPitch).not.toBe(p1.armPitch);
     a.setReloading(false);

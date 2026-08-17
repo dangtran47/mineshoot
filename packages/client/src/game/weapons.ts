@@ -1,31 +1,55 @@
-import { GUN_COOLDOWN_MS, GUN_MAG_SIZE, GUN_RELOAD_MS, SWORD_CHARGE_MAX_MS, SWORD_CHARGE_MS, SWORD_COOLDOWN_MS, WEAPON_GUN, WEAPON_SWORD } from '@mineshoot/shared';
-import type { Weapon } from '@mineshoot/shared';
+import {
+  ATTACK_HEAVY,
+  ATTACK_LIGHT,
+  GUN_COOLDOWN_MS,
+  GUN_MAG_SIZE,
+  GUN_RELOAD_MS,
+  MELEE_SWORD,
+  WEAPON_GUN,
+  WEAPON_SWORD,
+  attackSpec,
+  meleeChargeMaxMs,
+  meleeStats,
+} from '@mineshoot/shared';
+import type { AttackKind, MeleeKind, MeleeStats, Weapon } from '@mineshoot/shared';
 
 export interface WeaponEvents {
   onFire(): void;
-  /** Sword RMB pressed: a charge begins (release swings). */
+  /** RMB pressed with melee: a charge begins (release = heavy). */
   onChargeStart(): void;
-  onSwing(charged: boolean): void;
+  /** RMB was let go (or the charge dropped) before the heavy was ready: no swing. Only after onChargeStart. */
+  onChargeCancel(): void;
+  onSwing(attack: AttackKind): void;
   onSwitch(w: Weapon): void;
   /** Gun reload started (finishes GUN_RELOAD_MS later unless cancelled by a weapon switch). */
   onReload(): void;
+  /** The melee slot now holds a different weapon (picked up a drop / lost it on death). */
+  onMeleeChange(kind: MeleeKind): void;
 }
 
 /**
  * Local weapon state: selection, cooldowns, ammo, mouse handling. The gun
  * fires on LMB press and auto-repeats while held, spending one round per shot
- * from a GUN_MAG_SIZE magazine (unlimited reloads). The sword swings light on
- * LMB press; RMB charges while held and swings on release (charged if held for
- * SWORD_CHARGE_MS, light otherwise). Holding RMB past SWORD_CHARGE_MAX_MS
- * releases the swing by itself; RMB must then be pressed again to charge anew.
+ * from a GUN_MAG_SIZE magazine (unlimited reloads). Melee: LMB swings light on
+ * press and keeps swinging every cooldown while held (the animation alternates
+ * left/right); RMB charges while held and releases the heavy after chargeMs —
+ * an earlier release cancels, holding past the grace window releases the heavy
+ * by itself and RMB must be pressed again to charge anew. LMB is ignored while
+ * charging. Every attack's own recovery (cooldownMs) gates the next one.
+ * Timings come from the melee weapon currently in the slot (sword by default,
+ * or a picked-up drop: see setMelee).
  */
 export class Weapons {
   current: Weapon;
   /** Rounds left in the gun magazine. */
   ammo = GUN_MAG_SIZE;
+  /** Melee weapon in slot 2. */
+  melee: MeleeKind = MELEE_SWORD;
+  private stats: MeleeStats = meleeStats(MELEE_SWORD);
   private readonly allowed: readonly Weapon[];
   private lastFireAt = -Infinity;
   private lastSwingAt = -Infinity;
+  private lastAttack: AttackKind = ATTACK_LIGHT;
   private holding = false;
   private chargeStartAt: number | null = null;
   private reloadStartAt: number | null = null;
@@ -56,39 +80,49 @@ export class Weapons {
     this.select(this.current === WEAPON_GUN ? WEAPON_SWORD : WEAPON_GUN);
   }
 
-  /** Primary button (LMB): gun fires, sword swings light (unless a charge is in progress). */
+  /** Put a different melee weapon in slot 2 (server-driven: pickup or respawn). Drops any held charge. */
+  setMelee(kind: MeleeKind): void {
+    if (kind === this.melee) return;
+    this.melee = kind;
+    this.stats = meleeStats(kind);
+    this.dropCharge();
+    this.events.onMeleeChange(kind);
+  }
+
+  /** Walk-speed multiplier to apply while charging the current melee weapon. */
+  get chargeSpeedScale(): number {
+    return this.stats.chargeSpeedScale;
+  }
+
+  /** Primary button (LMB): gun fires; melee swings light (repeats while held, see update). Ignored while charging. */
   mouseDown(now: number): void {
     this.holding = true;
-    if (this.current === WEAPON_GUN) {
-      this.tryFire(now);
-    } else if (this.chargeStartAt === null && this.swordReady(now)) {
-      this.lastSwingAt = now;
-      this.events.onSwing(false);
-    }
+    if (this.current === WEAPON_GUN) this.tryFire(now);
+    else this.tryLight(now);
   }
 
   mouseUp(_now: number = performance.now()): void {
     this.holding = false;
   }
 
-  /** Secondary button (RMB): starts a sword charge; nothing with the gun. */
+  /** Secondary button (RMB): starts a melee charge (release = heavy); nothing with the gun or while already charging. */
   altDown(now: number): void {
-    if (this.current !== WEAPON_SWORD || this.chargeStartAt !== null || !this.swordReady(now)) return;
+    if (this.current !== WEAPON_SWORD || this.chargeStartAt !== null) return;
     this.chargeStartAt = now;
     this.events.onChargeStart();
   }
 
   altUp(now: number = performance.now()): void {
-    if (this.chargeStartAt !== null) this.swing(now);
+    if (this.chargeStartAt !== null) this.release(now);
   }
 
   /** Drop any held state without attacking (pointer unlock, death, weapon switch). */
   cancel(): void {
     this.holding = false;
-    this.chargeStartAt = null;
+    this.dropCharge();
   }
 
-  /** True while a sword charge is held (used to slow movement). */
+  /** True while a melee charge is held (used to slow movement). */
   get charging(): boolean {
     return this.chargeStartAt !== null;
   }
@@ -106,14 +140,17 @@ export class Weapons {
     this.reloadStartAt = null;
   }
 
-  /** Finish a due reload; auto-repeat while the gun button is held; auto-release an over-held sword charge. */
+  /** Finish a due reload; auto-repeat while LMB is held (gun shots / light swings); auto-release an over-held charge. */
   update(now: number): void {
     if (this.reloadStartAt !== null && now - this.reloadStartAt >= GUN_RELOAD_MS) {
       this.reloadStartAt = null;
       this.ammo = GUN_MAG_SIZE;
     }
-    if (this.holding && this.current === WEAPON_GUN) this.tryFire(now);
-    if (this.chargeStartAt !== null && now - this.chargeStartAt >= SWORD_CHARGE_MAX_MS) this.swing(now);
+    if (this.holding) {
+      if (this.current === WEAPON_GUN) this.tryFire(now);
+      else this.tryLight(now);
+    }
+    if (this.chargeStartAt !== null && now - this.chargeStartAt >= meleeChargeMaxMs(this.melee)) this.release(now);
   }
 
   /** 0..1 while the gun is reloading, null otherwise. */
@@ -122,28 +159,47 @@ export class Weapons {
     return Math.min(1, (now - this.reloadStartAt) / GUN_RELOAD_MS);
   }
 
-  /** 0..1 while a sword charge is held (1 = charged), null otherwise. */
+  /** 0..1 while a melee charge is held (1 = charged), null otherwise. */
   chargeFraction(now: number): number | null {
     if (this.chargeStartAt === null) return null;
-    return Math.min(1, (now - this.chargeStartAt) / SWORD_CHARGE_MS);
+    return Math.min(1, (now - this.chargeStartAt) / this.stats.chargeMs);
   }
 
   cooldownFraction(now: number): number {
-    const cd = this.current === WEAPON_GUN ? GUN_COOLDOWN_MS : SWORD_COOLDOWN_MS;
+    const cd = this.current === WEAPON_GUN ? GUN_COOLDOWN_MS : attackSpec(this.melee, this.lastAttack).cooldownMs;
     const last = this.current === WEAPON_GUN ? this.lastFireAt : this.lastSwingAt;
     return Math.min(1, (now - last) / cd);
   }
 
-  private swordReady(now: number): boolean {
-    return now - this.lastSwingAt >= SWORD_COOLDOWN_MS;
+  /** The previous melee attack's recovery is over. */
+  private ready(now: number): boolean {
+    return now - this.lastSwingAt >= attackSpec(this.melee, this.lastAttack).cooldownMs;
   }
 
-  /** Release the current charge as a swing (charged if held long enough). */
-  private swing(now: number): void {
-    const charged = now - this.chargeStartAt! >= SWORD_CHARGE_MS;
-    this.chargeStartAt = null;
+  /** Light swing if recovered and not charging. */
+  private tryLight(now: number): void {
+    if (this.chargeStartAt === null && this.ready(now)) this.swing(now, ATTACK_LIGHT);
+  }
+
+  private swing(now: number, attack: AttackKind): void {
     this.lastSwingAt = now;
-    this.events.onSwing(charged);
+    this.lastAttack = attack;
+    this.events.onSwing(attack);
+  }
+
+  /** Let go of a charge: the heavy if held long enough (and recovered), otherwise a cancel. */
+  private release(now: number): void {
+    const charged = now - this.chargeStartAt! >= this.stats.chargeMs;
+    this.chargeStartAt = null;
+    if (charged && this.ready(now)) this.swing(now, ATTACK_HEAVY);
+    else this.events.onChargeCancel();
+  }
+
+  /** Forget a charge without swinging; the server is told if it had been announced. */
+  private dropCharge(): void {
+    if (this.chargeStartAt === null) return;
+    this.chargeStartAt = null;
+    this.events.onChargeCancel();
   }
 
   private tryFire(now: number): void {

@@ -1,11 +1,22 @@
 import { Room } from 'colyseus';
 import type { Client } from 'colyseus';
 import {
+  ATTACK_HEAVY,
+  ATTACK_LIGHT,
   ENDED_LINGER_MS,
   PHYSICS_DT,
   SERVER_TICK_MS,
+  DROP_INTERVAL_MAX_MS,
+  DROP_INTERVAL_MIN_MS,
+  DROP_LIFETIME_MS,
+  DROP_MAX_ACTIVE,
+  MELEE_SWORD,
+  canPickUp,
   createBot,
   createPhysState,
+  meleeStats,
+  pickDropKind,
+  pickDropSpot,
   stepPlayer,
   GUN_MAG_SIZE,
   KillTracker,
@@ -19,28 +30,32 @@ import {
   PLAYER_COLOR_COUNT,
   RESPAWN_MS,
   SPAWN_PROTECT_MS,
-  SWORD_CHARGE_MS,
-  SWORD_SERVER_MIN_INTERVAL_MS,
+  TRAINING_RESPAWN_MS,
   WEAPON_GUN,
   WEAPON_SWORD,
+  attackSpec,
   createRng,
   defaultWeapon,
   generateWorld,
   hashSeed,
+  meleeSelectable,
   pickSpawn,
   resolveShot,
   swordDamage,
   swordVictims,
   weaponAllowed,
 } from '@mineshoot/shared';
-import type { Bot, BotView, HitMsg, KillMsg, PlayerPhysState, PlayerPose, ShotMsg, ShotTarget, SpawnPoint, SwungMsg, Weapon, WeaponMode, World } from '@mineshoot/shared';
-import { PlayerSchema, RoomState } from './schema';
+import type { AttackKind, Bot, BotView, HitMsg, KillMsg, MeleeKind, PickupMsg, PlayerPhysState, PlayerPose, RoomMode, ShotMsg, ShotTarget, SpawnPoint, SwungMsg, Weapon, WeaponMode, World } from '@mineshoot/shared';
+import { DropSchema, PlayerSchema, RoomState } from './schema';
 import {
   parseBotCount,
   parseCharge,
+  parseChargeCancel,
   parseDurationMin,
   parsePose,
   parseReload,
+  parseRoomMode,
+  parseSelectMelee,
   parseShoot,
   parseSwing,
   parseWeaponMode,
@@ -57,7 +72,9 @@ interface PlayerMeta {
   protectedUntil: number;
   lastShotAt: number;
   lastSwingAt: number;
-  /** When the player started holding the sword button (0 = not charging). */
+  /** Which melee attack was swung last: its recovery gates the next swing. */
+  lastAttack: AttackKind;
+  /** When the player started holding the melee charge (0 = not charging). */
   chargeStartAt: number;
   /** Rounds left in the gun magazine. */
   ammo: number;
@@ -71,6 +88,7 @@ const freshMeta = (ready: boolean): PlayerMeta => ({
   protectedUntil: 0,
   lastShotAt: 0,
   lastSwingAt: 0,
+  lastAttack: ATTACK_LIGHT,
   chargeStartAt: 0,
   ammo: GUN_MAG_SIZE,
   reloadDoneAt: 0,
@@ -82,6 +100,9 @@ interface TestOverrides {
   respawnMs?: number;
   lingerMs?: number;
   spawnProtectMs?: number;
+  /** Fixed interval between weapon drops (replaces the random DROP_INTERVAL range). */
+  dropIntervalMs?: number;
+  dropLifetimeMs?: number;
 }
 
 /** Server-side bot runtime: brain + simulated body. */
@@ -95,6 +116,7 @@ interface CreateOptionsRaw {
   durationMin?: unknown;
   bots?: unknown;
   weapons?: unknown;
+  mode?: unknown;
   nickname?: unknown;
   testOverrides?: TestOverrides;
 }
@@ -110,6 +132,14 @@ export class ArenaRoom extends Room<RoomState> {
   private spawnProtectMs = SPAWN_PROTECT_MS;
   private lingerMs = ENDED_LINGER_MS;
   private weaponMode: WeaponMode = 'all';
+  private mode: RoomMode = 'match';
+  private dropIntervalMin = DROP_INTERVAL_MIN_MS;
+  private dropIntervalMax = DROP_INTERVAL_MAX_MS;
+  private dropLifetimeMs = DROP_LIFETIME_MS;
+  private nextDropAt = 0;
+  private dropSeq = 0;
+  /** When each drop on the ground expires (server-only). */
+  private readonly dropExpiry = new Map<string, number>();
   private readonly meta = new Map<string, PlayerMeta>();
   private readonly bots = new Map<string, BotRuntime>();
   private readonly killTracker = new KillTracker();
@@ -121,6 +151,9 @@ export class ArenaRoom extends Room<RoomState> {
     this.state.durationMin = parseDurationMin(options.durationMin);
     this.weaponMode = parseWeaponMode(options.weapons);
     this.state.weapons = this.weaponMode;
+    this.mode = parseRoomMode(options.mode);
+    this.state.mode = this.mode;
+    if (this.mode === 'training') this.respawnMs = TRAINING_RESPAWN_MS;
     const botCount = parseBotCount(options.bots);
     // Bots occupy player slots: humans + bots never exceed MAX_PLAYERS.
     this.maxClients = MAX_PLAYERS - botCount;
@@ -131,6 +164,8 @@ export class ArenaRoom extends Room<RoomState> {
       if (typeof t.respawnMs === 'number') this.respawnMs = t.respawnMs;
       if (typeof t.lingerMs === 'number') this.lingerMs = t.lingerMs;
       if (typeof t.spawnProtectMs === 'number') this.spawnProtectMs = t.spawnProtectMs;
+      if (typeof t.dropIntervalMs === 'number') this.dropIntervalMin = this.dropIntervalMax = t.dropIntervalMs;
+      if (typeof t.dropLifetimeMs === 'number') this.dropLifetimeMs = t.dropLifetimeMs;
     }
 
     const seed = hashSeed(`${this.roomId}:${Date.now()}`);
@@ -142,20 +177,24 @@ export class ArenaRoom extends Room<RoomState> {
 
     this.endsAt = Date.now() + durationMs;
     this.state.timeLeftMs = durationMs;
+    this.scheduleDrop(Date.now());
     this.setMetadata({
       name: this.state.name,
       durationMin: this.state.durationMin,
       endsAt: this.endsAt,
       bots: botCount,
       weapons: this.weaponMode,
+      mode: this.mode,
     });
 
     this.onMessage(MSG.pose, (client, raw: unknown) => this.handlePose(client, raw));
     this.onMessage(MSG.shoot, (client, raw: unknown) => this.handleShoot(client, raw));
     this.onMessage(MSG.swing, (client, raw: unknown) => this.handleSwing(client, raw));
     this.onMessage(MSG.charge, (client, raw: unknown) => this.handleCharge(client, raw));
+    this.onMessage(MSG.chargeCancel, (client, raw: unknown) => this.handleChargeCancel(client, raw));
     this.onMessage(MSG.reload, (client, raw: unknown) => this.handleReload(client, raw));
     this.onMessage(MSG.ready, (client) => this.handleReady(client));
+    this.onMessage(MSG.selectMelee, (client, raw: unknown) => this.handleSelectMelee(client, raw));
     this.onMessage(MSG.ping, (client, t: unknown) => {
       if (typeof t === 'number') client.send(MSG.pong, t);
     });
@@ -176,7 +215,7 @@ export class ArenaRoom extends Room<RoomState> {
     this.state.players.set(id, p);
     this.meta.set(id, freshMeta(true));
     this.bots.set(id, {
-      brain: createBot(createRng(this.state.seed + n * 7919), this.spawnPoints, { weapons: this.weaponMode }),
+      brain: createBot(createRng(this.state.seed + n * 7919), this.spawnPoints, { weapons: this.weaponMode, passive: this.mode === 'training' }),
       phys: createPhysState(0, 0, 0),
     });
     this.spawn(id, p);
@@ -210,7 +249,7 @@ export class ArenaRoom extends Room<RoomState> {
       this.applyPose(p, phys);
       if (p.weapon !== d.weapon) p.weapon = d.weapon;
       if (d.shoot) this.attackShoot(id, p, phys, now);
-      if (d.swing) this.attackSwing(id, p, phys, now, false);
+      if (d.swing) this.attackSwing(id, p, phys, now, ATTACK_LIGHT);
     }
   }
 
@@ -383,7 +422,7 @@ export class ArenaRoom extends Room<RoomState> {
     if (result.hitPlayerId) this.damage(id, result.hitPlayerId, result.damage, WEAPON_GUN, result.part === 'head');
   }
 
-  /** Player started holding the sword button: remember when, so a later swing can be verified as charged. */
+  /** Player started holding the melee charge: remember when, so a later heavy swing can be verified. */
   private handleCharge(client: Client, raw: unknown): void {
     if (!weaponAllowed(this.weaponMode, WEAPON_SWORD)) return;
     const epoch = parseCharge(raw);
@@ -396,6 +435,30 @@ export class ArenaRoom extends Room<RoomState> {
     this.syncFlags(client.sessionId, p, now);
   }
 
+  /** Player let go before the heavy was ready: no swing, just stop showing the wind-up. */
+  private handleChargeCancel(client: Client, raw: unknown): void {
+    if (!weaponAllowed(this.weaponMode, WEAPON_SWORD)) return;
+    const epoch = parseChargeCancel(raw);
+    if (epoch === null) return;
+    const p = this.actor(client, epoch);
+    if (!p) return;
+    this.meta.get(client.sessionId)!.chargeStartAt = 0;
+    this.syncFlags(client.sessionId, p, Date.now());
+  }
+
+  /** Training range: swap the melee slot on request (a match makes you find a drop instead). */
+  private handleSelectMelee(client: Client, raw: unknown): void {
+    if (!meleeSelectable(this.mode, this.weaponMode)) return;
+    const m = parseSelectMelee(raw);
+    if (!m) return;
+    const p = this.actor(client, m.epoch);
+    if (!p || p.melee === m.melee) return;
+    p.melee = m.melee;
+    // A new weapon has its own charge timing: forget any wind-up in progress.
+    this.meta.get(client.sessionId)!.chargeStartAt = 0;
+    this.syncFlags(client.sessionId, p, Date.now());
+  }
+
   private handleSwing(client: Client, raw: unknown): void {
     if (!weaponAllowed(this.weaponMode, WEAPON_SWORD)) return;
     const m = parseSwing(raw);
@@ -403,44 +466,103 @@ export class ArenaRoom extends Room<RoomState> {
     const p = this.actor(client, m.epoch);
     if (!p) return;
     this.applyPose(p, m);
-    this.attackSwing(client.sessionId, p, m, Date.now(), m.charged);
+    this.attackSwing(client.sessionId, p, m, Date.now(), m.attack);
   }
 
   /**
-   * Server-authoritative sword swing. A swing counts as charged only if the
-   * client announced the charge (MSG.charge) at least SWORD_CHARGE_MS earlier.
+   * Server-authoritative melee attack with whatever the player holds in the melee
+   * slot (sword or a picked-up drop). A heavy counts only if the client announced
+   * the charge (MSG.charge) at least the weapon's chargeMs earlier; otherwise it
+   * lands as a light. The previous attack's recovery gates this one.
    */
-  private attackSwing(id: string, p: PlayerSchema, pose: PlayerPose, now: number, wantsCharged: boolean): void {
+  private attackSwing(id: string, p: PlayerSchema, pose: PlayerPose, now: number, wants: AttackKind): void {
     const meta = this.meta.get(id)!;
-    const charged = wantsCharged && meta.chargeStartAt > 0 && now - meta.chargeStartAt >= SWORD_CHARGE_MS;
+    const kind = p.melee as MeleeKind;
+    const stats = meleeStats(kind);
+    const charged = meta.chargeStartAt > 0 && now - meta.chargeStartAt >= stats.chargeMs;
+    const attack: AttackKind = wants === ATTACK_HEAVY && !charged ? ATTACK_LIGHT : wants;
     meta.chargeStartAt = 0;
     this.syncFlags(id, p, now);
-    if (now - meta.lastSwingAt < SWORD_SERVER_MIN_INTERVAL_MS) return;
+    if (now - meta.lastSwingAt < attackSpec(kind, meta.lastAttack).serverMinIntervalMs) return;
     meta.lastSwingAt = now;
+    meta.lastAttack = attack;
     if (p.weapon !== WEAPON_SWORD) p.weapon = WEAPON_SWORD;
     this.dropProtection(p, meta);
-    const swung: SwungMsg = { attackerId: id, charged };
+    const swung: SwungMsg = { attackerId: id, attack, melee: kind };
     this.broadcast(MSG.swung, swung);
 
-    for (const victim of swordVictims(this.world, pose, this.targetsExcluding(id, now), charged)) {
-      const dmg = swordDamage(victim.part, charged);
-      const hit: HitMsg = { attackerId: id, victimId: victim.id, part: victim.part, damage: dmg, charged };
+    for (const victim of swordVictims(this.world, pose, this.targetsExcluding(id, now), attack, kind)) {
+      const dmg = swordDamage(victim.part, attack, kind);
+      const hit: HitMsg = { attackerId: id, victimId: victim.id, part: victim.part, damage: dmg, attack, melee: kind };
       this.broadcast(MSG.hit, hit);
-      this.damage(id, victim.id, dmg, WEAPON_SWORD, victim.part === 'head');
+      this.damage(id, victim.id, dmg, WEAPON_SWORD, victim.part === 'head', kind);
+    }
+  }
+
+  // --- weapon drops ---
+
+  private scheduleDrop(now: number): void {
+    this.nextDropAt = now + this.dropIntervalMin + this.rng() * (this.dropIntervalMax - this.dropIntervalMin);
+  }
+
+  /** Drops exist only where the melee slot is usable. */
+  private get dropsEnabled(): boolean {
+    return weaponAllowed(this.weaponMode, WEAPON_SWORD);
+  }
+
+  private spawnDrop(now: number): void {
+    const avoid: { x: number; z: number }[] = [];
+    for (const d of this.state.drops.values()) avoid.push({ x: d.x, z: d.z });
+    const spot = pickDropSpot(this.world, this.rng, avoid, this.spawnPoints);
+    if (!spot) return;
+    const d = new DropSchema();
+    d.kind = pickDropKind(this.rng);
+    d.x = spot.x;
+    d.y = spot.y;
+    d.z = spot.z;
+    const id = `d${++this.dropSeq}`;
+    this.state.drops.set(id, d);
+    this.dropExpiry.set(id, now + this.dropLifetimeMs);
+  }
+
+  private removeDrop(id: string): void {
+    this.state.drops.delete(id);
+    this.dropExpiry.delete(id);
+  }
+
+  /** Spawn due drops, expire stale ones, and hand a drop to the first living player standing on it. */
+  private tickDrops(now: number): void {
+    if (!this.dropsEnabled) return;
+    if (now >= this.nextDropAt) {
+      if (this.state.drops.size < DROP_MAX_ACTIVE) this.spawnDrop(now);
+      this.scheduleDrop(now);
+    }
+    for (const [id, expiresAt] of this.dropExpiry) if (now >= expiresAt) this.removeDrop(id);
+    if (this.state.drops.size === 0) return;
+    for (const [pid, p] of this.state.players) {
+      if (!p.alive) continue;
+      for (const [did, d] of this.state.drops) {
+        if (!canPickUp(p, d)) continue;
+        this.removeDrop(did);
+        p.melee = d.kind;
+        const msg: PickupMsg = { playerId: pid, melee: d.kind as MeleeKind };
+        this.broadcast(MSG.pickup, msg);
+        break;
+      }
     }
   }
 
   // --- combat / lifecycle ---
 
   /** Subtract HP from a living victim; a drop to 0 is a kill credited to the attacker. */
-  private damage(attackerId: string, victimId: string, amount: number, weapon: Weapon, headshot: boolean): void {
+  private damage(attackerId: string, victimId: string, amount: number, weapon: Weapon, headshot: boolean, melee: MeleeKind = MELEE_SWORD): void {
     const victim = this.state.players.get(victimId);
     if (!victim || !this.targetable(victimId, victim, Date.now())) return;
     victim.hp = Math.max(0, victim.hp - amount);
-    if (victim.hp === 0) this.kill(attackerId, victimId, weapon, headshot);
+    if (victim.hp === 0) this.kill(attackerId, victimId, weapon, headshot, melee);
   }
 
-  private kill(killerId: string, victimId: string, weapon: Weapon, headshot: boolean): void {
+  private kill(killerId: string, victimId: string, weapon: Weapon, headshot: boolean, melee: MeleeKind = MELEE_SWORD): void {
     const victim = this.state.players.get(victimId);
     if (!victim || !victim.alive) return;
     const killer = this.state.players.get(killerId);
@@ -458,9 +580,19 @@ export class ArenaRoom extends Room<RoomState> {
       victimId,
       victimName: victim.name,
       weapon,
+      melee,
       headshot,
     };
     this.broadcast(MSG.kill, msg);
+  }
+
+  /** Training dummies stand on the central plateau, spaced out like drops; everyone else uses spawn points. */
+  private pickSpawnFor(id: string, others: { x: number; z: number }[]): SpawnPoint {
+    if (this.mode === 'training' && this.bots.has(id)) {
+      const spot = pickDropSpot(this.world, this.rng, others, this.spawnPoints);
+      if (spot) return spot;
+    }
+    return pickSpawn(this.spawnPoints, others, this.rng);
   }
 
   private spawn(id: string, p: PlayerSchema): void {
@@ -468,7 +600,7 @@ export class ArenaRoom extends Room<RoomState> {
     for (const [sid, other] of this.state.players) {
       if (sid !== id && other.alive) enemies.push({ x: other.x, z: other.z });
     }
-    const s = pickSpawn(this.spawnPoints, enemies, this.rng);
+    const s = this.pickSpawnFor(id, enemies);
     p.x = s.x;
     p.y = s.y;
     p.z = s.z;
@@ -477,6 +609,8 @@ export class ArenaRoom extends Room<RoomState> {
     p.alive = true;
     p.hp = MAX_HP;
     p.weapon = defaultWeapon(this.weaponMode);
+    // A picked-up drop is lost on death: everyone comes back with the plain sword.
+    p.melee = MELEE_SWORD;
     p.shielded = this.spawnProtectMs > 0;
     const meta = this.meta.get(id);
     if (meta) {
@@ -507,6 +641,7 @@ export class ArenaRoom extends Room<RoomState> {
       }
       this.syncFlags(id, p, now);
     }
+    this.tickDrops(now);
   }
 
   private tickTimer(): void {

@@ -2,15 +2,19 @@ import { describe, expect, it } from 'vitest';
 import {
   parseBotCount,
   parseCharge,
+  parseChargeCancel,
   parseDurationMin,
   parsePose,
   parseReload,
+  parseRoomMode,
+  parseSelectMelee,
   parseShoot,
   parseSwing,
   parseWeaponMode,
   sanitizeName,
   sanitizeRoomName,
 } from '../src/rooms/validate';
+import { ATTACK_HEAVY, ATTACK_LIGHT, MELEE_KATANA, MELEE_SWORD } from '@mineshoot/shared';
 
 describe('sanitizeName', () => {
   it('trims, strips junk, limits length, falls back', () => {
@@ -59,10 +63,13 @@ describe('parsePose / parseShoot', () => {
     expect(s.epoch).toBe(1);
     expect((s as { weapon?: unknown }).weapon).toBeUndefined();
   });
-  it('parseSwing reads charged as a strict boolean (default false)', () => {
-    expect(parseSwing(good)!.charged).toBe(false);
-    expect(parseSwing({ ...good, charged: true })!.charged).toBe(true);
-    expect(parseSwing({ ...good, charged: 1 })!.charged).toBe(false);
+  it('parseSwing reads attack as a known AttackKind (garbage → light)', () => {
+    expect(parseSwing(good)!.attack).toBe(ATTACK_LIGHT);
+    expect(parseSwing({ ...good, attack: ATTACK_HEAVY })!.attack).toBe(ATTACK_HEAVY);
+    expect(parseSwing({ ...good, attack: 2 })!.attack).toBe(ATTACK_LIGHT);
+    expect(parseSwing({ ...good, attack: 7 })!.attack).toBe(ATTACK_LIGHT);
+    expect(parseSwing({ ...good, attack: '2' })!.attack).toBe(ATTACK_LIGHT);
+    expect(parseSwing({ ...good, attack: true })!.attack).toBe(ATTACK_LIGHT);
     expect(parseSwing({ ...good, x: 'no' })).toBeNull();
   });
   it('parseCharge accepts only an integer epoch', () => {
@@ -72,6 +79,8 @@ describe('parsePose / parseShoot', () => {
     expect(parseCharge(undefined)).toBeNull();
     expect(parseReload(2)).toBe(2);
     expect(parseReload('2')).toBeNull();
+    expect(parseChargeCancel(4)).toBe(4);
+    expect(parseChargeCancel(null)).toBeNull();
   });
 });
 
@@ -92,5 +101,26 @@ describe('parseBotCount', () => {
     expect(parseWeaponMode('laser')).toBe('all');
     expect(parseWeaponMode(undefined)).toBe('all');
     expect(parseWeaponMode(1)).toBe('all');
+  });
+
+  it('parseRoomMode accepts only known modes, default match', () => {
+    expect(parseRoomMode('training')).toBe('training');
+    expect(parseRoomMode('match')).toBe('match');
+    expect(parseRoomMode('sandbox')).toBe('match');
+    expect(parseRoomMode(undefined)).toBe('match');
+    expect(parseRoomMode(2)).toBe('match');
+  });
+});
+
+describe('parseSelectMelee', () => {
+  it('needs an integer epoch and a known melee kind', () => {
+    expect(parseSelectMelee({ epoch: 3, melee: MELEE_KATANA })).toEqual({ epoch: 3, melee: MELEE_KATANA });
+    expect(parseSelectMelee({ epoch: 0, melee: MELEE_SWORD })).toEqual({ epoch: 0, melee: MELEE_SWORD });
+    expect(parseSelectMelee({ epoch: 1.5, melee: MELEE_KATANA })).toBeNull();
+    expect(parseSelectMelee({ epoch: 1, melee: 99 })).toBeNull();
+    expect(parseSelectMelee({ epoch: 1, melee: '2' })).toBeNull();
+    expect(parseSelectMelee({ epoch: 1 })).toBeNull();
+    expect(parseSelectMelee(null)).toBeNull();
+    expect(parseSelectMelee(2)).toBeNull();
   });
 });

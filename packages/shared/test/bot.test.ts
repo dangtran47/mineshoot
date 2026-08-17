@@ -113,3 +113,37 @@ describe('bot', () => {
     expect(Math.hypot(self.x - enemies[0].x, self.z - enemies[0].z)).toBeLessThan(3);
   });
 });
+
+describe('training dummy (passive bot)', () => {
+  it('never attacks or moves, but turns to face a visible enemy', () => {
+    const w = flat();
+    const bot = createBot(createRng(5), waypoints, { passive: true });
+    let self = createPhysState(32, 1, 40, Math.PI); // facing +Z, enemy at -Z
+    const enemies = [{ id: 'e', x: 32, y: 1, z: 30 }];
+    for (let i = 0; i < 80; i++) {
+      const d = bot.compute(w, { self, enemies, now: i * 50 }, 0.05);
+      expect(d.shoot).toBe(false);
+      expect(d.swing).toBe(false);
+      expect(d.input.forward).toBe(0);
+      expect(d.input.strafe).toBe(0);
+      expect(d.input.jump).toBe(false);
+      self = stepPlayer(w, { ...self, yaw: d.yaw, pitch: d.pitch }, d.input, 0.05);
+    }
+    expect(self.x).toBe(32);
+    expect(self.z).toBe(40);
+    const wantYaw = Math.atan2(-(enemies[0].x - self.x), -(enemies[0].z - self.z));
+    expect(Math.abs(Math.atan2(Math.sin(self.yaw - wantYaw), Math.cos(self.yaw - wantYaw)))).toBeLessThan(0.15);
+  });
+
+  it('stands still with nobody around (no wandering)', () => {
+    const w = flat();
+    const bot = createBot(createRng(6), waypoints, { passive: true });
+    let self = createPhysState(30, 1, 30, 0);
+    for (let i = 0; i < 40; i++) {
+      const d = bot.compute(w, { self, enemies: [], now: i * 50 }, 0.05);
+      self = stepPlayer(w, { ...self, yaw: d.yaw, pitch: d.pitch }, d.input, 0.05);
+    }
+    expect(self.x).toBe(30);
+    expect(self.z).toBe(30);
+  });
+});

@@ -1,5 +1,5 @@
-import { DEFAULT_DURATION_MIN, DEFAULT_WEAPON_MODE, DURATION_OPTIONS_MIN, MAX_BOTS, MAX_NAME_LEN, WEAPON_MODES, WORLD_SX, WORLD_SZ } from '@mineshoot/shared';
-import type { PoseMsg, ShootMsg, SwingMsg, Weapon, WeaponMode } from '@mineshoot/shared';
+import { ATTACK_LIGHT, DEFAULT_DURATION_MIN, DEFAULT_ROOM_MODE, DEFAULT_WEAPON_MODE, DURATION_OPTIONS_MIN, MAX_BOTS, MAX_NAME_LEN, WEAPON_MODES, WORLD_SX, WORLD_SZ, isAttackKind, isMeleeKind, isRoomMode } from '@mineshoot/shared';
+import type { PoseMsg, RoomMode, SelectMeleeMsg, ShootMsg, SwingMsg, Weapon, WeaponMode } from '@mineshoot/shared';
 
 export function sanitizeName(raw: unknown, fallback: string): string {
   if (typeof raw !== 'string') return fallback;
@@ -28,6 +28,11 @@ export function parseBotCount(raw: unknown): number {
 /** Allowed-weapons rule; anything unknown falls back to the default ('all'). */
 export function parseWeaponMode(raw: unknown): WeaponMode {
   return (WEAPON_MODES as readonly unknown[]).includes(raw) ? (raw as WeaponMode) : DEFAULT_WEAPON_MODE;
+}
+
+/** Room kind; anything unknown is a normal match. */
+export function parseRoomMode(raw: unknown): RoomMode {
+  return isRoomMode(raw) ? raw : DEFAULT_ROOM_MODE;
 }
 
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -72,7 +77,8 @@ export function parseShoot(msg: unknown): ShootMsg | null {
 export function parseSwing(msg: unknown): SwingMsg | null {
   const p = parsePoseLike(msg);
   if (!p) return null;
-  return { ...p, charged: (msg as Record<string, unknown>).charged === true };
+  const a = (msg as Record<string, unknown>).attack;
+  return { ...p, attack: isAttackKind(a) ? a : ATTACK_LIGHT };
 }
 
 /** Charge-start payload: the sender's spawn epoch. */
@@ -82,3 +88,13 @@ export function parseCharge(msg: unknown): number | null {
 
 /** Reload payload: the sender's spawn epoch. */
 export const parseReload = parseCharge;
+/** Charge-cancel payload: the sender's spawn epoch. */
+export const parseChargeCancel = parseCharge;
+
+/** Training-range melee pick: integer epoch + a known melee kind. */
+export function parseSelectMelee(msg: unknown): SelectMeleeMsg | null {
+  if (typeof msg !== 'object' || msg === null) return null;
+  const m = msg as Record<string, unknown>;
+  if (!Number.isInteger(m.epoch) || !isMeleeKind(m.melee)) return null;
+  return { epoch: m.epoch as number, melee: m.melee };
+}

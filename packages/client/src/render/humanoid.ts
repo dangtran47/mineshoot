@@ -1,7 +1,9 @@
 import * as THREE from 'three';
-import { PLAYER_COLOR_COUNT, WEAPON_SWORD } from '@mineshoot/shared';
-import type { Weapon } from '@mineshoot/shared';
+import { MELEE_SWORD, PLAYER_COLOR_COUNT, WEAPON_SWORD } from '@mineshoot/shared';
+import type { MeleeKind, SwingAnim, Weapon } from '@mineshoot/shared';
 import { HumanoidAnim } from './humanoidAnim';
+import { buildMeleeProp, disposeProp } from './meleeProps';
+import type { MeleeProp } from './meleeProps';
 
 export const PLAYER_COLORS: readonly number[] = [
   0xe74c3c, 0x3498db, 0x2ecc71, 0xf1c40f, 0x9b59b6, 0xe67e22, 0x1abc9c, 0xecf0f1,
@@ -26,8 +28,10 @@ export class Humanoid {
   private readonly armR: THREE.Group;
   private readonly gun: THREE.Group;
   private readonly muzzle: THREE.Mesh;
+  /** Melee slot holder; contains the current melee prop. */
   private readonly sword: THREE.Group;
-  private readonly blade: THREE.MeshLambertMaterial;
+  private prop: MeleeProp;
+  private melee: MeleeKind = MELEE_SWORD;
   private readonly anim = new HumanoidAnim();
   private walkPhase = 0;
   private lastX = 0;
@@ -72,18 +76,12 @@ export class Humanoid {
     this.muzzle.visible = false;
     this.gun.add(gunBody, barrel, grip, this.muzzle);
 
-    // Sword: long bright blade + guard + handle; the blade glows while charging.
+    // Melee slot: the sword (or a picked-up drop weapon); its blade glows while charging.
     this.sword = new THREE.Group();
     this.sword.position.set(0, -0.6, 0);
     this.sword.rotation.x = -Math.PI / 2;
-    this.blade = new THREE.MeshLambertMaterial({ color: 0xe8edf5, emissive: 0xff8c1a, emissiveIntensity: 0 });
-    const bladeMesh = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.1, 1.1), this.blade);
-    bladeMesh.position.set(0, 0, -0.7);
-    const guard = box(0.3, 0.06, 0.06, 0x8a6b2f);
-    guard.position.set(0, 0, -0.12);
-    const handle = box(0.06, 0.06, 0.2, 0x3a2a1a);
-    handle.position.set(0, 0, 0);
-    this.sword.add(bladeMesh, guard, handle);
+    this.prop = buildMeleeProp(MELEE_SWORD);
+    this.sword.add(this.prop.group);
     this.armR.add(this.gun, this.sword);
 
     this.head = box(0.45, 0.45, 0.45, SKIN);
@@ -106,6 +104,16 @@ export class Humanoid {
     this.anim.setWeapon(w);
   }
 
+  /** Swap the melee prop (server-synced `melee` kind). */
+  setMelee(kind: MeleeKind): void {
+    if (kind === this.melee) return;
+    this.melee = kind;
+    disposeProp(this.prop);
+    this.prop = buildMeleeProp(kind);
+    this.sword.add(this.prop.group);
+    this.anim.setMelee(kind);
+  }
+
   /** Sword charge held (server-synced flag). */
   setCharging(on: boolean, now: number): void {
     this.anim.setCharging(on, now);
@@ -116,9 +124,9 @@ export class Humanoid {
     this.anim.setReloading(on);
   }
 
-  /** Sword swing (hit or miss). */
-  swing(now: number, charged: boolean): void {
-    this.anim.swing(now, charged);
+  /** Melee attack (hit or miss). */
+  swing(now: number, anim: SwingAnim, heavy: boolean): void {
+    this.anim.swing(now, anim, heavy);
   }
 
   /** Gun fired: recoil kick + muzzle flash. */
@@ -130,7 +138,8 @@ export class Humanoid {
   update(now: number): void {
     const p = this.anim.pose(now);
     this.armR.rotation.x = p.armPitch;
-    this.blade.emissiveIntensity = p.swordGlow * 1.5;
+    this.armR.rotation.z = p.armRoll;
+    for (const m of this.prop.glow) m.emissiveIntensity = p.swordGlow * 1.5;
     this.gun.position.y = -0.6 + p.gunKick * 0.12; // recoil: gun jolts back up the arm
     this.muzzle.visible = p.muzzleFlash;
   }

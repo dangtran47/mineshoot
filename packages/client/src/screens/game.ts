@@ -5,22 +5,27 @@ import {
   MSG,
   PLAYER_HEIGHT,
   POSE_INTERVAL_MS,
+  MELEE_KINDS,
+  MELEE_SWORD,
   RESPAWN_MS,
-  SWORD_CHARGE_SPEED_SCALE,
   WEAPON_GUN,
   WEAPON_SWORD,
   allowedWeapons,
+  attackSpec,
   forwardVector,
   generateWorld,
+  meleeSelectable,
+  meleeStats,
   rankPlayers,
 } from '@mineshoot/shared';
-import type { HitMsg, KillMsg, PoseMsg, RankRow, ShootMsg, ShotMsg, SwingMsg, SwungMsg, Weapon } from '@mineshoot/shared';
+import type { AttackKind, HitMsg, KillMsg, MeleeKind, PickupMsg, PoseMsg, RankRow, RoomMode, SelectMeleeMsg, ShootMsg, ShotMsg, SwingMsg, SwungMsg, Weapon } from '@mineshoot/shared';
 import { displayName } from '../net';
 import type { GameRoom, NetPlayer } from '../net';
 import { createScene } from '../render/scene';
 import { buildWorldMeshes } from '../render/worldMesh';
 import { Tracers } from '../render/tracers';
 import { BloodFx } from '../render/bloodFx';
+import { DropsView } from '../render/dropsView';
 import { ViewModel } from '../render/viewmodel';
 import { Keyboard } from '../input/keyboard';
 import { PointerLook } from '../input/pointerLock';
@@ -29,6 +34,9 @@ import { RemotePlayers } from '../game/remotePlayers';
 import { Weapons } from '../game/weapons';
 import { Hud } from '../hud/hud';
 import { awardBadges } from '../hud/icons';
+
+/** Keys 3–7 pick a melee weapon directly where the room allows it (training range, offline sandbox). */
+const MELEE_PICK_KEYS: readonly string[] = ['Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7'];
 
 export interface GameScreenOptions {
   container: HTMLElement;
@@ -55,6 +63,8 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
   scene.add(blood.mesh);
   const remotes = new RemotePlayers();
   scene.add(remotes.group);
+  const drops = new DropsView();
+  scene.add(drops.group);
   scene.add(camera); // so the view model (child of camera) renders
   const viewModel = new ViewModel(camera);
 
@@ -70,8 +80,11 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
   let diedAt = 0;
   let ended = false;
   const weaponMode = room?.state.weapons ?? 'all';
-  hud.setRoomName(room ? room.state.name : 'Offline sandbox');
-  hud.setWeaponRules(weaponMode);
+  // The offline sandbox behaves like a training range (every melee weapon is a key away).
+  const roomMode: RoomMode = room?.state.mode ?? 'training';
+  const canPickMelee = meleeSelectable(roomMode, weaponMode);
+  hud.setRoomName(room ? (roomMode === 'training' ? `\u{1F3AF} ${room.state.name}` : room.state.name) : 'Offline sandbox');
+  hud.setWeaponRules(weaponMode, roomMode);
 
   // --- weapons ---
   const currentPose = (): ShootMsg => ({
@@ -103,21 +116,40 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     onChargeStart() {
       room?.send(MSG.charge, epoch);
     },
-    onSwing(charged: boolean) {
-      viewModel.swing();
-      const m: SwingMsg = { ...currentPose(), charged };
+    onChargeCancel() {
+      room?.send(MSG.chargeCancel, epoch);
+    },
+    onSwing(attack: AttackKind) {
+      viewModel.swing(attackSpec(weapons.melee, attack).anim);
+      const m: SwingMsg = { ...currentPose(), attack };
       room?.send(MSG.swing, m);
     },
     onSwitch(w: Weapon) {
       viewModel.setWeapon(w);
-      hud.setWeapon(w);
+      hud.setWeapon(w, weapons.melee);
     },
     onReload() {
       room?.send(MSG.reload, epoch);
     },
+    onMeleeChange(kind: MeleeKind) {
+      viewModel.setMelee(kind);
+      hud.setWeapon(weapons.current, kind);
+    },
   }, allowedWeapons(weaponMode));
   viewModel.setWeapon(weapons.current);
-  hud.setWeapon(weapons.current);
+  hud.setWeapon(weapons.current, weapons.melee);
+  /** Training range / sandbox: arm `kind` in the melee slot and bring it out (the server confirms via the state patch). */
+  const pickMelee = (kind: MeleeKind): void => {
+    if (!canPickMelee || !local.alive) return;
+    if (room) {
+      const m: SelectMeleeMsg = { epoch, melee: kind };
+      room.send(MSG.selectMelee, m);
+    } else {
+      weapons.setMelee(kind);
+    }
+    weapons.select(WEAPON_SWORD);
+    hud.toast(meleeStats(kind).name);
+  };
 
   // --- input wiring ---
   look.onMouseDown = (b) => {
@@ -204,10 +236,19 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
         diedAt = epoch > 0 ? now : 0;
         weapons.cancel();
       }
+      // Melee slot follows the server (drop pickups arm it, death resets it to the sword).
+      weapons.setMelee(me.melee as MeleeKind);
       hud.setStats(me.kills, me.deaths);
       hud.setHealth(me.hp);
       hud.setShield(me.alive && me.shielded);
     }
+    // Weapon drops on the ground.
+    const dropIds = new Set<string>();
+    state.drops?.forEach((d, id) => {
+      dropIds.add(id);
+      if (!drops.has(id)) drops.add(id, d.kind as MeleeKind, d.x, d.y, d.z);
+    });
+    drops.retain(dropIds);
     if (state.timeLeftMs !== lastTimeLeft) {
       lastTimeLeft = state.timeLeftMs;
       lastTimeLeftAt = now;
@@ -230,7 +271,14 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     if (m.shooterId !== meId) remotes.shot(m.shooterId, performance.now());
   };
   const onSwung = (m: SwungMsg): void => {
-    if (m.attackerId !== meId) remotes.swing(m.attackerId, m.charged, performance.now());
+    if (m.attackerId !== meId) remotes.swing(m.attackerId, m.attack, m.melee, performance.now());
+  };
+  const onPickup = (m: PickupMsg): void => {
+    if (m.playerId !== meId) return;
+    // Arm it right away (the state patch will confirm) and bring it out if the room allows.
+    weapons.setMelee(m.melee);
+    weapons.select(WEAPON_SWORD);
+    hud.toast(`Picked up ${meleeStats(m.melee).name}`);
   };
   const onHit = (m: HitMsg): void => {
     if (m.attackerId === meId) hud.hitmark(m.part === 'head');
@@ -256,7 +304,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     );
     if (mine) hud.announce(badges);
     if (m.victimId === meId) {
-      hud.showDeath(killerName, m.weapon, m.headshot, badges);
+      hud.showDeath(killerName, m.weapon, m.headshot, badges, m.melee ?? MELEE_SWORD);
       hud.deathFlash();
     }
   };
@@ -276,6 +324,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
   if (room) {
     room.onMessage(MSG.shot, onShot);
     room.onMessage(MSG.swung, onSwung);
+    room.onMessage(MSG.pickup, onPickup);
     room.onMessage(MSG.hit, onHit);
     room.onMessage(MSG.kill, onKill);
     room.onMessage(MSG.pong, onPong);
@@ -303,9 +352,10 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     if (inputEnabled) {
       if (keys.wasPressed('Digit1')) weapons.select(WEAPON_GUN);
       if (keys.wasPressed('Digit2')) weapons.select(WEAPON_SWORD);
+      if (canPickMelee) MELEE_PICK_KEYS.forEach((code, i) => keys.wasPressed(code) && pickMelee(MELEE_KINDS[i]));
       if (keys.wasPressed('KeyR') && local.alive) weapons.reload(now);
     }
-    const moving = local.update(dt, inputEnabled, weapons.charging ? SWORD_CHARGE_SPEED_SCALE : 1);
+    const moving = local.update(dt, inputEnabled, weapons.charging ? weapons.chargeSpeedScale : 1);
     if (local.alive) weapons.update(now);
     const charge = weapons.chargeFraction(now);
     viewModel.setCharge(charge);
@@ -315,6 +365,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     hud.setAmmo(weapons.ammo, GUN_MAG_SIZE, reload !== null);
     viewModel.update(dt, moving && local.state.onGround);
     remotes.update(now);
+    drops.update(now);
     tracers.update(now);
     blood.update(now);
     hud.update(now);
@@ -346,6 +397,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     hud.dispose();
     viewModel.dispose();
     remotes.dispose();
+    drops.dispose();
     tracers.dispose();
     blood.dispose();
     worldMesh.dispose();
@@ -357,7 +409,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
 
   if (import.meta.env.DEV) {
     // Dev-only hook for the headless smoke test (scripts/smoke.mjs); stripped from production builds.
-    (window as unknown as { __mineshoot?: unknown }).__mineshoot = { room, local, look, weapons, hud, ready: sendReady };
+    (window as unknown as { __mineshoot?: unknown }).__mineshoot = { room, local, look, weapons, hud, ready: sendReady, pickMelee };
   }
 
   return { dispose: finish };

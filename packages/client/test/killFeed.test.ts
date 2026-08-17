@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { FEED_MAX, FEED_TTL_MS, KillFeedModel, killFeedLine } from '../src/hud/killFeed';
 import type { KillLineInput } from '../src/hud/killFeed';
-import { WEAPON_GUN, WEAPON_SWORD } from '@mineshoot/shared';
+import { MELEE_AXE, MELEE_PICKAXE, WEAPON_GUN, WEAPON_SWORD } from '@mineshoot/shared';
 
 const line = (killer: string): KillLineInput => ({ killer, victim: 'v', weapon: WEAPON_GUN, multi: 1, streak: 1, revenge: false, shutdown: false, headshot: false });
 
@@ -35,5 +35,15 @@ describe('killFeedLine', () => {
   });
   it('appends award tags', () => {
     expect(killFeedLine({ ...base, weapon: WEAPON_GUN, multi: 2, revenge: true })).toBe('Alice 🔫 Bob · DOUBLE KILL · REVENGE');
+  });
+});
+
+describe('killFeedLine melee kinds', () => {
+  it('shows the drop weapon that made the kill', () => {
+    const base = line('a');
+    expect(killFeedLine({ ...base, weapon: WEAPON_SWORD })).toContain('🗡️');
+    expect(killFeedLine({ ...base, weapon: WEAPON_SWORD, melee: MELEE_AXE })).toContain('🪓');
+    expect(killFeedLine({ ...base, weapon: WEAPON_SWORD, melee: MELEE_PICKAXE })).toContain('⛏️');
+    expect(killFeedLine({ ...base, weapon: WEAPON_GUN, melee: MELEE_AXE })).toContain('🔫');
   });
 });

@@ -74,6 +74,11 @@ input, select {
 .hud .weapon { position: absolute; right: 14px; bottom: 14px; text-align: right; text-shadow: 0 1px 3px #000; }
 .hud .weapon .name { font-size: 20px; font-weight: 700; }
 .hud .weapon .hint { color: var(--muted); font-size: 12px; }
+.hud .weapon .label { font-size: 13px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; min-height: 1.1em; }
+.hud .weapon .label.special { color: var(--accent2); text-shadow: 0 0 8px var(--accent2), 0 1px 3px #000; }
+.hud .toast { position: absolute; left: 50%; bottom: 20%; transform: translateX(-50%); padding: 6px 14px; background: rgba(0,0,0,0.6); border: 1px solid var(--accent2); border-radius: 4px; color: var(--accent2); font-weight: 700; letter-spacing: 1px; text-shadow: 0 1px 3px #000; pointer-events: none; animation: toast-pop 0.25s ease-out; }
+.hud .toast.hidden { display: none; }
+@keyframes toast-pop { from { transform: translateX(-50%) scale(0.8); opacity: 0; } to { transform: translateX(-50%) scale(1); opacity: 1; } }
 .lobby .badge { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; margin-left: 6px; vertical-align: middle; }
 .hud .weapon .ammo { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .hud .weapon .ammo.low { color: var(--danger); }

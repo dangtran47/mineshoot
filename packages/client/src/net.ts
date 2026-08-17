@@ -1,7 +1,7 @@
 import { Client } from 'colyseus.js';
 import type { Room } from 'colyseus.js';
 import { ROOM_NAME } from '@mineshoot/shared';
-import type { CreateOptions, RoomMetadata, WeaponMode } from '@mineshoot/shared';
+import type { CreateOptions, RoomMetadata, RoomMode, WeaponMode } from '@mineshoot/shared';
 
 /** Structural views over the server's synced schema (decoded via reflection). */
 export interface NetPlayer {
@@ -17,11 +17,19 @@ export interface NetPlayer {
   deaths: number;
   spawnEpoch: number;
   weapon: number;
+  /** Melee weapon in slot 2 (MeleeKind). */
+  melee: number;
   color: number;
   isBot: boolean;
   shielded: boolean;
   charging: boolean;
   reloading: boolean;
+}
+export interface NetDrop {
+  kind: number;
+  x: number;
+  y: number;
+  z: number;
 }
 export interface NetMap<T> {
   size: number;
@@ -35,8 +43,10 @@ export interface NetRoomState {
   seed: number;
   durationMin: number;
   weapons: WeaponMode;
+  mode: RoomMode;
   timeLeftMs: number;
   players: NetMap<NetPlayer>;
+  drops: NetMap<NetDrop>;
 }
 export type GameRoom = Room<NetRoomState>;
 

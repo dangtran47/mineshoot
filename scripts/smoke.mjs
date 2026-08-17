@@ -7,7 +7,7 @@ const require = createRequire(import.meta.url);
 const pw = require('playwright-core');
 
 const out = process.argv[2] ?? '/tmp';
-const URL = `${process.env.SMOKE_URL ?? 'http://localhost:5173'}/?testDurationMs=9000`;
+const URL = `${process.env.SMOKE_URL ?? 'http://localhost:5173'}/?testDurationMs=12000`;
 const browser = await pw.chromium.launch({
   channel: 'chrome',
   headless: true,
@@ -84,11 +84,17 @@ await b.waitForFunction(() => document.querySelector('.health .hp').textContent 
 console.log('bob respawned; stats:', await b.textContent('.stats'), 'hp:', await b.textContent('.health .hp'), 'shield:', await shieldShown(b));
 await b.waitForFunction(() => document.querySelector('.shield').classList.contains('hidden'), null, { timeout: 4000 });
 
-// Sword: Bob teleports right in front of Alice, holds RMB to charge (≥0.8 s), releases: charged headshot = 100 → kill.
+// Sword: Bob teleports right in front of Alice and holds LMB: light slashes repeat every cooldown (45 each →
+// hp 55, then 10); he lets go, then holds RMB to charge (≥0.8 s) and releases the heavy overhead: headshot = 100 → kill.
 await tp(a, 32.5, 36.5, 0);
 await tp(b, 32.5, 34.5, Math.PI);
 await a.waitForTimeout(250);
-await b.evaluate(() => { const g = window.__mineshoot; g.weapons.select(1); g.weapons.altDown(performance.now()); });
+await b.evaluate(() => { const g = window.__mineshoot; g.weapons.select(1); g.weapons.mouseDown(performance.now()); });
+await a.waitForFunction(() => document.querySelector('.health .hp').textContent === '55', null, { timeout: 4000 });
+console.log('alice hp after light slash:', await a.textContent('.health .hp'));
+await a.waitForFunction(() => document.querySelector('.health .hp').textContent === '10', null, { timeout: 4000 });
+console.log('alice hp after held-LMB second slash:', await a.textContent('.health .hp'));
+await b.evaluate(() => { const g = window.__mineshoot; g.weapons.mouseUp(performance.now()); g.weapons.altDown(performance.now()); });
 // Alice sees Bob's charge: synced flag + wound-up humanoid arm / glowing blade.
 // (Checked before the screenshots: a charge auto-releases after SWORD_CHARGE_MAX_MS and headless screenshots are slow.)
 await a.waitForFunction(() => { let c = false; const me = window.__mineshoot.room.sessionId; window.__mineshoot.room.state.players.forEach((pl, id) => { if (id !== me && pl.charging) c = true; }); return c; }, null, { timeout: 2000 });
@@ -104,10 +110,12 @@ console.log('bob announce:', (await b.textContent('.announce')).replace(/\s+/g, 
   '| icons:', await b.evaluate(() => [...document.querySelectorAll('.announce .icon')].map((e) => e.getAttribute('aria-label')).join(',')),
   '| hidden:', await b.evaluate(() => document.querySelector('.announce').classList.contains('hidden')));
 console.log('alice feed after sword kill:', await a.evaluate(() => [...document.querySelectorAll('.feed div')].map((d) => d.title).join(' | ')));
-console.log('bob weapon hud icon:', await b.evaluate(() => document.querySelector('.weapon .name .icon')?.getAttribute('aria-label')));
+console.log('bob weapon hud icon:', await b.evaluate(() => document.querySelector('.weapon .name .icon')?.getAttribute('aria-label')),
+  '| label:', await b.textContent('.weapon .label'));
 await shot(b, 'bob-revenge.png');
 
-// Match ends at 9s → results on both.
+
+// Match ends at 12s → results on both.
 await a.waitForSelector('.results', { timeout: 15000 });
 await b.waitForSelector('.results', { timeout: 15000 });
 console.log('results alice:', (await a.textContent('.results table')).replace(/\s+/g, ' ').trim());
@@ -116,7 +124,9 @@ await a.click('.results .back');
 await a.waitForSelector('.lobby', { timeout: 5000 });
 console.log('alice back in lobby');
 
-// --- Bots scenario: fresh sword-only room with 3 bots ---
+// --- Bots scenario: fresh sword-only room with 3 bots, weapon drops every 1.5 s ---
+await a.goto(`${URL}&testDropMs=1500`);
+await a.fill('.nick', 'Alice');
 await a.fill('.roomname', 'Bot Room');
 await a.selectOption('.duration', '3');
 await a.selectOption('.bots', '3');
@@ -141,9 +151,57 @@ const moved = Object.keys(p0).filter((id) => p0[id][0] !== p1[id]?.[0] || p0[id]
 console.log('bots that moved:', moved.length, '/', Object.keys(p0).length);
 console.log('alice feed/stats with bots:', (await a.textContent('.feed')).trim(), '|', await a.textContent('.stats'));
 await shot(a, 'bots.png');
+
+// --- Weapon drops: they land on the central plateau (1.5 s test interval); walking over one arms it until death.
+await a.waitForFunction(() => window.__mineshoot.room.state.drops.size > 0, null, { timeout: 8000 });
+const drop = await a.evaluate(() => { let d = null; window.__mineshoot.room.state.drops.forEach((v, id) => { if (!d) d = { id, kind: v.kind, x: v.x, y: v.y, z: v.z }; }); return d; });
+console.log('drop seen by alice:', JSON.stringify(drop), '| on plateau:', drop.x >= 25 && drop.x <= 39 && drop.z >= 25 && drop.z <= 39);
+// Look at it from a few blocks away for a screenshot, then walk onto it.
+// Stand 3 blocks away on the plateau side that has room, facing the drop.
+const back = drop.z > 32 ? -3 : 3;
+await a.evaluate(([x, y, z, back]) => window.__mineshoot.local.teleport(x, y, z + back, back > 0 ? 0 : Math.PI), [drop.x, drop.y, drop.z, back]);
+await a.waitForTimeout(400);
+await shot(a, 'drop-on-ground.png');
+await a.evaluate(([x, y, z]) => window.__mineshoot.local.teleport(x, y, z, 0), [drop.x, drop.y, drop.z]);
+await a.waitForFunction((k) => window.__mineshoot.weapons.melee === k, drop.kind, { timeout: 4000 });
+await a.waitForFunction((id) => !window.__mineshoot.room.state.drops.has(id), drop.id, { timeout: 2000 });
+console.log('alice picked up kind', drop.kind, '| toast:', await a.textContent('.toast'), '| hud label:', await a.textContent('.weapon .label'),
+  '| hud icon:', await a.evaluate(() => document.querySelector('.weapon .name .icon')?.getAttribute('aria-label')),
+  '| drop gone:', await a.evaluate((id) => !window.__mineshoot.room.state.drops.has(id), drop.id));
+await a.waitForTimeout(300);
+await shot(a, 'drop-picked-up.png');
 await a.click('button:has-text("Leave match")');
 await a.waitForSelector('.lobby', { timeout: 5000 });
 console.log('alice left bot room');
+
+// --- Training range: passive dummies parked on the plateau, melee picked directly with keys 3–7 (dev hook here).
+await a.fill('.roomname', 'Range');
+await a.selectOption('.duration', '3');
+await a.selectOption('.mode', 'training');
+console.log('training bots default:', await a.inputValue('.bots'));
+await a.selectOption('.bots', '2');
+await a.selectOption('.weapons', 'all');
+await a.click('.create');
+await a.waitForSelector('canvas.game', { timeout: 10000 });
+await ready(a);
+console.log('training room:', await a.textContent('.roomname'), '| hint:', await a.textContent('.weapon .hint'));
+await b.waitForFunction(() => document.querySelector('.rooms')?.textContent.includes('Range'), null, { timeout: 6000 });
+console.log('lobby rows (training):', (await b.textContent('.rooms')).replace(/\s+/g, ' ').trim());
+const d0 = await botPos(a);
+const onPlateau = Object.values(d0).every(([x, z]) => x >= 25 && x <= 40 && z >= 25 && z <= 40);
+await tp(a, 32.5, 36.5, 0);
+await a.waitForTimeout(1500);
+const d1 = await botPos(a);
+const dummiesMoved = Object.keys(d0).filter((id) => d0[id][0] !== d1[id]?.[0] || d0[id][1] !== d1[id]?.[1]);
+console.log('dummies:', JSON.stringify(d0), '| on plateau:', onPlateau, '| moved:', dummiesMoved.length, '| alice hp:', await a.evaluate(() => window.__mineshoot.room.state.players.get(window.__mineshoot.room.sessionId).hp));
+await a.evaluate(() => window.__mineshoot.pickMelee(2)); // katana
+await a.waitForFunction(() => window.__mineshoot.weapons.melee === 2 && window.__mineshoot.weapons.current === 1, null, { timeout: 4000 });
+console.log('picked katana | toast:', await a.textContent('.toast'), '| hud label:', await a.textContent('.weapon .label'));
+await a.waitForTimeout(300);
+await shot(a, 'training-range.png');
+await a.click('button:has-text("Leave match")');
+await a.waitForSelector('.lobby', { timeout: 5000 });
+console.log('alice left training range');
 await browser.close();
 console.log('console errors:', errors.length ? errors : 'none');
 process.exit(errors.length ? 1 : 0);

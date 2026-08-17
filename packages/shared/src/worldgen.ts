@@ -11,16 +11,21 @@ export interface GeneratedWorld {
 }
 
 const BORDER_WALL_H = 6;
-const PLATEAU_MIN = 25;
-const PLATEAU_MAX = 38; // inclusive
+/** The raised central plateau: the arena's centre stage, where weapon drops land. */
+export const PLATEAU_MIN = 25;
+export const PLATEAU_MAX = 38; // inclusive
 const PLATEAU_TOP = 9;
+/** Stair ramps up onto the plateau: one per side, centred, this many blocks wide. */
+const RAMP_WIDTH = 4;
+const RAMP_LO = Math.floor((PLATEAU_MIN + PLATEAU_MAX + 1) / 2) - RAMP_WIDTH / 2; // first ramp column
 const MIN_SPAWN_DIST = 8;
 const TARGET_SPAWNS = 12;
 
 /**
- * Deterministic arena from a seed: noise heightmap, raised central plateau,
- * pillars, walls, elevated platforms, trees, and a bedrock border. Also
- * returns valid spawn points (standing room, well spread out).
+ * Deterministic arena from a seed: noise heightmap, raised central plateau
+ * with a stair ramp on each of its four sides, pillars, walls, elevated
+ * platforms, trees, and a bedrock border. Also returns valid spawn points
+ * (standing room, well spread out).
  */
 export function generateWorld(seed: number): GeneratedWorld {
   const world = createWorld(WORLD_SX, WORLD_SY, WORLD_SZ);
@@ -60,9 +65,44 @@ export function generateWorld(seed: number): GeneratedWorld {
     }
   }
 
+  // Stair ramps: from the middle of each plateau side, step down one block per
+  // column outward until the terrain is already at least that high. Players
+  // can only jump one block, so this guarantees four ways up regardless of
+  // what the heightmap did around the plateau. Ramp columns (plus a margin)
+  // are reserved so no obstacle can block them.
+  const reserved = new Set<number>();
+  const reserve = (x: number, z: number): void => {
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) reserved.add((x + dx) * 1024 + z + dz);
+  };
+  const carveRamp = (dx: number, dz: number): void => {
+    // (dx, dz) is the outward direction; the ramp spans RAMP_WIDTH columns across it.
+    let x = dx > 0 ? PLATEAU_MAX + 1 : dx < 0 ? PLATEAU_MIN - 1 : RAMP_LO;
+    let z = dz > 0 ? PLATEAU_MAX + 1 : dz < 0 ? PLATEAU_MIN - 1 : RAMP_LO;
+    for (let stepTop = PLATEAU_TOP - 1; stepTop >= 1; stepTop--) {
+      let merged = true;
+      for (let k = 0; k < RAMP_WIDTH; k++) {
+        const cx = dx === 0 ? x + k : x;
+        const cz = dz === 0 ? z + k : z;
+        reserve(cx, cz);
+        const top = columnTop(world, cx, cz);
+        if (top >= stepTop) continue; // terrain already reaches this step here
+        merged = false;
+        for (let y = top + 1; y <= stepTop; y++) setBlock(world, cx, y, cz, Block.Brick);
+      }
+      if (merged) break;
+      x += dx;
+      z += dz;
+    }
+  };
+  carveRamp(1, 0);
+  carveRamp(-1, 0);
+  carveRamp(0, 1);
+  carveRamp(0, -1);
+
   const randInt = (lo: number, hi: number): number => lo + Math.floor(rng() * (hi - lo + 1));
   const inPlateau = (x: number, z: number): boolean =>
-    x >= PLATEAU_MIN - 1 && x <= PLATEAU_MAX + 1 && z >= PLATEAU_MIN - 1 && z <= PLATEAU_MAX + 1;
+    (x >= PLATEAU_MIN - 1 && x <= PLATEAU_MAX + 1 && z >= PLATEAU_MIN - 1 && z <= PLATEAU_MAX + 1) ||
+    reserved.has(x * 1024 + z);
 
   // Pillars (2x2, planks)
   for (let i = 0; i < 8; i++) {
@@ -95,7 +135,8 @@ export function generateWorld(seed: number): GeneratedWorld {
   for (let i = 0; i < 6; i++) {
     const x = randInt(3, world.sx - 9);
     const z = randInt(3, world.sz - 9);
-    if (inPlateau(x + 2, z + 2)) continue;
+    if (inPlateau(x + 2, z + 2) || inPlateau(x, z) || inPlateau(x + 4, z) || inPlateau(x, z + 4) || inPlateau(x + 4, z + 4))
+      continue;
     let base = 0;
     for (let dx = 0; dx < 5; dx++)
       for (let dz = 0; dz < 5; dz++) base = Math.max(base, columnTop(world, x + dx, z + dz));

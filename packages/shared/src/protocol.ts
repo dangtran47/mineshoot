@@ -2,6 +2,7 @@ import type { Vec3 } from './types';
 import type { HitPart } from './hitbox';
 import type { SwordPart } from './sword';
 import type { KillAwards } from './kills';
+import type { AttackKind, MeleeKind } from './melee';
 
 export const WEAPON_GUN = 0;
 export const WEAPON_SWORD = 1;
@@ -24,6 +25,23 @@ export function allowedWeapons(mode: WeaponMode): Weapon[] {
   return mode === 'all' ? [WEAPON_GUN, WEAPON_SWORD] : [defaultWeapon(mode)];
 }
 
+/**
+ * What kind of room this is; chosen at creation. `match` is the normal
+ * deathmatch. `training` is a practice range: bots are passive dummies parked
+ * on the central plateau (they never attack, respawn fast) and any melee
+ * weapon can be picked directly (MSG.selectMelee) instead of waiting for a drop.
+ */
+export const ROOM_MODES = ['match', 'training'] as const;
+export type RoomMode = (typeof ROOM_MODES)[number];
+export const DEFAULT_ROOM_MODE: RoomMode = 'match';
+export function isRoomMode(v: unknown): v is RoomMode {
+  return (ROOM_MODES as readonly unknown[]).includes(v);
+}
+/** True when players may switch their melee weapon at will (training rooms with melee allowed). */
+export function meleeSelectable(mode: RoomMode, weapons: WeaponMode): boolean {
+  return mode === 'training' && weaponAllowed(weapons, WEAPON_SWORD);
+}
+
 export interface CreateOptions {
   name: string;
   durationMin: number;
@@ -32,6 +50,8 @@ export interface CreateOptions {
   bots?: number;
   /** Allowed weapons (default 'all'). */
   weapons?: WeaponMode;
+  /** Deathmatch or training range (default 'match'). */
+  mode?: RoomMode;
 }
 export interface JoinOptions {
   nickname: string;
@@ -43,6 +63,7 @@ export interface RoomMetadata {
   endsAt: number;
   bots: number;
   weapons: WeaponMode;
+  mode: RoomMode;
 }
 
 export interface PoseMsg {
@@ -63,15 +84,22 @@ export interface ShootMsg {
   epoch: number;
 }
 export interface SwingMsg extends ShootMsg {
-  /** Client claims a charged swing; the server only honours it if the charge really lasted SWORD_CHARGE_MS. */
-  charged: boolean;
+  /** Which attack: light (LMB) or heavy (RMB held, released). A heavy claim is honoured only if a `charge` arrived ≥ chargeMs earlier, else it lands as light. */
+  attack: AttackKind;
 }
-/** Sent when the player starts holding the sword button; payload is the spawn epoch. */
+/** Sent when the player starts holding RMB with melee (charge begins); payload is the spawn epoch. */
 export type ChargeMsg = number;
+/** Sent when RMB is released before the heavy was ready (no swing); payload is the spawn epoch. */
+export type ChargeCancelMsg = number;
 /** Sent when the player starts reloading the gun; payload is the spawn epoch. */
 export type ReloadMsg = number;
 /** Sent once when the player clicks to play; the server spawns them only after this. */
 export type ReadyMsg = null;
+/** Training rooms only: put this melee weapon in slot 2 right away (no drop needed). */
+export interface SelectMeleeMsg {
+  epoch: number;
+  melee: MeleeKind;
+}
 
 export interface ShotMsg {
   shooterId: string;
@@ -83,18 +111,26 @@ export interface ShotMsg {
   /** Damage dealt (0 on a miss). */
   damage: number;
 }
-/** A sword swing was performed (hit or miss); drives the attacker's animation on other clients. */
+/** A melee swing was performed (hit or miss); drives the attacker's animation on other clients. */
 export interface SwungMsg {
   attackerId: string;
-  charged: boolean;
+  attack: AttackKind;
+  /** Which melee weapon was swung. */
+  melee: MeleeKind;
 }
-/** A sword swing connected (lethal or not). */
+/** A melee swing connected (lethal or not). */
 export interface HitMsg {
   attackerId: string;
   victimId: string;
   part: SwordPart;
   damage: number;
-  charged: boolean;
+  attack: AttackKind;
+  melee: MeleeKind;
+}
+/** A player walked over a weapon drop and now holds it (the drop is gone from the state). */
+export interface PickupMsg {
+  playerId: string;
+  melee: MeleeKind;
 }
 export interface KillMsg extends KillAwards {
   killerId: string;
@@ -102,6 +138,8 @@ export interface KillMsg extends KillAwards {
   victimId: string;
   victimName: string;
   weapon: Weapon;
+  /** Melee weapon used when `weapon` is the melee slot (MELEE_SWORD for gun kills). */
+  melee: MeleeKind;
   /** The killing blow landed on the head. */
   headshot: boolean;
 }
@@ -111,14 +149,17 @@ export const MSG = {
   shoot: 'shoot',
   swing: 'swing',
   charge: 'charge',
+  chargeCancel: 'chargeCancel',
   reload: 'reload',
   ready: 'ready',
+  selectMelee: 'selectMelee',
   ping: 'ping',
   pong: 'pong',
   shot: 'shot',
   swung: 'swung',
   hit: 'hit',
   kill: 'kill',
+  pickup: 'pickup',
 } as const;
 
 export const ROOM_NAME = 'arena';

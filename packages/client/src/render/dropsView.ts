@@ -1,0 +1,97 @@
+import * as THREE from 'three';
+import type { MeleeKind } from '@mineshoot/shared';
+import { buildMeleeProp, disposeProp } from './meleeProps';
+import type { MeleeProp } from './meleeProps';
+
+interface DropView {
+  root: THREE.Group;
+  prop: MeleeProp;
+  /** Tilted, centred holder for the prop; bobs up and down. */
+  pivot: THREE.Group;
+  beacon: THREE.Mesh;
+  phase: number;
+}
+
+const BEACON_COLOR = 0xffd766;
+/** Hover height of the weapon's centre above the drop's feet position. */
+const HOVER_Y = 0.75;
+const BOB_AMP = 0.08;
+/** Lying almost flat, tip raised a little so it reads as a weapon and never dips into the ground. */
+const TILT = 0.35;
+/** Props are modelled grip-at-origin along -z (~1.2–1.5 long); shift so the middle sits on the spin axis. */
+const CENTER_Z = 0.7;
+/**
+ * Roll the prop onto its side: heads/edges are modelled on ±y (down when held), so a quarter
+ * turn lays axe bits, scythe blades and pick points flat — visible in profile as the drop
+ * spins, and not hanging down into the ground.
+ */
+const ROLL = Math.PI / 2;
+
+/**
+ * Weapon drops lying in the arena: the weapon prop hovering just above the
+ * ground, slowly spinning and bobbing, under a tall translucent light column
+ * so it can be spotted from across the map.
+ */
+export class DropsView {
+  readonly group = new THREE.Group();
+  private readonly drops = new Map<string, DropView>();
+  private readonly beaconGeo = new THREE.BoxGeometry(0.35, 6, 0.35);
+  private readonly beaconMat = new THREE.MeshBasicMaterial({ color: BEACON_COLOR, transparent: true, opacity: 0.3, depthWrite: false });
+  private readonly padGeo = new THREE.BoxGeometry(1.0, 0.06, 1.0);
+  private readonly padMat = new THREE.MeshBasicMaterial({ color: BEACON_COLOR, transparent: true, opacity: 0.55, depthWrite: false });
+
+  has(id: string): boolean {
+    return this.drops.has(id);
+  }
+
+  add(id: string, kind: MeleeKind, x: number, y: number, z: number): void {
+    if (this.drops.has(id)) return;
+    const root = new THREE.Group();
+    root.position.set(x, y, z);
+    const prop = buildMeleeProp(kind);
+    // Lay the weapon nearly flat (tip slightly up), centred on the spin axis, hovering at knee height.
+    const pivot = new THREE.Group();
+    pivot.position.set(0, HOVER_Y, 0);
+    pivot.rotation.x = TILT;
+    prop.group.position.z = CENTER_Z;
+    prop.group.rotation.z = ROLL;
+    pivot.add(prop.group);
+    root.add(pivot);
+    const beacon = new THREE.Mesh(this.beaconGeo, this.beaconMat);
+    beacon.position.set(0, 3, 0);
+    const pad = new THREE.Mesh(this.padGeo, this.padMat);
+    pad.position.set(0, 0.04, 0);
+    root.add(beacon, pad);
+    this.group.add(root);
+    this.drops.set(id, { root, prop, pivot, beacon, phase: (x * 7 + z * 13) % 6.28 });
+  }
+
+  remove(id: string): void {
+    const d = this.drops.get(id);
+    if (!d) return;
+    this.group.remove(d.root);
+    disposeProp(d.prop);
+    this.drops.delete(id);
+  }
+
+  /** Drop everything not in `ids` (state diff). */
+  retain(ids: Set<string>): void {
+    for (const id of [...this.drops.keys()]) if (!ids.has(id)) this.remove(id);
+  }
+
+  update(now: number): void {
+    const t = now / 1000;
+    for (const d of this.drops.values()) {
+      d.root.rotation.y = t * 1.6 + d.phase;
+      d.pivot.position.y = HOVER_Y + Math.sin(t * 2.2 + d.phase) * BOB_AMP;
+    }
+  }
+
+  dispose(): void {
+    for (const id of [...this.drops.keys()]) this.remove(id);
+    this.beaconGeo.dispose();
+    this.beaconMat.dispose();
+    this.padGeo.dispose();
+    this.padMat.dispose();
+  }
+}

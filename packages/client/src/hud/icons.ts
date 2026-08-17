@@ -2,8 +2,8 @@
  * Pixel-art HUD icons rendered as inline SVG (16×16 grid → <rect> runs). No shipped assets,
  * crisp at any size, and '#' pixels use currentColor so CSS can tint them.
  */
-import { multiKillLabel, streakLabel } from '@mineshoot/shared';
-import type { KillAwards } from '@mineshoot/shared';
+import { MELEE_AXE, MELEE_KATANA, MELEE_PICKAXE, MELEE_SCYTHE, MELEE_SWORD, WEAPON_GUN, multiKillLabel, streakLabel } from '@mineshoot/shared';
+import type { KillAwards, MeleeKind } from '@mineshoot/shared';
 
 export const ICON_SIZE = 16;
 
@@ -16,7 +16,7 @@ const PALETTE: Record<string, string> = {
   y: '#ffd23f', // flame core
 };
 
-export type IconName = 'gun' | 'sword' | 'headshot' | 'skull' | 'flame' | 'revenge' | 'shutdown';
+export type IconName = 'gun' | 'sword' | 'axe' | 'katana' | 'scythe' | 'pickaxe' | 'headshot' | 'skull' | 'flame' | 'revenge' | 'shutdown';
 
 // prettier-ignore
 export const BITMAPS: Record<IconName, string[]> = {
@@ -53,6 +53,78 @@ export const BITMAPS: Record<IconName, string[]> = {
     '..bb..bb........',
     '.bb.....b.......',
     'bb..............',
+    '................',
+    '................',
+  ],
+  axe: [
+    '..........####..',
+    '.........######.',
+    '........###..###',
+    '........###...##',
+    '.......####.....',
+    '.......#####....',
+    '......bb#####...',
+    '.....bb..#####..',
+    '....bb....###...',
+    '...bb...........',
+    '..bb............',
+    '.bb.............',
+    'bb..............',
+    '................',
+    '................',
+    '................',
+  ],
+  katana: [
+    '..............##',
+    '.............##.',
+    '............##..',
+    '...........##...',
+    '..........##....',
+    '.........##.....',
+    '........##......',
+    '.......##.......',
+    '......##........',
+    '....k###........',
+    '...kk#k.........',
+    '..kk............',
+    '.kk.............',
+    'kk..............',
+    '................',
+    '................',
+  ],
+  scythe: [
+    '......#####.....',
+    '....#########...',
+    '...####...####..',
+    '..###.......###.',
+    '..##.........##.',
+    '..bb............',
+    '..bb............',
+    '..bb............',
+    '..bb............',
+    '..bb............',
+    '..bb............',
+    '..bb............',
+    '..bb............',
+    '..bb............',
+    '................',
+    '................',
+  ],
+  pickaxe: [
+    '.......#######..',
+    '.....#########..',
+    '....###....####.',
+    '...##.....b.###.',
+    '..##.....b...##.',
+    '.##.....b.......',
+    '.......b........',
+    '......b.........',
+    '.....b..........',
+    '....b...........',
+    '...b............',
+    '..b.............',
+    '.b..............',
+    'b...............',
     '................',
     '................',
   ],
@@ -171,9 +243,22 @@ export function iconSvg(name: IconName, cls = ''): string {
   return `<svg class="${classes}" viewBox="0 0 ${ICON_SIZE} ${ICON_SIZE}" shape-rendering="crispEdges" aria-label="${name}" role="img">${rects.join('')}</svg>`;
 }
 
-/** Weapon icon (0 = gun, 1 = sword). */
-export function weaponIcon(weapon: number, cls = ''): string {
-  return iconSvg(weapon === 0 ? 'gun' : 'sword', cls);
+const MELEE_ICONS: Record<MeleeKind, IconName> = {
+  [MELEE_SWORD]: 'sword',
+  [MELEE_AXE]: 'axe',
+  [MELEE_KATANA]: 'katana',
+  [MELEE_SCYTHE]: 'scythe',
+  [MELEE_PICKAXE]: 'pickaxe',
+};
+
+/** Icon name for a melee kind. */
+export function meleeIconName(melee: number): IconName {
+  return MELEE_ICONS[melee as MeleeKind] ?? 'sword';
+}
+
+/** Weapon icon: the gun, or whatever melee weapon (`melee` kind) is in the melee slot. */
+export function weaponIcon(weapon: number, melee: number = MELEE_SWORD, cls = ''): string {
+  return iconSvg(weapon === WEAPON_GUN ? 'gun' : meleeIconName(melee), cls);
 }
 
 /** One badge per award: the icon(s) plus a short caption ("×3", "5", "revenge"...). */

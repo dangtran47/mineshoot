@@ -20,9 +20,15 @@ describe('icon bitmaps', () => {
     expect(svg).toContain('shape-rendering="crispEdges"');
     expect(iconSvg('sword')).toContain('fill="#8a5a2b"');
   });
-  it('weaponIcon maps 0→gun, 1→sword', () => {
+  it('weaponIcon maps 0→gun, 1→the melee kind in the slot', () => {
     expect(weaponIcon(0)).toContain('icon-gun');
+    expect(weaponIcon(0, 2)).toContain('icon-gun');
     expect(weaponIcon(1)).toContain('icon-sword');
+    expect(weaponIcon(1, 1)).toContain('icon-axe');
+    expect(weaponIcon(1, 2)).toContain('icon-katana');
+    expect(weaponIcon(1, 3)).toContain('icon-scythe');
+    expect(weaponIcon(1, 4)).toContain('icon-pickaxe');
+    expect(weaponIcon(1, 99)).toContain('icon-sword');
   });
 });
 

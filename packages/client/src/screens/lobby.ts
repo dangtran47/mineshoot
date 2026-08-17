@@ -1,5 +1,5 @@
-import { DEFAULT_DURATION_MIN, DURATION_OPTIONS_MIN, MAX_BOTS, MAX_NAME_LEN, MAX_PLAYERS, WEAPON_MODES } from '@mineshoot/shared';
-import type { WeaponMode } from '@mineshoot/shared';
+import { DEFAULT_DURATION_MIN, DURATION_OPTIONS_MIN, MAX_BOTS, MAX_NAME_LEN, MAX_PLAYERS, ROOM_MODES, WEAPON_MODES } from '@mineshoot/shared';
+import type { RoomMode, WeaponMode } from '@mineshoot/shared';
 import { createRoom, joinRoom, listRooms } from '../net';
 import type { GameRoom, RoomListEntry } from '../net';
 import { formatTime } from '../hud/hud';
@@ -8,9 +8,16 @@ const NICK_KEY = 'mineshoot.nick';
 const POLL_MS = 2000;
 
 const WEAPON_MODE_LABEL: Record<WeaponMode, string> = { all: 'Gun + Sword', gun: 'Gun only', sword: 'Sword only' };
+const ROOM_MODE_LABEL: Record<RoomMode, string> = { match: 'Deathmatch', training: 'Training range' };
+/** Bots a training range gets when the creator left the bot count at zero (a range needs dummies). */
+const TRAINING_DEFAULT_BOTS = 3;
 /** Short badge for the room list ('' for the default rule). */
 export function weaponModeBadge(mode: WeaponMode | undefined): string {
   return mode === 'gun' ? '\u{1F52B} only' : mode === 'sword' ? '\u{1F5E1}\uFE0F only' : '';
+}
+/** Short badge for the room list ('' for a normal match). */
+export function roomModeBadge(mode: RoomMode | undefined): string {
+  return mode === 'training' ? '\u{1F3AF} training' : '';
 }
 
 export interface LobbyOptions {
@@ -35,6 +42,7 @@ export function showLobby(opts: LobbyOptions): { dispose(): void } {
         <label>New room</label>
         <input class="roomname" maxlength="24" placeholder="Room name" />
         <select class="duration"></select>
+        <select class="mode" title="Room type"></select>
         <select class="bots" title="AI bots"></select>
         <select class="weapons" title="Allowed weapons"></select>
         <button class="primary create">Create room</button>
@@ -45,6 +53,7 @@ export function showLobby(opts: LobbyOptions): { dispose(): void } {
       </table>
       <div class="error"></div>
       <div class="help">WASD move · Space jump · Mouse aim · LMB attack · RMB charge sword · 1/2 or wheel switch weapon · Tab scoreboard.
+        Training range: bots are passive dummies and keys 3–7 pick any melee weapon.
         <a href="#" class="offline">Offline sandbox</a></div>
     </div>`;
   opts.container.appendChild(root);
@@ -52,6 +61,7 @@ export function showLobby(opts: LobbyOptions): { dispose(): void } {
   const nick = root.querySelector<HTMLInputElement>('.nick')!;
   const roomName = root.querySelector<HTMLInputElement>('.roomname')!;
   const duration = root.querySelector<HTMLSelectElement>('.duration')!;
+  const mode = root.querySelector<HTMLSelectElement>('.mode')!;
   const bots = root.querySelector<HTMLSelectElement>('.bots')!;
   const weapons = root.querySelector<HTMLSelectElement>('.weapons')!;
   const createBtn = root.querySelector<HTMLButtonElement>('.create')!;
@@ -67,6 +77,16 @@ export function showLobby(opts: LobbyOptions): { dispose(): void } {
     if (d === DEFAULT_DURATION_MIN) o.selected = true;
     duration.appendChild(o);
   }
+  for (const m of ROOM_MODES) {
+    const o = document.createElement('option');
+    o.value = m;
+    o.textContent = ROOM_MODE_LABEL[m];
+    mode.appendChild(o);
+  }
+  // A training range without dummies is an empty field: give it a few unless the creator chose some.
+  mode.addEventListener('change', () => {
+    if (mode.value === 'training' && Number(bots.value) === 0) bots.value = String(TRAINING_DEFAULT_BOTS);
+  });
   for (let n = 0; n <= MAX_BOTS; n++) {
     const o = document.createElement('option');
     o.value = String(n);
@@ -109,10 +129,19 @@ export function showLobby(opts: LobbyOptions): { dispose(): void } {
         nickname: n,
         bots: Number(bots.value),
         weapons: weapons.value as WeaponMode,
+        mode: mode.value as RoomMode,
       };
-      // Dev-only: ?testDurationMs=... shortens the match (server honours it only with MINESHOOT_TEST=1).
-      const testMs = import.meta.env.DEV ? Number(new URLSearchParams(location.search).get('testDurationMs')) : 0;
-      if (testMs > 0) options.testOverrides = { durationMs: testMs, respawnMs: 1000, spawnProtectMs: 500 };
+      // Dev-only: ?testDurationMs=... shortens the match, ?testDropMs=... speeds up weapon drops
+      // (the server honours them only with MINESHOOT_TEST=1).
+      const params = import.meta.env.DEV ? new URLSearchParams(location.search) : null;
+      const testMs = Number(params?.get('testDurationMs'));
+      const testDropMs = Number(params?.get('testDropMs'));
+      if (testMs > 0 || testDropMs > 0) {
+        options.testOverrides = {
+          ...(testMs > 0 ? { durationMs: testMs, respawnMs: 1000, spawnProtectMs: 500 } : {}),
+          ...(testDropMs > 0 ? { dropIntervalMs: testDropMs } : {}),
+        };
+      }
       const room = await createRoom(options);
       dispose();
       opts.onJoined(room);
@@ -158,8 +187,8 @@ export function showLobby(opts: LobbyOptions): { dispose(): void } {
         const full = r.clients >= r.maxClients;
         const botCount = r.metadata.bots ?? 0;
         const players = `${r.clients + botCount}/${MAX_PLAYERS}${botCount ? ` (\u{1F916} ${botCount})` : ''}`;
-        const badge = weaponModeBadge(r.metadata.weapons);
-        const name = `${escapeHtml(r.metadata.name)}${badge ? ` <span class="badge">${badge}</span>` : ''}`;
+        const badges = [roomModeBadge(r.metadata.mode), weaponModeBadge(r.metadata.weapons)].filter(Boolean);
+        const name = `${escapeHtml(r.metadata.name)}${badges.map((b) => ` <span class="badge">${b}</span>`).join('')}`;
         tr.innerHTML = `<td>${name}</td><td>${players}</td><td>${formatTime(left)}</td>
           <td><button class="join" data-id="${r.roomId}" ${full || busy ? 'disabled' : ''}>${full ? 'Full' : 'Join'}</button></td>`;
         return tr;

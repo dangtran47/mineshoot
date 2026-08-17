@@ -44,6 +44,8 @@ export interface Bot {
 export interface BotOptions {
   /** Room weapon rules; the bot only ever picks an allowed weapon. */
   weapons?: WeaponMode;
+  /** Training dummy: stands where it spawned, turns to face the nearest visible enemy, never attacks. */
+  passive?: boolean;
 }
 
 function wrapAngle(a: number): number {
@@ -62,6 +64,7 @@ export function createBot(rng: () => number, waypoints: SpawnPoint[], options: B
   const mode = options.weapons ?? DEFAULT_WEAPON_MODE;
   const gunOk = weaponAllowed(mode, WEAPON_GUN);
   const swordOk = weaponAllowed(mode, WEAPON_SWORD);
+  const passive = options.passive === true;
   let targetId: string | null = null;
   let acquiredAt = 0;
   let waypoint: SpawnPoint | null = null;
@@ -139,6 +142,16 @@ export function createBot(rng: () => number, waypoints: SpawnPoint[], options: B
       let weapon: Weapon = gunOk ? WEAPON_GUN : WEAPON_SWORD;
       let shoot = false;
       let swing = false;
+
+      if (passive) {
+        // Dummy: just watch whoever is closest.
+        if (best) {
+          const dx = best.x - eye.x;
+          const dz = best.z - eye.z;
+          turnToward(Math.atan2(-dx, -dz), 0, dt);
+        }
+        return { input, yaw, pitch, weapon, shoot, swing };
+      }
 
       if (best) {
         const chest = { x: best.x, y: best.y + PLAYER_HEIGHT * 0.6, z: best.z };

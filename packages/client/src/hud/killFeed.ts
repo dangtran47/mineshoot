@@ -1,5 +1,5 @@
-import { WEAPON_GUN, killTags } from '@mineshoot/shared';
-import type { KillAwards, Weapon } from '@mineshoot/shared';
+import { MELEE_AXE, MELEE_KATANA, MELEE_PICKAXE, MELEE_SCYTHE, MELEE_SWORD, WEAPON_GUN, killTags } from '@mineshoot/shared';
+import type { KillAwards, MeleeKind, Weapon } from '@mineshoot/shared';
 
 /** How a feed line relates to the local player: their kill, their death, or neither. */
 export type FeedKind = 'neutral' | 'good' | 'bad';
@@ -15,6 +15,8 @@ export interface KillLineInput extends KillAwards {
   killer: string;
   victim: string;
   weapon: Weapon;
+  /** Melee kind used (meaningful when weapon is the melee slot). */
+  melee?: MeleeKind;
   headshot: boolean;
 }
 
@@ -38,8 +40,16 @@ export class KillFeedModel {
   }
 }
 
+const MELEE_EMOJI: Record<MeleeKind, string> = {
+  [MELEE_SWORD]: '🗡️',
+  [MELEE_AXE]: '🪓',
+  [MELEE_KATANA]: '⚔️',
+  [MELEE_SCYTHE]: '🌙',
+  [MELEE_PICKAXE]: '⛏️',
+};
+
 /** "Alice 🔫🎯 Bob · DOUBLE KILL" — plain-text form of a feed line (accessible name / tooltip). */
 export function killFeedLine(k: KillLineInput): string {
-  const icon = (k.weapon === WEAPON_GUN ? '🔫' : '🗡️') + (k.headshot ? '🎯' : '');
+  const icon = (k.weapon === WEAPON_GUN ? '🔫' : (MELEE_EMOJI[k.melee ?? MELEE_SWORD] ?? '🗡️')) + (k.headshot ? '🎯' : '');
   return [`${k.killer} ${icon} ${k.victim}`, ...killTags(k)].join(' · ');
 }

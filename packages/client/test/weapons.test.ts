@@ -1,6 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { GUN_COOLDOWN_MS, GUN_MAG_SIZE, GUN_RELOAD_MS, SWORD_CHARGE_MAX_MS, SWORD_CHARGE_MS, SWORD_COOLDOWN_MS, WEAPON_GUN, WEAPON_SWORD } from '@mineshoot/shared';
-import type { Weapon } from '@mineshoot/shared';
+import {
+  ATTACK_HEAVY,
+  ATTACK_LIGHT,
+  GUN_COOLDOWN_MS,
+  GUN_MAG_SIZE,
+  GUN_RELOAD_MS,
+  MELEE_AXE,
+  MELEE_KATANA,
+  MELEE_SCYTHE,
+  MELEE_STATS,
+  MELEE_SWORD,
+  SWORD_CHARGE_MAX_MS,
+  SWORD_CHARGE_MS,
+  SWORD_COOLDOWN_MS,
+  WEAPON_GUN,
+  WEAPON_SWORD,
+  meleeChargeMaxMs,
+} from '@mineshoot/shared';
+import type { AttackKind, Weapon } from '@mineshoot/shared';
 import { Weapons } from '../src/game/weapons';
 
 function make(allowed?: Weapon[]): { w: Weapons; log: string[] } {
@@ -9,9 +26,11 @@ function make(allowed?: Weapon[]): { w: Weapons; log: string[] } {
     {
       onFire: () => log.push('fire'),
       onChargeStart: () => log.push('charge'),
-      onSwing: (charged) => log.push(charged ? 'swing:charged' : 'swing'),
+      onChargeCancel: () => log.push('chargeCancel'),
+      onSwing: (a: AttackKind) => log.push(a === ATTACK_HEAVY ? 'swing:heavy' : 'swing'),
       onSwitch: (wp) => log.push(`switch:${wp}`),
       onReload: () => log.push('reload'),
+      onMeleeChange: (k) => log.push(`melee:${k}`),
     },
     allowed,
   );
@@ -27,97 +46,130 @@ describe('Weapons', () => {
     w.mouseUp(GUN_COOLDOWN_MS + 2);
     expect(log).toEqual(['fire', 'fire']);
   });
-  it('sword: LMB press is an immediate light swing, gated by the cooldown; holding never charges', () => {
+  it('sword: LMB press is an immediate light swing, gated by the cooldown', () => {
     const { w, log } = make();
     w.select(WEAPON_SWORD);
     w.mouseDown(1000);
+    w.mouseUp(1001);
     expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'swing']);
-    expect(w.chargeFraction(1000 + SWORD_CHARGE_MS)).toBeNull();
-    w.update(1000 + SWORD_CHARGE_MAX_MS); // holding LMB does nothing more
-    w.mouseUp(1000 + SWORD_CHARGE_MAX_MS + 1);
-    w.mouseDown(1000 + SWORD_CHARGE_MAX_MS + 2); // cooldown long over → another light swing
-    w.mouseUp(1000 + SWORD_CHARGE_MAX_MS + 3);
-    w.mouseDown(1000 + SWORD_CHARGE_MAX_MS + 4); // inside cooldown → ignored
+    w.mouseDown(1000 + SWORD_COOLDOWN_MS - 1); // inside cooldown → ignored
+    w.mouseUp(1000 + SWORD_COOLDOWN_MS);
+    w.mouseDown(1000 + SWORD_COOLDOWN_MS + 1); // cooldown over → another light swing
+    w.mouseUp(1000 + SWORD_COOLDOWN_MS + 2);
     expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'swing', 'swing']);
-    expect(w.cooldownFraction(1000 + SWORD_CHARGE_MAX_MS + 2 + SWORD_COOLDOWN_MS)).toBe(1);
+    expect(w.cooldownFraction(1000 + SWORD_COOLDOWN_MS + 1 + SWORD_COOLDOWN_MS)).toBe(1);
+    expect(w.chargeFraction(1000 + SWORD_COOLDOWN_MS + 2)).toBeNull();
   });
-  it('sword: RMB press starts a charge, an early release is only a light swing', () => {
+  it('sword: holding LMB keeps swinging light every cooldown until released; never charges', () => {
+    const { w, log } = make();
+    w.select(WEAPON_SWORD);
+    w.mouseDown(0);
+    w.update(SWORD_COOLDOWN_MS - 1);
+    expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'swing']);
+    w.update(SWORD_COOLDOWN_MS);
+    w.update(SWORD_COOLDOWN_MS + 10);
+    expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'swing', 'swing']);
+    w.update(SWORD_COOLDOWN_MS * 2);
+    expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'swing', 'swing', 'swing']);
+    expect(w.charging).toBe(false);
+    w.mouseUp(SWORD_COOLDOWN_MS * 2 + 1);
+    w.update(SWORD_COOLDOWN_MS * 5);
+    expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'swing', 'swing', 'swing']);
+  });
+  it('sword: RMB press starts a charge at once; letting go early cancels it without a swing', () => {
     const { w, log } = make();
     w.select(WEAPON_SWORD);
     w.altDown(1000);
+    expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'charge']);
+    expect(w.charging).toBe(true);
     expect(w.chargeFraction(1000 + SWORD_CHARGE_MS / 2)).toBeCloseTo(0.5);
-    w.altUp(1100);
-    expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'charge', 'swing']);
-    expect(w.chargeFraction(1200)).toBeNull();
+    w.altUp(1000 + SWORD_CHARGE_MS - 1);
+    expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'charge', 'chargeCancel']);
+    expect(w.chargeFraction(1000 + SWORD_CHARGE_MS)).toBeNull();
+    expect(w.charging).toBe(false);
   });
-  it('sword: LMB during a charge is ignored; the charge keeps going', () => {
-    const { w, log } = make();
-    w.select(WEAPON_SWORD);
-    w.altDown(0);
-    w.mouseDown(100);
-    w.mouseUp(110);
-    expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'charge']);
-    expect(w.chargeFraction(SWORD_CHARGE_MS)).toBe(1);
-    w.altUp(SWORD_CHARGE_MS + 1);
-    expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'charge', 'swing:charged']);
-  });
-  it('sword: holding RMB past SWORD_CHARGE_MAX_MS auto-releases a charged swing once; a new press is needed to charge again', () => {
-    const { w, log } = make();
-    w.select(WEAPON_SWORD);
-    w.altDown(0);
-    w.update(SWORD_CHARGE_MAX_MS - 1);
-    expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'charge']);
-    w.update(SWORD_CHARGE_MAX_MS);
-    expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'charge', 'swing:charged']);
-    expect(w.chargeFraction(SWORD_CHARGE_MAX_MS)).toBeNull();
-    expect(w.cooldownFraction(SWORD_CHARGE_MAX_MS)).toBe(0);
-    // Still holding: nothing more happens, and releasing does not swing again.
-    w.update(SWORD_CHARGE_MAX_MS * 2);
-    w.altUp(SWORD_CHARGE_MAX_MS * 2 + 1);
-    expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'charge', 'swing:charged']);
-    // A fresh press after the cooldown starts a new charge.
-    w.altDown(SWORD_CHARGE_MAX_MS * 2 + SWORD_COOLDOWN_MS + 2);
-    expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'charge', 'swing:charged', 'charge']);
-  });
-  it('sword: holding RMB at least SWORD_CHARGE_MS then releasing is a charged swing', () => {
+  it('sword: holding RMB at least chargeMs then releasing is the heavy swing', () => {
     const { w, log } = make();
     w.select(WEAPON_SWORD);
     w.altDown(0);
     w.update(SWORD_CHARGE_MS); // holding never swings by itself before the max
     expect(w.chargeFraction(SWORD_CHARGE_MS * 2)).toBe(1);
     w.altUp(SWORD_CHARGE_MS + 5);
-    expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'charge', 'swing:charged']);
+    expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'charge', 'swing:heavy']);
+    expect(w.chargeFraction(SWORD_CHARGE_MS + 6)).toBeNull();
   });
-  it('sword: RMB during the swing cooldown does not start a charge', () => {
+  it('sword: RMB right after a light swing charges immediately (a full charge outlasts the cooldown)', () => {
     const { w, log } = make();
     w.select(WEAPON_SWORD);
     w.mouseDown(0);
-    w.mouseUp(10);
+    w.mouseUp(5);
     w.altDown(20);
-    expect(w.chargeFraction(30)).toBeNull();
-    w.altUp(40);
-    w.altDown(SWORD_COOLDOWN_MS + 1);
     expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'swing', 'charge']);
+    w.altUp(20 + SWORD_CHARGE_MS);
+    expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'swing', 'charge', 'swing:heavy']);
   });
-  it('gun: RMB does nothing', () => {
+  it('sword: a charge held past meleeChargeMaxMs auto-releases the heavy once; a new press is needed to charge again', () => {
+    const { w, log } = make();
+    w.select(WEAPON_SWORD);
+    w.altDown(0);
+    w.update(SWORD_CHARGE_MAX_MS - 1);
+    expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'charge']);
+    w.update(SWORD_CHARGE_MAX_MS);
+    expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'charge', 'swing:heavy']);
+    expect(w.chargeFraction(SWORD_CHARGE_MAX_MS)).toBeNull();
+    expect(w.cooldownFraction(SWORD_CHARGE_MAX_MS)).toBe(0);
+    // Still holding: no new charge, and releasing does not swing again.
+    w.update(SWORD_CHARGE_MAX_MS * 2);
+    w.altUp(SWORD_CHARGE_MAX_MS * 2 + 1);
+    expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'charge', 'swing:heavy']);
+    // A fresh press charges again.
+    w.altDown(SWORD_CHARGE_MAX_MS * 2 + 2);
+    expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'charge', 'swing:heavy', 'charge']);
+  });
+  it('sword: LMB is ignored while charging (held LMB resumes swinging after the heavy); RMB while charging does nothing', () => {
+    const { w, log } = make();
+    w.select(WEAPON_SWORD);
+    w.altDown(0);
+    w.mouseDown(100);
+    w.update(SWORD_COOLDOWN_MS + 200);
+    w.altDown(300);
+    expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'charge']);
+    expect(w.chargeFraction(SWORD_CHARGE_MS)).toBe(1);
+    w.altUp(SWORD_CHARGE_MS + 1);
+    expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'charge', 'swing:heavy']);
+    // LMB still held: light swings resume once the heavy has recovered.
+    w.update(SWORD_CHARGE_MS + 1 + SWORD_COOLDOWN_MS - 1);
+    expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'charge', 'swing:heavy']);
+    w.update(SWORD_CHARGE_MS + 1 + SWORD_COOLDOWN_MS);
+    expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'charge', 'swing:heavy', 'swing']);
+  });
+  it('gun: RMB does nothing; holding LMB fires, never charges', () => {
     const { w, log } = make();
     w.altDown(0);
-    w.update(SWORD_CHARGE_MAX_MS);
-    w.altUp(SWORD_CHARGE_MAX_MS + 1);
-    expect(log).toEqual([]);
+    w.altUp(1);
+    w.mouseDown(2);
+    w.update(2 + SWORD_CHARGE_MS);
+    w.mouseUp(2 + SWORD_CHARGE_MS + 1);
+    expect(log.filter((e) => e !== 'fire')).toEqual([]);
     expect(w.chargeFraction(10)).toBeNull();
   });
-  it('cancel and weapon switch drop the charge without swinging', () => {
+  it('cancel and weapon switch drop a charge without swinging (and tell the server)', () => {
     const { w, log } = make();
     w.select(WEAPON_SWORD);
     w.altDown(0);
     w.cancel();
     w.altUp(SWORD_CHARGE_MS * 2);
+    expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'charge', 'chargeCancel']);
     w.altDown(SWORD_CHARGE_MS * 3);
     w.select(WEAPON_GUN);
     w.altUp(SWORD_CHARGE_MS * 5);
-    expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'charge', 'charge', `switch:${WEAPON_GUN}`]);
+    expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'charge', 'chargeCancel', 'charge', 'chargeCancel', `switch:${WEAPON_GUN}`]);
     expect(w.chargeFraction(SWORD_CHARGE_MS * 6)).toBeNull();
+    // A cancel with no charge going says nothing.
+    w.select(WEAPON_SWORD);
+    w.mouseDown(SWORD_CHARGE_MS * 7);
+    w.cancel();
+    expect(log[log.length - 1]).toBe('swing');
   });
 
   it('gun: each shot spends a round; an empty magazine auto-reloads instead of firing', () => {
@@ -209,5 +261,59 @@ describe('Weapons', () => {
     expect(both.w.canSwitch).toBe(true);
     both.w.toggle();
     expect(both.w.current).toBe(WEAPON_SWORD);
+  });
+});
+
+describe('Weapons: melee kinds', () => {
+  it('starts with the sword; setMelee swaps stats (cooldown, charge, speed scale) and reports it', () => {
+    const { w, log } = make();
+    expect(w.melee).toBe(MELEE_SWORD);
+    expect(w.chargeSpeedScale).toBe(MELEE_STATS[MELEE_SWORD].chargeSpeedScale);
+    w.setMelee(MELEE_KATANA);
+    expect(log).toEqual([`melee:${MELEE_KATANA}`]);
+    expect(w.chargeSpeedScale).toBe(MELEE_STATS[MELEE_KATANA].chargeSpeedScale);
+    w.select(WEAPON_SWORD);
+    const cd = MELEE_STATS[MELEE_KATANA].attacks[ATTACK_LIGHT].cooldownMs;
+    w.mouseDown(1000);
+    w.mouseUp(1001);
+    w.mouseDown(1000 + cd - 1); // katana cooldown not yet over
+    w.mouseUp(1000 + cd);
+    w.mouseDown(1000 + cd + 1);
+    w.mouseUp(1000 + cd + 2);
+    expect(log.filter((e) => e === 'swing')).toHaveLength(2);
+    expect(w.cooldownFraction(1000 + cd + 1 + cd / 2)).toBeCloseTo(0.5);
+    // Charge threshold follows the kind.
+    const charge = MELEE_STATS[MELEE_KATANA].chargeMs;
+    const t0 = 5000;
+    w.altDown(t0);
+    expect(w.chargeFraction(t0 + charge / 2)).toBeCloseTo(0.5);
+    w.altUp(t0 + charge + 1);
+    expect(log[log.length - 1]).toBe('swing:heavy');
+    // A slow weapon: the same hold is not enough → cancelled.
+    w.setMelee(MELEE_AXE);
+    const t1 = 9000;
+    w.altDown(t1);
+    w.altUp(t1 + charge + 1);
+    expect(log[log.length - 1]).toBe('chargeCancel');
+    // Auto-release after chargeMs + hold window.
+    const t2 = 12000;
+    w.altDown(t2);
+    w.update(t2 + meleeChargeMaxMs(MELEE_AXE) - 1);
+    expect(log[log.length - 1]).toBe('charge');
+    w.update(t2 + meleeChargeMaxMs(MELEE_AXE));
+    expect(log[log.length - 1]).toBe('swing:heavy');
+    // The heavy's own cooldown gates the next light.
+    expect(w.cooldownFraction(t2 + meleeChargeMaxMs(MELEE_AXE) + MELEE_STATS[MELEE_AXE].attacks[ATTACK_HEAVY].cooldownMs)).toBe(1);
+  });
+  it('setMelee with the same kind is a no-op; changing kind mid-charge drops the charge', () => {
+    const { w, log } = make();
+    w.setMelee(MELEE_SWORD);
+    expect(log).toEqual([]);
+    w.select(WEAPON_SWORD);
+    w.altDown(0);
+    w.setMelee(MELEE_SCYTHE);
+    w.altUp(5000);
+    expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'charge', 'chargeCancel', `melee:${MELEE_SCYTHE}`]);
+    expect(w.chargeFraction(6000)).toBeNull();
   });
 });
