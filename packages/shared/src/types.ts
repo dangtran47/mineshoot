@@ -73,4 +73,6 @@ export interface RankRow {
   team?: number;
   /** CTF: flags captured. */
   captures?: number;
+  /** Live scoreboard only: false while dead / not yet spawned (dimmed row). */
+  alive?: boolean;
 }

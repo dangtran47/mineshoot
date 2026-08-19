@@ -4,10 +4,12 @@ import {
   GUN_COOLDOWN_MS,
   GUN_MAG_SIZE,
   GUN_RELOAD_MS,
+  MELEE_MIN_CHARGE_FRACTION,
   MELEE_SWORD,
   WEAPON_GUN,
   WEAPON_SWORD,
   attackSpec,
+  chargeFraction,
   meleeChargeMaxMs,
   meleeStats,
 } from '@mineshoot/shared';
@@ -32,10 +34,12 @@ export interface WeaponEvents {
  * fires on LMB press and auto-repeats while held, spending one round per shot
  * from a GUN_MAG_SIZE magazine (unlimited reloads). Melee: LMB swings light on
  * press and keeps swinging every cooldown while held (the animation alternates
- * left/right); RMB charges while held and releases the heavy after chargeMs —
- * an earlier release cancels, holding past the grace window releases the heavy
- * by itself and RMB must be pressed again to charge anew. LMB is ignored while
- * charging. Every attack's own recovery (cooldownMs) gates the next one.
+ * left/right); RMB charges while held and releases the heavy — fully charged
+ * after chargeMs, at proportional damage (server-decided) if let go earlier but
+ * past MELEE_MIN_CHARGE_FRACTION of it; a shorter tap cancels. Holding past the
+ * grace window releases the heavy by itself and RMB must be pressed again to
+ * charge anew. LMB is ignored while charging. Every attack's own recovery
+ * (cooldownMs) gates the next one.
  * Timings come from the melee weapon currently in the slot (sword by default,
  * or a picked-up drop: see setMelee).
  */
@@ -205,11 +209,11 @@ export class Weapons {
     this.events.onSwing(attack);
   }
 
-  /** Let go of a charge: the heavy if held long enough (and recovered), otherwise a cancel. */
+  /** Let go of a charge: the heavy if held at least the minimum fraction (and recovered), otherwise a cancel. */
   private release(now: number): void {
-    const charged = now - this.chargeStartAt! >= this.stats.chargeMs;
+    const enough = chargeFraction(this.melee, now - this.chargeStartAt!) >= MELEE_MIN_CHARGE_FRACTION;
     this.chargeStartAt = null;
-    if (charged && this.ready(now)) this.swing(now, ATTACK_HEAVY);
+    if (enough && this.ready(now)) this.swing(now, ATTACK_HEAVY);
     else this.events.onChargeCancel();
   }
 

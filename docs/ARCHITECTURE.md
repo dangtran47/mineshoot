@@ -62,7 +62,7 @@ Pure TypeScript, `"exports": "./src/index.ts"` (consumed as source by Vite and
 | Hitscan | `raycast.ts`, `hitbox.ts`, `gun.ts` | `raycastVoxels` (DDA), `segmentVsAABB`, `playerHitboxes(feet)` (legs/torso/head boxes), `resolveShot(world, shooter, targets, range)` |
 | Melee | `sword.ts`, `melee.ts`, `drops.ts` | `MELEE_STATS` per `MeleeKind` → `attacks[AttackKind]` (`AttackSpec`: cone, reach, damage, sweep, cooldown, anim), `meleeStats()`, `attackSpec()`, `swordVictims(world, pose, targets, attack, kind)`, `swordDamage()`, `pickDropKind()`, `pickDropSpot()`, `canPickUp()`, drop cadence constants |
 | Match | `spawn.ts`, `ranking.ts`, `kills.ts` | `pickSpawn(points, enemies, rng)` (farthest-from-enemies with randomness), `rankPlayers`, `rankCtf`, `kdRatio`, `KillTracker` (multi-kill / streak / shutdown awards) |
-| CTF | `ctf.ts` | `FlagState`, `flagTouch()`, `canScore()`, `carriedFlag()`, `teamSpawns()`, `pickTeam()`, `botRebalance()`, `matchWinner()`, `botCtfGoal()` (offence-first bot goal); teams (`TEAM_RED/BLUE`, `Team`, `otherTeam`, `teamName`) live in `protocol.ts` |
+| CTF | `ctf.ts` | `FlagState`, `flagTouch()`, `canScore()`, `canReturn()`, `carriedFlag()`, `teamSpawns()`, `pickTeam()`, `botRebalance()`, `matchWinner()`, `botCtfGoal()` (offence-first bot goal); teams (`TEAM_RED/BLUE`, `Team`, `otherTeam`, `teamName`) live in `protocol.ts` |
 | Bots | `bot.ts` | `createBot(rng, waypoints, { weapons, passive, skill })` → `{ compute(world, view, dt), reset() }`; `passive` = training dummy (faces the nearest enemy, never moves or attacks); `skill` (`BotSkill` in `protocol.ts`, profiles via `botSkillProfile()`) scales sight / turn rate / reaction / aim error / attack interval; `view.goal` / `view.carrying` drive CTF behaviour. Movement toward any destination goes through `nav.ts` |
 | Navigation | `nav.ts` | `standable()`, `nearestStandable(world, x, y, z)`, `findPath(world, from, to)` (A* over standable cells: step up 1 with a jump, drop ≤ `MAX_DROP`, diagonals only with both orthogonal cells free), `cellCentre()`; the bot re-plans every 1.5 s, when its destination moves 2 blocks or when it strays 3 blocks off the route |
 
@@ -107,9 +107,11 @@ three.js, no Colyseus, plain objects in and out, a test file per module.
   camera at eye height; frozen while dead.
 - `game/weapons.ts` — client-side weapon state machine: selection, gun
   cooldown/auto-fire/magazine/reload; melee light (LMB, repeats every
-  cooldown while held) and heavy (RMB held = charge, release ≥ `chargeMs`
-  swings, earlier release cancels, auto-release past `chargeMaxMs`; LMB is
-  ignored while charging); each attack's own `cooldownMs` gates the next;
+  cooldown while held) and heavy (RMB held = charge; release swings once
+  ≥ `MELEE_MIN_CHARGE_FRACTION` of `chargeMs` is held — the server scales
+  damage by `chargeFraction`, full at `chargeMs` — a shorter tap cancels,
+  auto-release past `chargeMaxMs`; LMB is ignored while charging); each
+  attack's own `cooldownMs` gates the next;
   per-`MeleeKind` timings.
 - `game/remotePlayers.ts` + `game/interpolation.ts` — a `SnapshotBuffer` per
   remote player, rendered `INTERP_DELAY_MS` (100 ms) in the past with
@@ -147,7 +149,7 @@ can play a one-shot effect exactly once.
 | C→S | `selectMelee` | `SelectMeleeMsg {epoch, melee}` | Training range only: put this melee weapon in slot 2 now |
 | C→S | `shoot` | `ShootMsg` (pose + epoch) | Fire the gun from this pose |
 | C→S | `charge` | `epoch` | Started holding RMB with melee (charge) |
-| C→S | `chargeCancel` | `epoch` | RMB let go before the heavy was ready (no swing) |
+| C→S | `chargeCancel` | `epoch` | RMB let go before the heavy could swing (no swing) |
 | C→S | `swing` | `SwingMsg` (pose + `attack`) | Melee attack: light / heavy |
 | C→S | `reload` | `epoch` | Started a gun reload |
 | C→S | `ping` / S→C `pong` | `number` | RTT display |
@@ -284,10 +286,15 @@ always walkable so bots' steer-and-hop pathing works). State:
 ```
 home ──enemy touch (canPickUp)──▶ carried ──carrier dies / leaves / G──▶ dropped
   ▲                                  │  x/y/z follow the carrier                │
-  │                                  │  canScore(): inside own base zone         │ owner touch → home
-  │                                  │  (CTF_BASE_ZONE_RADIUS) && own flag home  │ enemy touch → carried
-  └──────── captured (score++, event) ┘                                          │ FLAG_RETURN_MS → home
+  │                                  │  enemy carrier: canScore() inside own    │ any touch → carried
+  │                                  │  base zone (CTF_BASE_ZONE_RADIUS) &&      │ (one flag per player)
+  │                                  │  own flag home → captured (score++)       │ FLAG_RETURN_MS → home
+  │                                  │  owner carrier: canReturn() inside own    │
+  └────────────── returned ──────────┘  base zone → home                         │
 ```
+
+The owning team does not return its flag by touching it: they pick it up
+(`flagTouch` → `pickup`, same carry rules) and walk it into their base zone.
 
 Server rules that must stay server-side: no friendly fire (`targetsExcluding`
 and the bots' enemy list skip teammates), a carrier's `shoot` is dropped
@@ -306,8 +313,10 @@ from `matchWinner`) over one ranked table per team (`splitTeams`).
 
 **CTF bots**: `tickBots` adds `goal` (`botCtfGoal(team, id, self, flags,
 bases)`: offence first — the enemy flag wherever it is, escort a teammate who
-carries it, return the own flag if it lies closer, chase the enemy carrying
-the own flag within `BOT_CHASE_RADIUS`, carriers → home) and `carrying` to the
+carries it, pick up the own flag if it lies closer, chase the enemy carrying
+the own flag within `BOT_CHASE_RADIUS`, carriers of either flag → home; once
+the team holds the enemy flag but the own flag is away, non-carriers → the
+own flag wherever it is) and `carrying` to the
 `BotView`; the brain walks to the goal when no enemy is in sight, patrols
 nearby waypoints once there, and as a carrier runs for the goal melee-out,
 only swinging at enemies within reach. Teams alternate (bot1 red, bot2 blue, …).

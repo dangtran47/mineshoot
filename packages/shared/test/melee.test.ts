@@ -16,6 +16,8 @@ import {
   canPickUp,
   isAttackKind,
   isMeleeKind,
+  MELEE_MIN_CHARGE_FRACTION,
+  chargeFraction,
   meleeChargeMaxMs,
   meleeStats,
 } from '../src/melee';
@@ -126,5 +128,16 @@ describe('canPickUp', () => {
     expect(canPickUp({ x: 12, y: 5, z: 10.5 }, drop)).toBe(false);
     expect(canPickUp({ x: 10.5, y: 8, z: 10.5 }, drop)).toBe(false);
     expect(canPickUp({ x: 10.5, y: 4, z: 10.5 }, drop)).toBe(true);
+  });
+
+  it('chargeFraction: held / chargeMs clamped to 0..1; below MELEE_MIN_CHARGE_FRACTION a release is only a cancel', () => {
+    expect(chargeFraction(MELEE_SWORD, 0)).toBe(0);
+    expect(chargeFraction(MELEE_SWORD, SWORD_CHARGE_MS / 2)).toBeCloseTo(0.5);
+    expect(chargeFraction(MELEE_SWORD, SWORD_CHARGE_MS)).toBe(1);
+    expect(chargeFraction(MELEE_SWORD, SWORD_CHARGE_MS * 3)).toBe(1);
+    expect(chargeFraction(MELEE_AXE, 550)).toBeCloseTo(0.5);
+    expect(chargeFraction(MELEE_SWORD, -10)).toBe(0);
+    expect(MELEE_MIN_CHARGE_FRACTION).toBeGreaterThan(0);
+    expect(MELEE_MIN_CHARGE_FRACTION).toBeLessThan(0.5);
   });
 });

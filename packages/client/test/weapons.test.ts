@@ -9,6 +9,7 @@ import {
   MELEE_KATANA,
   MELEE_SCYTHE,
   MELEE_STATS,
+  MELEE_MIN_CHARGE_FRACTION,
   MELEE_SWORD,
   SWORD_CHARGE_MAX_MS,
   SWORD_CHARGE_MS,
@@ -76,17 +77,31 @@ describe('Weapons', () => {
     w.update(SWORD_COOLDOWN_MS * 5);
     expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'swing', 'swing', 'swing']);
   });
-  it('sword: RMB press starts a charge at once; letting go early cancels it without a swing', () => {
+  it('sword: RMB press starts a charge at once; a tap shorter than the minimum fraction cancels it without a swing', () => {
     const { w, log } = make();
     w.select(WEAPON_SWORD);
     w.altDown(1000);
     expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'charge']);
     expect(w.charging).toBe(true);
     expect(w.chargeFraction(1000 + SWORD_CHARGE_MS / 2)).toBeCloseTo(0.5);
-    w.altUp(1000 + SWORD_CHARGE_MS - 1);
+    w.altUp(1000 + SWORD_CHARGE_MS * MELEE_MIN_CHARGE_FRACTION - 1);
     expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'charge', 'chargeCancel']);
     expect(w.chargeFraction(1000 + SWORD_CHARGE_MS)).toBeNull();
     expect(w.charging).toBe(false);
+  });
+  it('sword: letting go after at least the minimum fraction (but before fully charged) still swings the heavy', () => {
+    const { w, log } = make();
+    w.select(WEAPON_SWORD);
+    w.altDown(1000);
+    w.altUp(1000 + SWORD_CHARGE_MS / 2);
+    expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'charge', 'swing:heavy']);
+    expect(w.charging).toBe(false);
+    // …unless the previous swing's recovery is still running: then it is only a cancel.
+    w.mouseDown(5000);
+    w.mouseUp(5001);
+    w.altDown(5002);
+    w.altUp(5002 + SWORD_CHARGE_MS / 2);
+    expect(log.slice(-3)).toEqual(['swing', 'charge', 'chargeCancel']);
   });
   it('sword: holding RMB at least chargeMs then releasing is the heavy swing', () => {
     const { w, log } = make();
@@ -289,11 +304,11 @@ describe('Weapons: melee kinds', () => {
     expect(w.chargeFraction(t0 + charge / 2)).toBeCloseTo(0.5);
     w.altUp(t0 + charge + 1);
     expect(log[log.length - 1]).toBe('swing:heavy');
-    // A slow weapon: the same hold is not enough → cancelled.
+    // A slow weapon: the same hold is only a quarter of its charge → below the minimum, cancelled.
     w.setMelee(MELEE_AXE);
     const t1 = 9000;
     w.altDown(t1);
-    w.altUp(t1 + charge + 1);
+    w.altUp(t1 + MELEE_STATS[MELEE_AXE].chargeMs * MELEE_MIN_CHARGE_FRACTION - 1);
     expect(log[log.length - 1]).toBe('chargeCancel');
     // Auto-release after chargeMs + hold window.
     const t2 = 12000;

@@ -12,7 +12,8 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden; }
 #app { width: 100%; height: 100%; position: relative; }
-canvas.game { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+canvas.game { position: absolute; inset: 0; display: block; width: 100%; height: 100%; transition: filter 0.5s ease-out; }
+canvas.game.dead { filter: grayscale(1) brightness(0.75); }
 button {
   font: inherit; color: var(--text); background: #2c3446; border: 1px solid var(--border);
   border-radius: 6px; padding: 8px 14px; cursor: pointer;
@@ -54,7 +55,7 @@ input, select {
 .lobby .field.grow { max-width: 320px; }
 .lobby .fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: end; }
 .lobby .fields .field.name { grid-column: span 2; }
-.lobby .fields .create { grid-column: span 2; justify-self: end; min-width: 160px; }
+.lobby .fields .create { grid-column: 1 / -1; justify-self: center; min-width: 200px; margin-top: 4px; }
 .lobby input, .lobby select { width: 100%; padding: 10px 12px; border-radius: 8px; background: #0f131c; transition: border-color 0.15s, box-shadow 0.15s; }
 .lobby input:hover, .lobby select:hover { border-color: #4d5872; }
 .lobby input:focus, .lobby select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(122, 201, 67, 0.2); }
@@ -174,6 +175,8 @@ input, select {
 .hud .scoreboard th, .hud .scoreboard td, .results th, .results td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--border); }
 .hud .scoreboard th, .results th { color: var(--muted); font-weight: 500; font-size: 13px; }
 .hud .scoreboard tr.me td, .results tr.me td { color: var(--accent); font-weight: 600; }
+.hud .scoreboard tr.dead td { opacity: 0.4; }
+.hud .scoreboard td.empty { color: var(--muted); text-align: center; }
 .hidden { display: none !important; }
 .dmg-flash { position: absolute; inset: 0; opacity: 0; pointer-events: none; transition: opacity 0.4s ease-out;
   background: radial-gradient(ellipse at center, rgba(255,0,0,0) 45%, rgba(200,0,0,0.55) 75%, rgba(120,0,0,0.95) 100%); }
@@ -232,5 +235,10 @@ input, select {
   border: 1px solid var(--team); color: var(--team); font-weight: 700; text-shadow: 0 1px 3px #000; pointer-events: none; animation: shield-pulse 0.9s ease-in-out infinite alternate; }
 .hud .carry.hidden { display: none; }
 .hud .feed .text { white-space: nowrap; }
-.hud .scoreboard tr.t-red td:nth-child(2) { color: var(--team-red); }
-.hud .scoreboard tr.t-blue td:nth-child(2) { color: var(--team-blue); }
+.hud .scoreboard.ctf { min-width: 0; width: min(880px, 94vw); }
+.hud .scoreboard .sides { display: flex; gap: 14px; align-items: flex-start; }
+.hud .scoreboard .side { flex: 1 1 0; min-width: 0; border: 1px solid var(--team); border-radius: 8px; padding: 8px 10px; background: color-mix(in srgb, var(--team) 8%, transparent); }
+.hud .scoreboard .side .teamhead { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; color: var(--team); font-weight: 800; font-size: 18px; }
+.hud .scoreboard .side .teamhead .score { font-size: 24px; }
+.hud .scoreboard .side td:nth-child(2) { color: var(--team); }
+.hud .scoreboard .side tr.me td:nth-child(2) { color: var(--accent); }

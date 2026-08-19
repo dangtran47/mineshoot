@@ -1,4 +1,4 @@
-import { ATTACK_HEAVY, GUN_MAG_SIZE, MAX_HP, MELEE_KINDS, MELEE_SWORD, TEAM_BLUE, TEAM_RED, WEAPON_GUN, meleeSelectable, meleeStats, teamName } from '@mineshoot/shared';
+import { ATTACK_HEAVY, GUN_MAG_SIZE, MAX_HP, MELEE_KINDS, MELEE_SWORD, TEAM_BLUE, TEAM_RED, WEAPON_GUN, meleeSelectable, meleeStats, splitTeams, teamName } from '@mineshoot/shared';
 import type { FlagStatus, MeleeKind, RankRow, RoomMode, Team, Weapon, WeaponMode } from '@mineshoot/shared';
 import { KillFeedModel, killFeedLine } from './killFeed';
 import type { FeedKind, KillLineInput } from './killFeed';
@@ -42,6 +42,35 @@ export function formatTime(ms: number): string {
 }
 
 /** DOM overlay for the in-game UI. All state is pushed in by the game screen. */
+/** One ranking table; `ctf` adds the captures column (rows are already ranked). */
+function scoreTable(rows: RankRow[], meId: string | undefined, ctf: boolean): HTMLTableElement {
+  const table = el('table');
+  const head = el('tr');
+  for (const h of ctf ? ['#', 'Player', 'C', 'K', 'D', 'K/D'] : ['#', 'Player', 'K', 'D', 'K/D']) head.append(el('th', undefined, h));
+  table.append(head);
+  if (!rows.length) {
+    const tr = el('tr');
+    const td = el('td', 'empty', 'Nobody');
+    td.colSpan = ctf ? 6 : 5;
+    tr.append(td);
+    table.append(tr);
+  }
+  rows.forEach((r, i) => {
+    const cls = [r.id === meId ? 'me' : '', r.alive === false ? 'dead' : ''].filter(Boolean).join(' ');
+    const tr = el('tr', cls || undefined);
+    tr.append(
+      el('td', undefined, String(i + 1)),
+      el('td', undefined, r.isBot ? `\u{1F916} ${r.name}` : r.name),
+      ...(ctf ? [el('td', undefined, String(r.captures ?? 0))] : []),
+      el('td', undefined, String(r.kills)),
+      el('td', undefined, String(r.deaths)),
+      el('td', undefined, kdRatio(r.kills, r.deaths).toFixed(2)),
+    );
+    table.append(tr);
+  });
+  return table;
+}
+
 export class Hud {
   readonly root = el('div', 'hud');
   private readonly timer = el('div', 'timer', '0:00');
@@ -329,28 +358,29 @@ export class Hud {
     this.flashTimer = Math.max(this.flashTimer, performance.now() + durationMs);
   }
 
-  /** Tab scoreboard. `ctf` adds a captures column and tints rows by team (rows come pre-ranked). */
-  setScoreboard(visible: boolean, rows?: RankRow[], meId?: string, ctf = false): void {
+  /**
+   * Tab scoreboard. Rows come pre-ranked; dead / unspawned rows are dimmed.
+   * With `ctf` (the live scores) the board splits into a Red and a Blue panel.
+   */
+  setScoreboard(visible: boolean, rows?: RankRow[], meId?: string, ctf?: { redScore: number; blueScore: number }): void {
     this.scoreboard.classList.toggle('hidden', !visible);
+    this.scoreboard.classList.toggle('ctf', !!ctf);
     if (!visible || !rows) return;
-    const table = el('table');
-    const head = el('tr');
-    for (const h of ctf ? ['#', 'Player', 'C', 'K', 'D', 'K/D'] : ['#', 'Player', 'K', 'D', 'K/D']) head.append(el('th', undefined, h));
-    table.append(head);
-    rows.forEach((r, i) => {
-      const cls = [r.id === meId ? 'me' : '', ctf && (r.team === TEAM_RED || r.team === TEAM_BLUE) ? TEAM_CLASS[r.team as Team] : ''].filter(Boolean).join(' ');
-      const tr = el('tr', cls || undefined);
-      tr.append(
-        el('td', undefined, String(i + 1)),
-        el('td', undefined, r.isBot ? `\u{1F916} ${r.name}` : r.name),
-        ...(ctf ? [el('td', undefined, String(r.captures ?? 0))] : []),
-        el('td', undefined, String(r.kills)),
-        el('td', undefined, String(r.deaths)),
-        el('td', undefined, kdRatio(r.kills, r.deaths).toFixed(2)),
-      );
-      table.append(tr);
-    });
-    this.scoreboard.replaceChildren(table);
+    if (!ctf) {
+      this.scoreboard.replaceChildren(scoreTable(rows, meId, false));
+      return;
+    }
+    const { red, blue } = splitTeams(rows);
+    const side = (team: Team, teamRows: RankRow[], score: number): HTMLElement => {
+      const box = el('div', `side ${TEAM_CLASS[team]}`);
+      const head = el('div', 'teamhead');
+      head.append(el('span', 'name', teamName(team)), el('span', 'score', String(score)));
+      box.append(head, scoreTable(teamRows, meId, true));
+      return box;
+    };
+    const sides = el('div', 'sides');
+    sides.append(side(TEAM_RED, red, ctf.redScore), side(TEAM_BLUE, blue, ctf.blueScore));
+    this.scoreboard.replaceChildren(sides);
   }
 
   update(now: number): void {

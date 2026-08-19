@@ -1,7 +1,7 @@
 import { PLAYER_HEIGHT } from './constants';
 import { eyePosition } from './gun';
 import { playerHitboxes } from './hitbox';
-import { ATTACK_LIGHT, MELEE_SWORD, attackSpec } from './melee';
+import { ATTACK_HEAVY, ATTACK_LIGHT, MELEE_SWORD, attackSpec } from './melee';
 import type { AttackKind, MeleeKind } from './melee';
 import { flatForward, forwardVector } from './playerPhysics';
 import { raycastVoxels, segmentVsAABB } from './raycast';
@@ -16,9 +16,14 @@ export interface SwordHit {
   part: SwordPart;
 }
 
-/** Damage of `attack` with `kind` (default: the plain sword) by part. */
-export function swordDamage(part: SwordPart, attack: AttackKind = ATTACK_LIGHT, kind: MeleeKind = MELEE_SWORD): number {
-  return attackSpec(kind, attack).damage[part];
+/**
+ * Damage of `attack` with `kind` (default: the plain sword) by part. A heavy
+ * released before it was fully charged (`charge` < 1, see chargeFraction) does
+ * that fraction of the full heavy damage, rounded; a light never scales.
+ */
+export function swordDamage(part: SwordPart, attack: AttackKind = ATTACK_LIGHT, kind: MeleeKind = MELEE_SWORD, charge = 1): number {
+  const full = attackSpec(kind, attack).damage[part];
+  return attack === ATTACK_HEAVY ? Math.round(full * Math.min(1, Math.max(0, charge))) : full;
 }
 
 const cosDeg = (deg: number): number => Math.cos((deg * Math.PI) / 180);

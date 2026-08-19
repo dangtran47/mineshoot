@@ -130,12 +130,12 @@ export interface ShootMsg {
   epoch: number;
 }
 export interface SwingMsg extends ShootMsg {
-  /** Which attack: light (LMB) or heavy (RMB held, released). A heavy claim is honoured only if a `charge` arrived ≥ chargeMs earlier, else it lands as light. */
+  /** Which attack: light (LMB) or heavy (RMB held, released). A heavy claim is honoured only if a `charge` arrived ≥ MELEE_MIN_CHARGE_FRACTION × chargeMs earlier (damage scales with the hold, full at chargeMs), else it lands as light. */
   attack: AttackKind;
 }
 /** Sent when the player starts holding RMB with melee (charge begins); payload is the spawn epoch. */
 export type ChargeMsg = number;
-/** Sent when RMB is released before the heavy was ready (no swing); payload is the spawn epoch. */
+/** Sent when RMB is released too early for any heavy (no swing); payload is the spawn epoch. */
 export type ChargeCancelMsg = number;
 /** Sent when the player starts reloading the gun; payload is the spawn epoch. */
 export type ReloadMsg = number;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { TEAM_BLUE, TEAM_NONE, TEAM_RED } from '@mineshoot/shared';
 import type { RankRow } from '@mineshoot/shared';
-import { ctfHeadline, ctfOutcome, splitTeams } from '../src/screens/results';
+import { ctfHeadline, ctfOutcome } from '../src/screens/results';
 
 const ctf = (redScore: number, blueScore: number) => ({ redScore, blueScore, captureLimit: 3 });
 
@@ -28,17 +28,3 @@ describe('ctfHeadline', () => {
   });
 });
 
-describe('splitTeams', () => {
-  const row = (id: string, team: number, captures: number, kills: number): RankRow => ({ id, name: id, kills, deaths: 0, team, captures });
-  it('groups rows per team, ranked by captures then kills', () => {
-    const rows = [row('b1', TEAM_BLUE, 0, 5), row('r1', TEAM_RED, 1, 0), row('r2', TEAM_RED, 2, 0), row('b2', TEAM_BLUE, 0, 9)];
-    const { red, blue } = splitTeams(rows);
-    expect(red.map((r) => r.id)).toEqual(['r2', 'r1']);
-    expect(blue.map((r) => r.id)).toEqual(['b2', 'b1']);
-  });
-  it('drops teamless rows and returns empty sides', () => {
-    const { red, blue } = splitTeams([row('x', TEAM_NONE, 0, 1)]);
-    expect(red).toEqual([]);
-    expect(blue).toEqual([]);
-  });
-});

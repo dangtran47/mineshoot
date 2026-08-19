@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CTF_BASE_ZONE_RADIUS } from '../src/constants';
-import { botCtfGoal, botRebalance, canScore, carriedFlag, flagTouch, matchWinner, pickTeam, teamSpawns } from '../src/ctf';
+import { botCtfGoal, botRebalance, canReturn, canScore, carriedFlag, flagTouch, matchWinner, pickTeam, teamSpawns } from '../src/ctf';
 import type { FlagState } from '../src/ctf';
 import { TEAM_BLUE, TEAM_NONE, TEAM_RED } from '../src/protocol';
 import type { Team } from '../src/protocol';
@@ -20,17 +20,24 @@ describe('teamSpawns', () => {
 });
 
 describe('flagTouch', () => {
+  const blue = { id: 'b1', team: TEAM_BLUE as Team };
+  const red = { id: 'r1', team: TEAM_RED as Team };
   it('enemies take a home flag and pick up a dropped one', () => {
-    expect(flagTouch(home(TEAM_RED), { team: TEAM_BLUE })).toBe('take');
-    expect(flagTouch(dropped(TEAM_RED), { team: TEAM_BLUE })).toBe('pickup');
+    expect(flagTouch(home(TEAM_RED), blue, [home(TEAM_RED), home(TEAM_BLUE)])).toBe('take');
+    expect(flagTouch(dropped(TEAM_RED), blue, [dropped(TEAM_RED), home(TEAM_BLUE)])).toBe('pickup');
   });
-  it('the owning team returns a dropped flag and ignores its own home flag', () => {
-    expect(flagTouch(dropped(TEAM_RED), { team: TEAM_RED })).toBe('return');
-    expect(flagTouch(home(TEAM_RED), { team: TEAM_RED })).toBeNull();
+  it('the owning team picks up its dropped flag (to carry it home) and ignores its own home flag', () => {
+    expect(flagTouch(dropped(TEAM_RED), red, [dropped(TEAM_RED), home(TEAM_BLUE)])).toBe('pickup');
+    expect(flagTouch(home(TEAM_RED), red, [home(TEAM_RED), home(TEAM_BLUE)])).toBeNull();
   });
   it('a carried flag cannot be touched', () => {
-    expect(flagTouch(carried(TEAM_RED, 'b1'), { team: TEAM_BLUE })).toBeNull();
-    expect(flagTouch(carried(TEAM_RED, 'b1'), { team: TEAM_RED })).toBeNull();
+    expect(flagTouch(carried(TEAM_RED, 'b2'), blue, [carried(TEAM_RED, 'b2'), home(TEAM_BLUE)])).toBeNull();
+    expect(flagTouch(carried(TEAM_RED, 'b2'), red, [carried(TEAM_RED, 'b2'), home(TEAM_BLUE)])).toBeNull();
+  });
+  it('a carrier cannot pick up a second flag', () => {
+    expect(flagTouch(dropped(TEAM_RED), red, [dropped(TEAM_RED), carried(TEAM_BLUE, 'r1')])).toBeNull();
+    expect(flagTouch(home(TEAM_BLUE), red, [carried(TEAM_RED, 'r1'), home(TEAM_BLUE)])).toBeNull();
+    expect(flagTouch(dropped(TEAM_BLUE), blue, [carried(TEAM_RED, 'b1'), dropped(TEAM_BLUE)])).toBeNull();
   });
 });
 
@@ -43,6 +50,14 @@ describe('canScore', () => {
     expect(canScore(inZone, [carried(TEAM_RED, 'b1'), carried(TEAM_BLUE, 'r1')], bases)).toBe(false);
     expect(canScore(inZone, [home(TEAM_RED), home(TEAM_BLUE)], bases)).toBe(false);
     expect(canScore(inZone, [home(TEAM_RED), carried(TEAM_BLUE, 'r2')], bases)).toBe(false);
+  });
+  it('canReturn: carrying the own flag inside the own base zone sends it home (the enemy flag never counts)', () => {
+    expect(canReturn(inZone, [carried(TEAM_RED, 'r1'), home(TEAM_BLUE)], bases)).toBe(true);
+    expect(canReturn(inZone, [carried(TEAM_RED, 'r1'), carried(TEAM_BLUE, 'b1')], bases)).toBe(true);
+    expect(canReturn({ ...inZone, x: bases[TEAM_RED].x + CTF_BASE_ZONE_RADIUS + 0.5 }, [carried(TEAM_RED, 'r1'), home(TEAM_BLUE)], bases)).toBe(false);
+    expect(canReturn(inZone, [home(TEAM_RED), carried(TEAM_BLUE, 'r1')], bases)).toBe(false);
+    expect(canReturn(inZone, [carried(TEAM_RED, 'r2'), home(TEAM_BLUE)], bases)).toBe(false);
+    expect(canReturn({ ...inZone, x: bases[TEAM_BLUE].x }, [carried(TEAM_RED, 'r1'), home(TEAM_BLUE)], bases)).toBe(false);
   });
   it('carriedFlag finds the flag a player holds', () => {
     const flags = [home(TEAM_RED), carried(TEAM_BLUE, 'r1')];
@@ -90,5 +105,19 @@ describe('botCtfGoal', () => {
   it('chases the enemy carrying the own flag only when they are near', () => {
     expect(botCtfGoal(TEAM_RED, 'bot1', west, [carried(TEAM_RED, 'b1', 30, 12), home(TEAM_BLUE)], bases)).toEqual({ x: 30, y: 5, z: 12 });
     expect(botCtfGoal(TEAM_RED, 'bot1', west, [carried(TEAM_RED, 'b1', 70, 12), home(TEAM_BLUE)], bases)).toEqual(bases[TEAM_BLUE]);
+  });
+  it('goes to get the own flag back when a teammate already holds the enemy flag (no camping at base)', () => {
+    const atBase = { x: bases[TEAM_RED].x, z: bases[TEAM_RED].z };
+    const held = carried(TEAM_BLUE, 'r2', bases[TEAM_RED].x, bases[TEAM_RED].z);
+    expect(botCtfGoal(TEAM_RED, 'bot1', atBase, [carried(TEAM_RED, 'b1', 80, 12), held], bases)).toEqual({ x: 80, y: 5, z: 12 });
+    expect(botCtfGoal(TEAM_RED, 'bot1', atBase, [dropped(TEAM_RED, 70, 30), held], bases)).toEqual({ x: 70, y: 5, z: 30 });
+  });
+  it('a carrier who cannot score waits at home (teammates fetch the own flag)', () => {
+    expect(botCtfGoal(TEAM_RED, 'bot1', west, [dropped(TEAM_RED, 70, 30), carried(TEAM_BLUE, 'bot1', 20, 24)], bases)).toEqual(bases[TEAM_RED]);
+    expect(botCtfGoal(TEAM_RED, 'bot1', west, [carried(TEAM_RED, 'b1', 70, 30), carried(TEAM_BLUE, 'bot1', 20, 24)], bases)).toEqual(bases[TEAM_RED]);
+  });
+  it('a bot carrying its own flag brings it home', () => {
+    expect(botCtfGoal(TEAM_RED, 'bot1', west, [carried(TEAM_RED, 'bot1', 20, 24), home(TEAM_BLUE)], bases)).toEqual(bases[TEAM_RED]);
+    expect(botCtfGoal(TEAM_RED, 'bot1', west, [carried(TEAM_RED, 'bot1', 20, 24), carried(TEAM_BLUE, 'r2', 60, 30)], bases)).toEqual(bases[TEAM_RED]);
   });
 });

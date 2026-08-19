@@ -197,6 +197,31 @@ describe('generateCtfWorld', () => {
     expect(y).toBeGreaterThan(6); // the ridge is high ground
   });
 
+  it('every drop-zone column can be reached on foot from the plateau centre (steps of at most one block up)', () => {
+    const { world, dropZone } = generateCtfWorld(9);
+    const key = (x: number, z: number): number => x * 1024 + z;
+    const start: [number, number] = [Math.floor((dropZone.minX + dropZone.maxX) / 2), Math.floor((dropZone.minZ + dropZone.maxZ) / 2)];
+    const seen = new Set<number>([key(...start)]);
+    const queue: [number, number][] = [start];
+    while (queue.length > 0) {
+      const [x, z] = queue.shift()!;
+      const top = columnTop(world, x, z);
+      for (const [nx, nz] of [
+        [x - 1, z],
+        [x + 1, z],
+        [x, z - 1],
+        [x, z + 1],
+      ]) {
+        if (nx < dropZone.minX || nx > dropZone.maxX || nz < dropZone.minZ || nz > dropZone.maxZ || seen.has(key(nx, nz))) continue;
+        if (columnTop(world, nx, nz) - top > 1) continue; // a jump clears one block
+        seen.add(key(nx, nz));
+        queue.push([nx, nz]);
+      }
+    }
+    for (let x = dropZone.minX; x <= dropZone.maxX; x++)
+      for (let z = dropZone.minZ; z <= dropZone.maxZ; z++) expect(seen.has(key(x, z)), `column ${x},${z}`).toBe(true);
+  });
+
   it('generateWorldFor picks the map by room mode', () => {
     expect(generateWorldFor('match', 5).world.sx).toBe(WORLD_SX);
     expect(generateWorldFor('training', 5).world.sx).toBe(WORLD_SX);

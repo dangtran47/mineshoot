@@ -62,6 +62,15 @@ describe('swordDamage', () => {
     expect(swordDamage('body', ATTACK_HEAVY)).toBe(70);
     expect(SWORD_DAMAGE.charged.head).toBe(100);
   });
+
+  it('a heavy released before it is fully charged does damage in proportion to the hold; a light never scales', () => {
+    expect(swordDamage('head', ATTACK_HEAVY, MELEE_SWORD, 0.5)).toBe(50);
+    expect(swordDamage('body', ATTACK_HEAVY, MELEE_SWORD, 0.5)).toBe(35);
+    expect(swordDamage('body', ATTACK_HEAVY, MELEE_SWORD, 0.3)).toBe(21);
+    expect(swordDamage('head', ATTACK_HEAVY, MELEE_SWORD, 1)).toBe(100);
+    expect(swordDamage('head', ATTACK_HEAVY, MELEE_AXE, 0.25)).toBe(25);
+    expect(swordDamage('head', ATTACK_LIGHT, MELEE_SWORD, 0.5)).toBe(45);
+  });
 });
 
 describe('swordVictims with drop weapons', () => {

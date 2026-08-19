@@ -166,16 +166,21 @@ export function generateCtfWorld(seed: number): GeneratedWorld {
       }
     }
   }
-  // Plateau corner posts: a little cover up top.
+  // Plateau corner posts: a little cover up top. Two blocks high with a
+  // one-block step on the side facing the plateau centre, so a drop that lands
+  // on top can still be jumped up to (a jump clears one block, not two).
   for (const [cx, cz] of [
     [hub.minX + 1, hub.minZ + 1],
     [hub.maxX - 2, hub.minZ + 1],
     [hub.minX + 1, hub.maxZ - 2],
     [hub.maxX - 2, hub.maxZ - 2],
   ]) {
+    const stepDz = cz < zMid ? 1 : 0;
     for (let dx = 0; dx < 2; dx++)
-      for (let dz = 0; dz < 2; dz++)
-        for (let y = CTF_HUB_TOP + 1; y <= CTF_HUB_TOP + 3; y++) setBlock(world, cx + dx, y, cz + dz, Block.Planks);
+      for (let dz = 0; dz < 2; dz++) {
+        const h = dz === stepDz ? 1 : 2;
+        for (let y = CTF_HUB_TOP + 1; y <= CTF_HUB_TOP + h; y++) setBlock(world, cx + dx, y, cz + dz, Block.Planks);
+      }
   }
 
   const towers: Rect[] = CTF_TOWERS.flatMap(([tx, tz]) => [

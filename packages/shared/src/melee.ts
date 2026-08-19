@@ -130,6 +130,18 @@ export function meleeChargeMaxMs(kind: MeleeKind): number {
   return meleeStats(kind).chargeMs + MELEE_CHARGE_HOLD_MS;
 }
 
+/**
+ * Letting go of RMB after holding at least this fraction of the weapon's
+ * chargeMs still swings the heavy, at damage scaled by `chargeFraction`; a
+ * shorter hold is a plain cancel (no swing), so a mis-tap costs nothing.
+ */
+export const MELEE_MIN_CHARGE_FRACTION = 0.25;
+
+/** How charged a heavy is after holding for `heldMs`: 0..1, 1 = fully charged. */
+export function chargeFraction(kind: MeleeKind, heldMs: number): number {
+  return Math.min(1, Math.max(0, heldMs / meleeStats(kind).chargeMs));
+}
+
 // Weapon drops
 /** A new drop appears this long after the previous one (uniform in the range). */
 export const DROP_INTERVAL_MIN_MS = 25_000;

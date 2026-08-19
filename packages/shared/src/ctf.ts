@@ -8,8 +8,10 @@ import type { SpawnPoint, Vec3 } from './types';
  * each at its base. Touch the enemy flag to carry it; bring it into your own
  * base zone while your own flag is home to score. A carrier who dies drops
  * the flag where they stood: teammates pick it up and carry on, the owning
- * team touches it to send it home, and nobody touching it for FLAG_RETURN_MS
- * sends it home too. Carriers are slower, melee-only and visible to everyone.
+ * team picks it up and has to carry it back into its own base zone to return
+ * it, and nobody touching it for FLAG_RETURN_MS sends it home by itself.
+ * Anyone carries at most one flag. Carriers are slower, melee-only and
+ * visible to everyone, whichever flag they hold.
  */
 
 export type FlagStatus = 'home' | 'carried' | 'dropped';
@@ -25,7 +27,7 @@ export interface FlagState {
   carrierId: string;
 }
 
-export type FlagTouch = 'take' | 'pickup' | 'return';
+export type FlagTouch = 'take' | 'pickup';
 
 /** The `n` spawn points nearest a base: that team respawns only there. */
 export function teamSpawns(spawns: SpawnPoint[], base: { x: number; z: number }, n = CTF_TEAM_SPAWN_COUNT): SpawnPoint[] {
@@ -35,12 +37,13 @@ export function teamSpawns(spawns: SpawnPoint[], base: { x: number; z: number },
 /**
  * What happens when `toucher` (alive, within pickup range) touches `flag`:
  * an enemy takes it from its stand or picks it up from the ground, the
- * owning team returns a dropped one, nothing else does anything.
+ * owning team picks up a dropped one (to carry it home), nothing else does
+ * anything — and someone already carrying a flag can't pick up another.
  */
-export function flagTouch(flag: FlagState, toucher: { team: Team }): FlagTouch | null {
-  if (flag.status === 'carried') return null;
+export function flagTouch(flag: FlagState, toucher: { id: string; team: Team }, flags: readonly FlagState[]): FlagTouch | null {
+  if (flag.status === 'carried' || carriedFlag(flags, toucher.id)) return null;
   if (flag.team !== toucher.team) return flag.status === 'home' ? 'take' : 'pickup';
-  return flag.status === 'dropped' ? 'return' : null;
+  return flag.status === 'dropped' ? 'pickup' : null;
 }
 
 /** The flag `playerId` carries, if any. */
@@ -61,6 +64,21 @@ export function canScore(
   if (!carried || carried.team === player.team) return false;
   const own = flags.find((f) => f.team === player.team);
   if (!own || own.status !== 'home') return false;
+  const base = bases[player.team];
+  return Math.hypot(player.x - base.x, player.z - base.z) <= CTF_BASE_ZONE_RADIUS;
+}
+
+/**
+ * True when `player` carries their own flag and stands within
+ * CTF_BASE_ZONE_RADIUS (horizontally) of their own flag stand: it goes home.
+ */
+export function canReturn(
+  player: { id: string; team: Team; x: number; z: number },
+  flags: readonly FlagState[],
+  bases: Record<Team, { x: number; z: number }>,
+): boolean {
+  const carried = carriedFlag(flags, player.id);
+  if (!carried || carried.team !== player.team) return false;
   const base = bases[player.team];
   return Math.hypot(player.x - base.x, player.z - base.z) <= CTF_BASE_ZONE_RADIUS;
 }
@@ -95,10 +113,13 @@ export const BOT_CHASE_RADIUS = 20;
 
 /**
  * Where a CTF bot wants to be. Bots play offence: go get the enemy flag and
- * run it home. On the way they still do the sensible thing — return the own
- * flag if it lies closer than the enemy flag, chase the enemy carrying the
- * own flag when they are near, and escort a teammate who has the enemy flag
- * (flag positions follow carriers).
+ * run it home. On the way they still do the sensible thing — pick up the own
+ * flag if it lies closer than the enemy flag (and carry it home), chase the
+ * enemy carrying the own flag when they are near, and escort a teammate who
+ * has the enemy flag (flag positions follow carriers). Once the team holds
+ * the enemy flag but cannot score because the own flag is away, everyone but
+ * the carrier goes to get it back wherever it is (pick it up, or hunt its
+ * carrier); a carrier of either flag always heads home.
  */
 export function botCtfGoal(
   team: Team,
@@ -107,12 +128,15 @@ export function botCtfGoal(
   flags: readonly FlagState[],
   bases: Record<Team, Vec3>,
 ): Vec3 | null {
-  if (carriedFlag(flags, botId)) return bases[team];
   const own = flags.find((f) => f.team === team);
   const enemy = flags.find((f) => f.team !== team);
   if (!enemy) return null;
   const at = (f: FlagState): Vec3 => ({ x: f.x, y: f.y, z: f.z });
   const dist = (f: FlagState): number => Math.hypot(f.x - self.x, f.z - self.z);
+  const ownAway = own !== undefined && own.status !== 'home';
+  if (carriedFlag(flags, botId)) return bases[team];
+  // The team already holds the enemy flag: the only thing left to do is get the own flag back.
+  if (ownAway && enemy.status === 'carried') return at(own);
   if (own && own.status === 'dropped' && dist(own) < dist(enemy)) return at(own);
   if (own && own.status === 'carried' && dist(own) <= BOT_CHASE_RADIUS) return at(own);
   return at(enemy);

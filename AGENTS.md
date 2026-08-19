@@ -133,8 +133,8 @@ packages/shared/src/
   sword.ts melee.ts drops.ts    swordVictims()/swordDamage(), MELEE_STATS (light/
                                 heavy AttackSpec per kind), attackSpec(),
                                 pickDropKind()/pickDropSpot()/canPickUp()
-  spawn.ts ranking.ts kills.ts  pickSpawn(), rankPlayers()/rankCtf(), KillTracker/awards
-  ctf.ts           FlagState, flagTouch(), canScore(), teamSpawns(), pickTeam(),
+  spawn.ts ranking.ts kills.ts  pickSpawn(), rankPlayers()/rankCtf()/splitTeams(), KillTracker/awards
+  ctf.ts           FlagState, flagTouch(), canScore(), canReturn(), teamSpawns(), pickTeam(),
                    botRebalance(), matchWinner(), botCtfGoal()
   bot.ts           createBot(rng, spawns, opts).compute(world, view, dt);
                    view.goal / view.carrying for CTF; skill profiles

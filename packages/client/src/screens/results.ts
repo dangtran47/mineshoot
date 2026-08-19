@@ -1,4 +1,4 @@
-import { TEAM_BLUE, TEAM_NONE, TEAM_RED, kdRatio, matchWinner, rankCtf, teamName } from '@mineshoot/shared';
+import { TEAM_BLUE, TEAM_NONE, TEAM_RED, kdRatio, matchWinner, splitTeams, teamName } from '@mineshoot/shared';
 import type { RankRow, Team } from '@mineshoot/shared';
 import type { CtfSummary } from './game';
 
@@ -21,14 +21,6 @@ export function ctfOutcome(ctf: CtfSummary, myTeam: number | undefined): CtfOutc
   const w = matchWinner(ctf.redScore, ctf.blueScore);
   if (w === TEAM_NONE) return 'draw';
   return w === myTeam ? 'victory' : 'defeat';
-}
-
-/** Rows per team, each side ranked by the CTF order; teamless rows are dropped. */
-export function splitTeams(rows: RankRow[]): { red: RankRow[]; blue: RankRow[] } {
-  return {
-    red: rankCtf(rows.filter((r) => r.team === TEAM_RED)),
-    blue: rankCtf(rows.filter((r) => r.team === TEAM_BLUE)),
-  };
 }
 
 const OUTCOME_LABEL: Record<CtfOutcome, string> = { victory: 'Victory', defeat: 'Defeat', draw: 'Draw' };

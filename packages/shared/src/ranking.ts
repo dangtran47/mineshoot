@@ -1,3 +1,4 @@
+import { TEAM_BLUE, TEAM_RED } from './protocol';
 import type { RankRow } from './types';
 
 /** Kills desc, then deaths asc, then name asc. Pure; returns a new array. */
@@ -19,6 +20,14 @@ export function rankCtf(rows: RankRow[]): RankRow[] {
     if (a.deaths !== b.deaths) return a.deaths - b.deaths;
     return a.name.localeCompare(b.name);
   });
+}
+
+/** CTF: rows per team, each side ranked by the CTF order; teamless rows are dropped. */
+export function splitTeams(rows: RankRow[]): { red: RankRow[]; blue: RankRow[] } {
+  return {
+    red: rankCtf(rows.filter((r) => r.team === TEAM_RED)),
+    blue: rankCtf(rows.filter((r) => r.team === TEAM_BLUE)),
+  };
 }
 
 export function kdRatio(kills: number, deaths: number): number {

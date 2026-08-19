@@ -14,6 +14,7 @@ import {
   TEAMS,
   botCtfGoal,
   botRebalance,
+  canReturn,
   canScore,
   carriedFlag,
   flagTouch,
@@ -31,7 +32,8 @@ import {
   canPickUp,
   createBot,
   createPhysState,
-  meleeStats,
+  MELEE_MIN_CHARGE_FRACTION,
+  chargeFraction,
   pickDropKind,
   pickDropSpot,
   stepPlayer,
@@ -590,15 +592,16 @@ export class ArenaRoom extends Room<RoomState> {
   /**
    * Server-authoritative melee attack with whatever the player holds in the melee
    * slot (sword or a picked-up drop). A heavy counts only if the client announced
-   * the charge (MSG.charge) at least the weapon's chargeMs earlier; otherwise it
-   * lands as a light. The previous attack's recovery gates this one.
+   * the charge (MSG.charge) at least MELEE_MIN_CHARGE_FRACTION of the weapon's
+   * chargeMs earlier, and does damage in proportion to how long it was held
+   * (full after chargeMs); otherwise it lands as a light. The previous attack's
+   * recovery gates this one.
    */
   private attackSwing(id: string, p: PlayerSchema, pose: PlayerPose, now: number, wants: AttackKind): void {
     const meta = this.meta.get(id)!;
     const kind = p.melee as MeleeKind;
-    const stats = meleeStats(kind);
-    const charged = meta.chargeStartAt > 0 && now - meta.chargeStartAt >= stats.chargeMs;
-    const attack: AttackKind = wants === ATTACK_HEAVY && !charged ? ATTACK_LIGHT : wants;
+    const charge = meta.chargeStartAt > 0 ? chargeFraction(kind, now - meta.chargeStartAt) : 0;
+    const attack: AttackKind = wants === ATTACK_HEAVY && charge < MELEE_MIN_CHARGE_FRACTION ? ATTACK_LIGHT : wants;
     meta.chargeStartAt = 0;
     this.syncFlags(id, p, now);
     if (now - meta.lastSwingAt < attackSpec(kind, meta.lastAttack).serverMinIntervalMs) return;
@@ -610,7 +613,7 @@ export class ArenaRoom extends Room<RoomState> {
     this.broadcast(MSG.swung, swung);
 
     for (const victim of swordVictims(this.world, pose, this.targetsExcluding(id, now), attack, kind)) {
-      const dmg = swordDamage(victim.part, attack, kind);
+      const dmg = swordDamage(victim.part, attack, kind, charge);
       const hit: HitMsg = { attackerId: id, victimId: victim.id, part: victim.part, damage: dmg, attack, melee: kind };
       this.broadcast(MSG.hit, hit);
       this.damage(id, victim.id, dmg, WEAPON_SWORD, victim.part === 'head', kind);
@@ -836,8 +839,9 @@ export class ArenaRoom extends Room<RoomState> {
 
   /**
    * Flags: carried ones follow their carrier, dropped ones go home after
-   * FLAG_RETURN_MS, carriers inside their own base zone (own flag home) score,
-   * and anyone alive touching a flag takes / picks up / returns it.
+   * FLAG_RETURN_MS, carriers inside their own base zone score (enemy flag,
+   * own flag home) or return (own flag), and anyone alive touching a flag
+   * takes / picks it up — one flag per player, one touch per tick.
    */
   private tickFlags(now: number): void {
     if (!this.ctf) return;
@@ -864,20 +868,21 @@ export class ArenaRoom extends Room<RoomState> {
         if (this.state.phase !== 'playing') return;
         continue;
       }
+      if (canReturn(player, flags, this.bases)) {
+        this.returnFlag(this.state.flags.get(flagKey(player.team))!, id);
+        continue;
+      }
       for (const f of this.state.flags.values()) {
         if (!canPickUp(p, f)) continue;
         const grace = this.flagDropGrace.get(f.team as Team);
         if (grace && grace.id === id && now < grace.until) continue;
-        const touch = flagTouch({ team: f.team as Team, status: f.status as FlagState['status'], x: f.x, y: f.y, z: f.z, carrierId: f.carrierId }, player);
+        const touch = flagTouch({ team: f.team as Team, status: f.status as FlagState['status'], x: f.x, y: f.y, z: f.z, carrierId: f.carrierId }, player, flags);
         if (!touch) continue;
-        if (touch === 'return') {
-          this.returnFlag(f, id);
-        } else {
-          f.status = 'carried';
-          f.carrierId = id;
-          this.flagDroppedAt.delete(f.team as Team);
-          this.flagEvent('taken', f, id);
-        }
+        f.status = 'carried';
+        f.carrierId = id;
+        this.flagDroppedAt.delete(f.team as Team);
+        this.flagEvent('taken', f, id);
+        break;
       }
     }
   }

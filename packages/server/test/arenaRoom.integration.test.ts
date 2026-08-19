@@ -239,6 +239,28 @@ describe('arena room', () => {
       await until(() => hits.length === 4, 3000, 'fourth hit');
       expect(swings).toHaveLength(swungBefore + 2);
 
+      // A heavy released after half the charge still lands as a heavy, at about half damage (body 70 → ~35; Alice is at 10 HP → kill).
+      await sleep(SWORD_SERVER_MIN_INTERVAL_MS + 20);
+      bob.send(MSG.charge, me(bob).spawnEpoch);
+      await sleep(SWORD_CHARGE_MS / 2);
+      bob.send(MSG.swing, { ...poseOf(bob, 32, 42, 0, WEAPON_SWORD, pitchToHeight(1.0, 2)), attack: ATTACK_HEAVY });
+      await until(() => hits.length === 5, 3000, 'partial heavy hit');
+      expect(hits[4]).toMatchObject({ victimId: alice.sessionId, part: 'body', attack: ATTACK_HEAVY, melee: MELEE_SWORD });
+      expect(hits[4].damage).toBeGreaterThanOrEqual(28);
+      expect(hits[4].damage).toBeLessThanOrEqual(42);
+      await until(() => kills.length === 3, 3000, 'third kill');
+      await until(() => me(alice).alive && me(alice).spawnEpoch === 3, 5000, 'alice respawned again');
+      alice.send(MSG.pose, poseOf(alice, 32, 40, 0));
+      bob.send(MSG.pose, poseOf(bob, 32, 42, 0, WEAPON_SWORD));
+      await until(() => Math.abs(me(alice).z - 40) < 0.01 && Math.abs(bobView().z - 42) < 0.01, 3000, 'both repositioned');
+      // Released almost at once (under the minimum fraction): it is only a light.
+      await sleep(SWORD_SERVER_MIN_INTERVAL_MS + 20);
+      bob.send(MSG.charge, me(bob).spawnEpoch);
+      bob.send(MSG.swing, { ...poseOf(bob, 32, 42, 0, WEAPON_SWORD, pitchToHeight(1.0, 2)), attack: ATTACK_HEAVY });
+      await until(() => hits.length === 6, 3000, 'tap heavy → light');
+      expect(hits[5]).toMatchObject({ victimId: alice.sessionId, part: 'body', damage: 30, attack: ATTACK_LIGHT });
+      await until(() => me(alice).hp === 70, 3000, 'alice hp 70');
+
       // ping/pong
       let pong = -1;
       alice.onMessage(MSG.pong, (t: number) => (pong = t));
@@ -254,7 +276,7 @@ describe('arena room', () => {
       await bob?.leave();
       await alice.leave();
     }
-  });
+  }, 15000);
 
   it('drops melee weapons mid-arena; walking over one arms you until you die', async () => {
     const alice: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, {
@@ -824,7 +846,7 @@ describe('arena room', () => {
       }
     }, 20000);
 
-    it('drops: a killed carrier drops the flag, owners return it, G hands it off, teammates pick it up, it returns on its own', async () => {
+    it('drops: a killed carrier drops the flag, owners carry it home, G hands it off, teammates pick it up, it returns on its own', async () => {
       const alice: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, {
         nickname: 'Alice',
         durationMin: 5,
@@ -857,6 +879,7 @@ describe('arena room', () => {
         }
 
         // Bob takes the red flag and gets shot: it drops where he stood.
+        const redHome = { x: flag(alice, TEAM_RED).x, y: flag(alice, TEAM_RED).y, z: flag(alice, TEAM_RED).z };
         standAt(bob, flag(bob, TEAM_RED));
         await until(() => flag(alice, TEAM_RED).carrierId === bob!.sessionId, 3000, 'bob has red flag');
         bob.send(MSG.pose, poseOf(bob, 32, 30, 0));
@@ -867,10 +890,18 @@ describe('arena room', () => {
         expect(flag(alice, TEAM_RED).x).toBeCloseTo(32, 2);
         expect(flag(alice, TEAM_RED).z).toBeCloseTo(30, 2);
         expect(events.at(-1)).toMatchObject({ kind: 'dropped', team: TEAM_RED, playerId: bob.sessionId });
-        // Alice (red) touches it: straight home.
+        // Alice (red) touches it: she carries her own flag and has to bring it into the red base zone herself.
         standAt(alice, flag(alice, TEAM_RED));
+        await until(() => flag(alice, TEAM_RED).carrierId === alice.sessionId, 3000, 'alice carries the red flag');
+        expect(flag(alice, TEAM_RED).status).toBe('carried');
+        expect(events.at(-1)).toMatchObject({ kind: 'taken', team: TEAM_RED, playerId: alice.sessionId });
+        alice.send(MSG.pose, poseOf(alice, 40, 40, 0)); // half-way: still carried, not home
+        await until(() => Math.abs(flag(alice, TEAM_RED).x - 40) < 0.01, 3000, 'flag follows alice');
+        expect(flag(alice, TEAM_RED).status).toBe('carried');
+        standAt(alice, redHome);
         await until(() => flag(alice, TEAM_RED).status === 'home', 3000, 'red flag returned');
         expect(events.at(-1)).toMatchObject({ kind: 'returned', team: TEAM_RED, playerId: alice.sessionId });
+        alice.send(MSG.pose, poseOf(alice, 32, 40, 0)); // off the stand again
 
         // Bob (respawned) takes it again and hands it off with G; Carol (blue) picks it up.
         await until(() => me(bob!).alive === true, 3000, 'bob respawned');

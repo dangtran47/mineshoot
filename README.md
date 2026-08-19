@@ -60,7 +60,7 @@ around, and shoot each other for 3–15 minutes. Then argue about the K/D table.
 | Mouse | Aim (click to lock the pointer, `Esc` to release) |
 | `W A S D` / `Space` | Move / jump |
 | `LMB` (tap or hold) | Shoot (gun) · **light** melee slash — keeps swinging while held, alternating left / right |
-| `RMB` hold (≥ charge time), release | **Heavy** melee blow — each weapon's own signature move (overhead, execute, iaido, reap, head-hunt) |
+| `RMB` hold, release | **Heavy** melee blow — each weapon's own signature move (overhead, execute, iaido, reap, head-hunt); full damage once fully charged, proportional if you let go earlier |
 | `R` | Reload (automatic when the magazine is empty) |
 | `1` / `2` / mouse wheel | Switch gun / melee |
 | `G` | Capture the Flag: put the flag you carry down (hand it to a teammate) |
@@ -80,10 +80,12 @@ Damage depends on where you hit:
 - **Sword** — short-range melee. `LMB` is a quick light slash (head 45 / body
   30, hits the nearest target in a 56° cone); hold it to keep slashing every
   0.5 s, left and right in turn. Hold `RMB` to charge (you walk 30 % slower)
-  and release ≥ 0.8 s later for the **heavy** overhead (head 100 / body 70,
-  narrower 40° cone but sweeps everyone in it); letting go earlier just
-  cancels, holding longer than 2 s releases it by itself. `LMB` does nothing
-  while you charge.
+  and release 0.8 s later for the full **heavy** overhead (head 100 / body 70,
+  narrower 40° cone but sweeps everyone in it). Letting go earlier still swings
+  the heavy at damage in proportion to how long you held (half the charge →
+  50 / 35), so a full charge is always worth much more; a tap shorter than a
+  quarter of the charge just cancels. Holding longer than 2 s releases it by
+  itself. `LMB` does nothing while you charge.
 
 ### Weapon drops
 
@@ -170,8 +172,10 @@ always walkable.
   fire; in a gun-only room a carrier cannot attack at all) and can hand the
   flag off with **`G`** (you cannot pick it straight back up for 1.5 s).
 - **Dropped flags.** A killed (or leaving) carrier drops the flag where they
-  stood. Teammates pick it up and carry on; the owning team touches it to send
-  it home; untouched for **20 s** it returns by itself.
+  stood. Teammates pick it up and carry on; the owning team picks it up too
+  and has to **carry it back into its own base zone** to return it (same
+  slow, melee-only carry — and nobody carries two flags at once); untouched
+  for **20 s** it returns by itself.
 - **Winning.** First to the capture limit (**3**, 5 or 10) or the higher score
   when time runs out; equal scores are a draw. The scoreboard adds a captures
   column and the results screen says **Victory / Defeat / Draw** for your side
@@ -182,9 +186,12 @@ always walkable.
   the slow melee-only carry and the "own flag must be home" rule are what turn
   a flag run into a tug of war rather than a sprint.
 - **Bots** join both teams (alternating) and play offence: they go for the
-  enemy flag and run it home, escort a teammate who has it, return their own
-  flag when it lies closer than the enemy flag, and chase the enemy carrying
-  their flag only when they are within 20 blocks.
+  enemy flag and run it home, escort a teammate who has it, pick up their own
+  flag and carry it home when it lies closer than the enemy flag, and chase
+  the enemy carrying their flag only when they are within 20 blocks. Once
+  their team holds the enemy flag but can't score because their own flag is
+  away, everyone but the carrier goes to get it back wherever it is (the
+  carrier waits at home).
 
 Weapon modes (`Gun + Sword` / `Gun only` / `Sword only`) apply as usual, and
 weapon drops fall on the central plateau more often than in the arena (see

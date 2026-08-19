@@ -218,7 +218,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
 
   const rankingRows = (): RankRow[] => {
     const rows: RankRow[] = [];
-    room?.state.players.forEach((p, id) => rows.push({ id, name: p.name, kills: p.kills, deaths: p.deaths, isBot: p.isBot, team: p.team, captures: p.captures }));
+    room?.state.players.forEach((p, id) => rows.push({ id, name: p.name, kills: p.kills, deaths: p.deaths, isBot: p.isBot, team: p.team, captures: p.captures, alive: p.alive }));
     return ctf ? rankCtf(rows) : rankPlayers(rows);
   };
   const ctfSummary = (): CtfSummary | undefined =>
@@ -255,11 +255,14 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
         local.alive = true;
         weapons.resetAmmo();
         hud.hideDeath();
+        renderer.domElement.classList.remove('dead');
       } else if (!me.alive && local.alive) {
         // Either killed, or (epoch 0) not yet spawned because we haven't clicked to play.
         local.alive = false;
         diedAt = epoch > 0 ? now : 0;
         weapons.cancel();
+        // Grey out the world while dead (not on the initial click-to-play overlay).
+        renderer.domElement.classList.toggle('dead', epoch > 0);
       }
       // Melee slot follows the server (drop pickups arm it, death resets it to the sword).
       weapons.setMelee(me.melee as MeleeKind);
@@ -320,7 +323,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     let text: string;
     switch (m.kind) {
       case 'taken':
-        text = `\u{1F6A9} ${actorName} took the ${flag}`;
+        text = actorTeam === m.team ? `\u{1F6A9} ${actorName} picked up the ${flag}` : `\u{1F6A9} ${actorName} took the ${flag}`;
         break;
       case 'dropped':
         text = `\u{1F6A9} ${actorName} dropped the ${flag}`;
@@ -465,7 +468,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     if (room) {
       hud.setTimer(Math.max(0, lastTimeLeft - (now - lastTimeLeftAt)));
       if (!local.alive && diedAt > 0) hud.setRespawnCountdown(respawnMsFor(roomMode) - (now - diedAt));
-      hud.setScoreboard(keys.isDown('Tab'), rankingRows(), meId, ctf);
+      hud.setScoreboard(keys.isDown('Tab'), rankingRows(), meId, ctfSummary());
     } else {
       hud.setTimer(0);
     }
