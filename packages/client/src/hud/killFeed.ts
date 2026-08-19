@@ -5,7 +5,10 @@ import type { KillAwards, MeleeKind, Weapon } from '@mineshoot/shared';
 export type FeedKind = 'neutral' | 'good' | 'bad';
 
 export interface FeedEntry {
-  line: KillLineInput;
+  /** A kill line, or null for a plain-text line (flag events). */
+  line: KillLineInput | null;
+  /** Text of a plain line ('' for kill lines). */
+  text: string;
   /** Milliseconds timestamp when it should disappear. */
   expiresAt: number;
   kind: FeedKind;
@@ -28,7 +31,13 @@ export class KillFeedModel {
   readonly entries: FeedEntry[] = [];
 
   push(line: KillLineInput, now: number, kind: FeedKind = 'neutral'): void {
-    this.entries.push({ line, expiresAt: now + FEED_TTL_MS, kind });
+    this.entries.push({ line, text: '', expiresAt: now + FEED_TTL_MS, kind });
+    while (this.entries.length > FEED_MAX) this.entries.shift();
+  }
+
+  /** A plain-text line ("🚩 Bob took the Red flag"). */
+  pushText(text: string, now: number, kind: FeedKind = 'neutral'): void {
+    this.entries.push({ line: null, text, expiresAt: now + FEED_TTL_MS, kind });
     while (this.entries.length > FEED_MAX) this.entries.shift();
   }
 

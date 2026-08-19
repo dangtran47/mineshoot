@@ -69,4 +69,8 @@ export interface RankRow {
   kills: number;
   deaths: number;
   isBot?: boolean;
+  /** CTF: TEAM_RED / TEAM_BLUE (absent or 0 elsewhere). */
+  team?: number;
+  /** CTF: flags captured. */
+  captures?: number;
 }

@@ -16,7 +16,7 @@ colleagues. npm workspaces monorepo, TypeScript everywhere, three packages:
 
 | Package | Role | Runtime deps |
 | --- | --- | --- |
-| `packages/shared` | Pure game core: constants, worldgen, physics, raycasts, gun/melee/drops/spawn/ranking rules, bot AI, wire protocol types | **none** (keep it that way) |
+| `packages/shared` | Pure game core: constants, worldgen (arena + CTF map), physics, raycasts, gun/melee/drops/spawn/CTF/ranking rules, bot AI, wire protocol types | **none** (keep it that way) |
 | `packages/server` | Colyseus 0.16 `arena` room; `GET /rooms`, `GET /health` | `colyseus`, `@colyseus/schema`, `@colyseus/ws-transport` |
 | `packages/client` | Vite + three.js: lobby, renderer, FPS controls, HUD, results | `three`, `colyseus.js` |
 
@@ -83,8 +83,19 @@ clicked-to-play). Keep sending it; keep checking it.
 **Weapon mode is enforced server-side.** `weaponAllowed(mode, weapon)` gates
 shoot/swing/charge/chargeCancel/reload and drops (`dropsEnabled`). Bots receive the mode
 too. Do not rely on the client hiding a button. Likewise the room mode
-(`'match'|'training'`): `meleeSelectable(mode, weapons)` gates `selectMelee`
+(`'match'|'training'|'ctf'`): `meleeSelectable(mode, weapons)` gates `selectMelee`
 on the server; a match never lets you pick a melee weapon without a drop.
+
+**Capture the flag is server-authoritative too.** Flags (`RoomState.flags`),
+scores, teams and every carrier rule live in `ArenaRoom.tickFlags` + pure
+helpers in `shared/ctf.ts`: no friendly fire (`targetsExcluding`), a carrier's
+`shoot` is dropped, spawns come from `teamSpawns()`, `selectTeam`/`dropFlag`
+are validated in `validate.ts`. The client only mirrors: melee lock, carry
+speed, flag meshes, HUD. Never trust the client for any of it.
+
+**World size comes from the world.** The CTF map is 96×48, the arena 64×64.
+Read `world.sx/sz` (or the `GeneratedWorld`'s `dropZone`/`bases`), never
+`WORLD_SX/SZ`, outside `worldgen.ts`; poses are clamped to the room's world.
 
 **Rate limits are server constants.** `GUN_SERVER_MIN_INTERVAL_MS`,
 `serverMinIntervalMs` per melee attack, `GUN_RELOAD_SERVER_MIN_MS` are slightly
@@ -114,23 +125,29 @@ packages/shared/src/
   protocol.ts      MSG names, message payload types, CreateOptions/RoomMetadata,
                    WeaponMode helpers
   types.ts         Vec3, World, PlayerPose, PlayerPhysState, MoveInput, Block…
-  worldgen.ts      generateWorld(seed) → { world, spawnPoints }; plateau bounds
+  worldgen.ts      generateWorld(seed) / generateCtfWorld(seed) / generateWorldFor(mode, seed)
+                   → { world, spawnPoints, dropZone, bases }; plateau bounds
   world.ts / noise.ts / rng.ts   voxel storage, 2D noise, seeded RNG
   aabb.ts collision.ts playerPhysics.ts   swept-AABB movement (stepPlayer)
   raycast.ts hitbox.ts gun.ts   voxel DDA, body-part boxes, resolveShot()
   sword.ts melee.ts drops.ts    swordVictims()/swordDamage(), MELEE_STATS (light/
                                 heavy AttackSpec per kind), attackSpec(),
                                 pickDropKind()/pickDropSpot()/canPickUp()
-  spawn.ts ranking.ts kills.ts  pickSpawn(), rankPlayers(), KillTracker/awards
-  bot.ts           createBot(rng, spawns, opts).compute(world, view, dt)
+  spawn.ts ranking.ts kills.ts  pickSpawn(), rankPlayers()/rankCtf(), KillTracker/awards
+  ctf.ts           FlagState, flagTouch(), canScore(), teamSpawns(), pickTeam(),
+                   botRebalance(), matchWinner(), botCtfGoal()
+  bot.ts           createBot(rng, spawns, opts).compute(world, view, dt);
+                   view.goal / view.carrying for CTF; skill profiles
+  nav.ts           standable()/nearestStandable()/findPath() grid A* the bots walk by
 
 packages/server/src/
   index.ts         PORT, SIMULATE_LATENCY_MS, listen
   app.ts           createApp(): http server (/health, /rooms) + Colyseus Server
-  rooms/schema.ts  RoomState / PlayerSchema / DropSchema (@colyseus/schema)
+  rooms/schema.ts  RoomState / PlayerSchema / DropSchema / FlagSchema (@colyseus/schema)
   rooms/validate.ts   parse*/sanitize* for every inbound message
   rooms/ArenaRoom.ts  the whole match: join/ready/spawn, poses, shoot/swing/
-                      charge/chargeCancel/reload, drops, bots, kills, timer, end
+                      charge/chargeCancel/reload, drops, bots, kills, timer, end,
+                      teams + flags (selectTeam/dropFlag/tickFlags)
 
 packages/client/src/
   main.ts          screen router: lobby → game → results; ?offline sandbox
@@ -142,7 +159,7 @@ packages/client/src/
                    (client-side weapon state machine: cooldowns, charge, mag)
   render/          scene, atlas, mesher/worldMesh (per-chunk face culling meshes),
                    humanoid + humanoidAnim, viewmodel, meleeProps, dropsView,
-                   tracers, bloodFx, nametag
+                   flagsView, tracers, bloodFx, nametag
   hud/             hud.ts (health/ammo/timer/scoreboard/overlays), killFeed,
                    damageFx, icons (inline SVG), style.css
   input/           keyboard.ts, pointerLock.ts
@@ -150,6 +167,7 @@ packages/client/src/
 packages/*/test/   vitest; server has a real Colyseus integration test that
                    boots the app on a random port and plays through messages
 scripts/smoke.mjs  playwright-core + headless Chrome (swiftshader) e2e
+docs/plans/        design plans behind bigger features (e.g. the CTF mode)
 ```
 
 ## How to work here
@@ -171,6 +189,9 @@ scripts/smoke.mjs  playwright-core + headless Chrome (swiftshader) e2e
 - **Message hygiene.** New inbound message → `MSG` name in `protocol.ts`, a
   `parseX` in `validate.ts` (with a test), a handler in `ArenaRoom` that goes
   through `actor()`, and `weaponAllowed` if it is weapon-specific.
+- **Bigger features start with a plan** in `docs/plans/YYYY-MM-DD-<topic>.md`
+  (context, decisions, numbers, file map, verification) and keep it updated
+  when the design shifts.
 - **README is the spec for numbers.** If you change a damage value, cooldown,
   cone, timer or the drop table, fix `README.md` in the same change.
 - **Don't widen scope.** Fix what was asked; mention adjacent problems in the
@@ -185,8 +206,10 @@ scripts/smoke.mjs  playwright-core + headless Chrome (swiftshader) e2e
   break silently.
 - Server vitest uses `pool: 'threads'` because the default forks pool chokes on
   Colyseus IPC noise. Don't "fix" that.
-- Bots and humans share `MAX_PLAYERS = 8`; the room sets `maxClients = 8 -
-  bots`.
+- Bots and humans share `MAX_PLAYERS = 16`; the room sets `maxClients = 16 -
+  bots`. In CTF bots alternate teams, play offence (`botCtfGoal`) and move
+  over on their own to keep the sides within one player of each other; humans
+  switch freely.
 - Players are not `alive` until they send `MSG.ready` (click to play). Tests
   and bots must account for that (`ready()` helper in the integration test).
 - Room registry is in Colyseus in-process memory: production must be a single

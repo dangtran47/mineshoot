@@ -7,6 +7,7 @@ import type { MeleeProp } from './meleeProps';
 
 export const PLAYER_COLORS: readonly number[] = [
   0xe74c3c, 0x3498db, 0x2ecc71, 0xf1c40f, 0x9b59b6, 0xe67e22, 0x1abc9c, 0xecf0f1,
+  0xc0392b, 0x2980b9, 0x27ae60, 0xd35400, 0x8e44ad, 0xf39c12, 0x16a085, 0x95a5a6,
 ];
 
 const SKIN = 0xf1c27d;
@@ -139,6 +140,10 @@ export class Humanoid {
     const p = this.anim.pose(now);
     this.armR.rotation.x = p.armPitch;
     this.armR.rotation.z = p.armRoll;
+    // Wrist bend: the sword group maps prop -z onto the arm at rotation.x = -π/2;
+    // adding the tilt swings the blade tip forward/up (same sense as arm pitch), so
+    // the blade's absolute pitch is armPitch + bladeTilt.
+    this.sword.rotation.x = -Math.PI / 2 + p.bladeTilt;
     for (const m of this.prop.glow) m.emissiveIntensity = p.swordGlow * 1.5;
     this.gun.position.y = -0.6 + p.gunKick * 0.12; // recoil: gun jolts back up the arm
     this.muzzle.visible = p.muzzleFlash;

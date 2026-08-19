@@ -3,6 +3,7 @@ import type { RankRow } from '@mineshoot/shared';
 import type { GameRoom } from './net';
 import { showLobby } from './screens/lobby';
 import { startGame } from './screens/game';
+import type { CtfSummary } from './screens/game';
 import { showResults } from './screens/results';
 
 const app = document.getElementById('app')!;
@@ -30,18 +31,25 @@ function game(room: GameRoom): void {
       container: app,
       room,
       seed: room.state.seed,
-      onEnded: (ranking, meId, roomName) => results(room, ranking, meId, roomName),
+      onEnded: (ranking, meId, roomName, ctf) => results(room, ranking, meId, roomName, ctf),
       onLeft: (message) => lobby(message),
     }),
   );
 }
 
-function results(room: GameRoom, ranking: RankRow[], meId: string, roomName: string): void {
+function results(room: GameRoom, ranking: RankRow[], meId: string, roomName: string, ctf?: CtfSummary): void {
   swap(
-    showResults(app, ranking, meId, roomName, () => {
-      void room.leave();
-      lobby();
-    }),
+    showResults(
+      app,
+      ranking,
+      meId,
+      roomName,
+      () => {
+        void room.leave();
+        lobby();
+      },
+      ctf,
+    ),
   );
 }
 

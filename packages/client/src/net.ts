@@ -1,7 +1,7 @@
 import { Client } from 'colyseus.js';
 import type { Room } from 'colyseus.js';
 import { ROOM_NAME } from '@mineshoot/shared';
-import type { CreateOptions, RoomMetadata, RoomMode, WeaponMode } from '@mineshoot/shared';
+import type { CreateOptions, FlagStatus, RoomMetadata, RoomMode, WeaponMode } from '@mineshoot/shared';
 
 /** Structural views over the server's synced schema (decoded via reflection). */
 export interface NetPlayer {
@@ -24,6 +24,19 @@ export interface NetPlayer {
   shielded: boolean;
   charging: boolean;
   reloading: boolean;
+  /** CTF: TEAM_RED / TEAM_BLUE (TEAM_NONE elsewhere). */
+  team: number;
+  /** CTF: flags captured. */
+  captures: number;
+}
+/** CTF: one team's flag; x/y/z follow the carrier while carried. */
+export interface NetFlag {
+  team: number;
+  status: FlagStatus;
+  x: number;
+  y: number;
+  z: number;
+  carrierId: string;
 }
 export interface NetDrop {
   kind: number;
@@ -47,6 +60,11 @@ export interface NetRoomState {
   timeLeftMs: number;
   players: NetMap<NetPlayer>;
   drops: NetMap<NetDrop>;
+  /** CTF: flags keyed by team ('1' red, '2' blue); empty otherwise. */
+  flags: NetMap<NetFlag>;
+  redScore: number;
+  blueScore: number;
+  captureLimit: number;
 }
 export type GameRoom = Room<NetRoomState>;
 
@@ -77,10 +95,11 @@ export async function createRoom(options: CreateOptions): Promise<GameRoom> {
   return waitForSelf(room);
 }
 
-export async function joinRoom(roomId: string, nickname: string): Promise<GameRoom> {
+/** `team` (CTF): TEAM_RED / TEAM_BLUE, or TEAM_NONE / omitted to let the server pick the smaller side. */
+export async function joinRoom(roomId: string, nickname: string, team = 0): Promise<GameRoom> {
   let room: GameRoom;
   try {
-    room = await new Client(WS_URL).joinById<NetRoomState>(roomId, { nickname });
+    room = await new Client(WS_URL).joinById<NetRoomState>(roomId, { nickname, team });
   } catch (error) {
     throw new Error(friendlyError(error, 'Could not join room'));
   }

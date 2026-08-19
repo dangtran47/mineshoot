@@ -17,8 +17,8 @@ import {
   WEAPON_GUN,
   WEAPON_SWORD,
 } from '@mineshoot/shared';
-import type { HitMsg, KillMsg, PickupMsg, ShotMsg, SwungMsg } from '@mineshoot/shared';
-import { DROP_MAX_ACTIVE, MELEE_KATANA, MELEE_STATS, MELEE_SWORD, PLATEAU_MAX, PLATEAU_MIN } from '@mineshoot/shared';
+import type { FlagEventMsg, HitMsg, KillMsg, PickupMsg, ShotMsg, SwungMsg } from '@mineshoot/shared';
+import { CTF_WORLD_SX, DROP_MAX_ACTIVE, MAX_PLAYERS, MELEE_KATANA, MELEE_STATS, MELEE_SWORD, PLATEAU_MAX, PLATEAU_MIN, TEAM_BLUE, TEAM_RED } from '@mineshoot/shared';
 import { createApp } from '../src/app';
 import type { RoomListEntry } from '../src/app';
 
@@ -354,6 +354,7 @@ describe('arena room', () => {
       nickname: 'Human',
       durationMin: 5,
       bots: 2,
+      botSkill: 'hard',
       testOverrides: { respawnMs: 500, spawnProtectMs: 0 },
     });
     const kills: KillMsg[] = [];
@@ -370,8 +371,9 @@ describe('arena room', () => {
 
       const rooms = (await (await fetch(`${httpUrl}/rooms`)).json()) as RoomListEntry[];
       const listed = rooms.find((r) => r.roomId === room.roomId)!;
-      expect(listed.maxClients).toBe(6); // 8 - 2 bots
+      expect(listed.maxClients).toBe(MAX_PLAYERS - 2); // bots take player slots
       expect(listed.metadata.bots).toBe(2);
+      expect(listed.metadata.botSkill).toBe('hard');
 
       // Bots move under server physics.
       const start = { x: bot1.x, z: bot1.z };
@@ -747,5 +749,211 @@ describe('arena room', () => {
     const listed = (await (await fetch(`${httpUrl}/rooms`)).json()) as RoomListEntry[];
     expect(listed.find((r) => r.roomId === room.roomId)).toBeUndefined();
     await until(() => leaveCode !== -1, 3000, 'server disconnect');
+  });
+
+  describe('capture the flag', () => {
+    const flag = (room: AnyRoom, team: number): any => room.state.flags.get(String(team));
+    /** Stand right on a flag / spot (feet at its height, so canPickUp's dy check passes). */
+    const standAt = (room: AnyRoom, at: { x: number; y: number; z: number }): void => {
+      room.send(MSG.pose, { x: at.x, y: at.y, z: at.z, yaw: 0, pitch: 0, epoch: me(room).spawnEpoch, weapon: WEAPON_SWORD });
+    };
+
+    it('teams, take → carry (no shooting) → score in the base zone, capture limit ends the match', async () => {
+      const alice: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, {
+        name: 'CTF',
+        durationMin: 5,
+        nickname: 'Alice',
+        mode: 'ctf',
+        captureLimit: 3,
+        team: TEAM_RED,
+        testOverrides: { respawnMs: 200, spawnProtectMs: 0 },
+      });
+      const events: FlagEventMsg[] = [];
+      const shots: ShotMsg[] = [];
+      alice.onMessage(MSG.flag, (m: FlagEventMsg) => events.push(m));
+      alice.onMessage(MSG.shot, (m: ShotMsg) => shots.push(m));
+      alice.onMessage(MSG.kill, () => {});
+      let bob: AnyRoom | null = null;
+      try {
+        await ready(alice);
+        expect(alice.state.mode).toBe('ctf');
+        expect(alice.state.captureLimit).toBe(3);
+        expect(alice.state.flags.size).toBe(2);
+        expect(flag(alice, TEAM_RED).status).toBe('home');
+        expect(flag(alice, TEAM_BLUE).status).toBe('home');
+        expect(flag(alice, TEAM_RED).x).toBeLessThan(CTF_WORLD_SX / 4);
+        expect(flag(alice, TEAM_BLUE).x).toBeGreaterThan((CTF_WORLD_SX * 3) / 4);
+        expect(me(alice).team).toBe(TEAM_RED);
+        expect(me(alice).color).toBe(0);
+        expect(me(alice).x).toBeLessThan(CTF_WORLD_SX / 2); // spawned on the red side
+
+        bob = await new Client(wsUrl).joinById(alice.roomId, { nickname: 'Bob', team: TEAM_BLUE });
+        bob.onMessage(MSG.flag, () => {});
+        bob.onMessage(MSG.shot, () => {});
+        bob.onMessage(MSG.kill, () => {});
+        await ready(bob);
+        expect(me(bob).team).toBe(TEAM_BLUE);
+        expect(me(bob).color).toBe(1);
+        expect(me(bob).x).toBeGreaterThan(CTF_WORLD_SX / 2);
+        const rooms = (await (await fetch(`${httpUrl}/rooms`)).json()) as RoomListEntry[];
+        expect(rooms.find((r) => r.roomId === alice.roomId)!.metadata).toMatchObject({ mode: 'ctf', captureLimit: 3, teams: [1, 1] });
+
+        for (let capture = 1; capture <= 3; capture++) {
+          // Alice runs onto the blue flag: she carries it, and it follows her.
+          standAt(alice, flag(alice, TEAM_BLUE));
+          await until(() => flag(alice, TEAM_BLUE).status === 'carried', 3000, 'blue flag taken');
+          expect(flag(alice, TEAM_BLUE).carrierId).toBe(alice.sessionId);
+          expect(events.at(-1)).toMatchObject({ kind: 'taken', team: TEAM_BLUE, playerId: alice.sessionId, playerName: 'Alice' });
+          // Carriers cannot shoot.
+          alice.send(MSG.shoot, poseOf(alice, 32, 40, 0));
+          await sleep(150);
+          expect(shots).toHaveLength(0);
+          // Home into the base zone (a few blocks off the stand still counts).
+          const home = flag(alice, TEAM_RED);
+          standAt(alice, { x: home.x + 2, y: home.y, z: home.z + 1 });
+          await until(() => alice.state.redScore === capture, 3000, `capture ${capture}`);
+          expect(events.at(-1)).toMatchObject({ kind: 'captured', team: TEAM_BLUE, playerId: alice.sessionId, redScore: capture, blueScore: 0 });
+          expect(me(alice).captures).toBe(capture);
+          expect(flag(alice, TEAM_BLUE).status).toBe('home');
+        }
+        await until(() => alice.state.phase === 'ended', 3000, 'capture limit ends the match');
+        expect(alice.state.blueScore).toBe(0);
+      } finally {
+        await bob?.leave();
+        await alice.leave();
+      }
+    }, 20000);
+
+    it('drops: a killed carrier drops the flag, owners return it, G hands it off, teammates pick it up, it returns on its own', async () => {
+      const alice: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, {
+        nickname: 'Alice',
+        durationMin: 5,
+        mode: 'ctf',
+        captureLimit: 10,
+        team: TEAM_RED,
+        testOverrides: { respawnMs: 200, spawnProtectMs: 0, flagReturnMs: 400 },
+      });
+      const events: FlagEventMsg[] = [];
+      alice.onMessage(MSG.flag, (m: FlagEventMsg) => events.push(m));
+      alice.onMessage(MSG.shot, () => {});
+      alice.onMessage(MSG.kill, () => {});
+      let bob: AnyRoom | null = null;
+      let carol: AnyRoom | null = null;
+      try {
+        await ready(alice);
+        bob = await new Client(wsUrl).joinById(alice.roomId, { nickname: 'Bob', team: TEAM_BLUE });
+        carol = await new Client(wsUrl).joinById(alice.roomId, { nickname: 'Carol' }); // no preference → the smaller team (red 1, blue 1 → either); force below
+        for (const r of [bob, carol]) {
+          r.onMessage(MSG.flag, () => {});
+          r.onMessage(MSG.shot, () => {});
+          r.onMessage(MSG.kill, () => {});
+        }
+        await ready(bob);
+        await ready(carol);
+        if (me(carol).team !== TEAM_BLUE) {
+          carol.send(MSG.selectTeam, TEAM_BLUE);
+          await until(() => me(carol!).team === TEAM_BLUE, 3000, 'carol blue');
+          await until(() => me(carol!).alive === true, 3000, 'carol respawned on blue');
+        }
+
+        // Bob takes the red flag and gets shot: it drops where he stood.
+        standAt(bob, flag(bob, TEAM_RED));
+        await until(() => flag(alice, TEAM_RED).carrierId === bob!.sessionId, 3000, 'bob has red flag');
+        bob.send(MSG.pose, poseOf(bob, 32, 30, 0));
+        alice.send(MSG.pose, poseOf(alice, 32, 40, 0));
+        await until(() => Math.abs(alice.state.players.get(bob!.sessionId).z - 30) < 0.01, 3000, 'bob in the sky');
+        alice.send(MSG.shoot, poseOf(alice, 32, 40, 0)); // level headshot
+        await until(() => flag(alice, TEAM_RED).status === 'dropped', 3000, 'red flag dropped');
+        expect(flag(alice, TEAM_RED).x).toBeCloseTo(32, 2);
+        expect(flag(alice, TEAM_RED).z).toBeCloseTo(30, 2);
+        expect(events.at(-1)).toMatchObject({ kind: 'dropped', team: TEAM_RED, playerId: bob.sessionId });
+        // Alice (red) touches it: straight home.
+        standAt(alice, flag(alice, TEAM_RED));
+        await until(() => flag(alice, TEAM_RED).status === 'home', 3000, 'red flag returned');
+        expect(events.at(-1)).toMatchObject({ kind: 'returned', team: TEAM_RED, playerId: alice.sessionId });
+
+        // Bob (respawned) takes it again and hands it off with G; Carol (blue) picks it up.
+        await until(() => me(bob!).alive === true, 3000, 'bob respawned');
+        standAt(bob, flag(bob, TEAM_RED));
+        await until(() => flag(alice, TEAM_RED).carrierId === bob!.sessionId, 3000, 'bob has red flag again');
+        bob.send(MSG.dropFlag, me(bob).spawnEpoch);
+        await until(() => flag(alice, TEAM_RED).status === 'dropped', 3000, 'handed off');
+        standAt(carol, flag(carol, TEAM_RED));
+        await until(() => flag(alice, TEAM_RED).carrierId === carol!.sessionId, 3000, 'carol picked it up');
+        expect(events.at(-1)).toMatchObject({ kind: 'taken', team: TEAM_RED, playerId: carol.sessionId });
+
+        // Carol puts it down somewhere nobody stands: it walks home by itself.
+        carol.send(MSG.pose, poseOf(carol, 60, 10, 0));
+        await until(() => Math.abs(flag(alice, TEAM_RED).x - 60) < 0.01, 3000, 'flag follows carol');
+        carol.send(MSG.dropFlag, me(carol).spawnEpoch);
+        await until(() => flag(alice, TEAM_RED).status === 'dropped', 3000, 'dropped in the open');
+        carol.send(MSG.pose, poseOf(carol, 70, 10, 0)); // step away
+        bob.send(MSG.pose, poseOf(bob, 60, 40, 0)); // Bob off the red stand too, or he'd take it again the moment it is back
+        await until(() => events.some((e) => e.kind === 'returned' && e.playerId === ''), 3000, 'auto-returned');
+        await until(() => flag(alice, TEAM_RED).status === 'home', 3000, 'red flag home');
+
+        // Team switch mid-match: Carol goes red, dies (no death counted) and respawns on the red side.
+        const deathsBefore = me(carol).deaths;
+        const epochBefore = me(carol).spawnEpoch;
+        carol.send(MSG.selectTeam, TEAM_RED);
+        await until(() => me(carol!).team === TEAM_RED, 3000, 'carol switched');
+        expect(me(carol).color).toBe(0);
+        await until(() => me(carol!).spawnEpoch === epochBefore + 1 && me(carol!).alive, 3000, 'carol respawned red');
+        expect(me(carol).deaths).toBe(deathsBefore);
+        expect(me(carol).x).toBeLessThan(CTF_WORLD_SX / 2);
+        const rooms = (await (await fetch(`${httpUrl}/rooms`)).json()) as RoomListEntry[];
+        expect(rooms.find((r) => r.roomId === alice.roomId)!.metadata.teams).toEqual([2, 1]);
+        // Same team again / garbage: ignored.
+        carol.send(MSG.selectTeam, TEAM_RED);
+        carol.send(MSG.selectTeam, 7);
+        await sleep(100);
+        expect(me(carol).team).toBe(TEAM_RED);
+        expect(me(carol).spawnEpoch).toBe(epochBefore + 1);
+      } finally {
+        await carol?.leave();
+        await bob?.leave();
+        await alice.leave();
+      }
+    }, 20000);
+
+    it('bots split over both teams and move to even the sides out', async () => {
+      const alice: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, {
+        nickname: 'Alice',
+        durationMin: 5,
+        mode: 'ctf',
+        bots: 2,
+        team: TEAM_RED,
+        testOverrides: { respawnMs: 100, spawnProtectMs: 0 },
+      });
+      alice.onMessage(MSG.flag, () => {});
+      alice.onMessage(MSG.shot, () => {});
+      alice.onMessage(MSG.swung, () => {});
+      alice.onMessage(MSG.hit, () => {});
+      alice.onMessage(MSG.kill, () => {});
+      let bob: AnyRoom | null = null;
+      try {
+        await ready(alice);
+        expect(alice.state.players.get('bot1').team).toBe(TEAM_RED);
+        expect(alice.state.players.get('bot2').team).toBe(TEAM_BLUE);
+        // Bob insists on red: 3 v 1 → a bot moves over.
+        bob = await new Client(wsUrl).joinById(alice.roomId, { nickname: 'Bob', team: TEAM_RED });
+        bob.onMessage(MSG.flag, () => {});
+        bob.onMessage(MSG.shot, () => {});
+        bob.onMessage(MSG.swung, () => {});
+        bob.onMessage(MSG.hit, () => {});
+        bob.onMessage(MSG.kill, () => {});
+        await ready(bob);
+        expect(me(bob).team).toBe(TEAM_RED);
+        await until(() => alice.state.players.get('bot1').team === TEAM_BLUE, 3000, 'bot1 rebalanced');
+        const rooms = (await (await fetch(`${httpUrl}/rooms`)).json()) as RoomListEntry[];
+        expect(rooms.find((r) => r.roomId === alice.roomId)!.metadata.teams).toEqual([2, 2]);
+        // Bots play: within a few seconds the attackers have moved off their spawn toward the enemy flag.
+        const start = { x: alice.state.players.get('bot2').x, z: alice.state.players.get('bot2').z };
+        await until(() => Math.hypot(alice.state.players.get('bot2').x - start.x, alice.state.players.get('bot2').z - start.z) > 4, 5000, 'bot moves');
+      } finally {
+        await bob?.leave();
+        await alice.leave();
+      }
+    }, 20000);
   });
 });

@@ -1,5 +1,5 @@
-import { ATTACK_HEAVY, GUN_MAG_SIZE, MAX_HP, MELEE_KINDS, MELEE_SWORD, WEAPON_GUN, meleeSelectable, meleeStats } from '@mineshoot/shared';
-import type { MeleeKind, RankRow, RoomMode, Weapon, WeaponMode } from '@mineshoot/shared';
+import { ATTACK_HEAVY, GUN_MAG_SIZE, MAX_HP, MELEE_KINDS, MELEE_SWORD, TEAM_BLUE, TEAM_RED, WEAPON_GUN, meleeSelectable, meleeStats, teamName } from '@mineshoot/shared';
+import type { FlagStatus, MeleeKind, RankRow, RoomMode, Team, Weapon, WeaponMode } from '@mineshoot/shared';
 import { KillFeedModel, killFeedLine } from './killFeed';
 import type { FeedKind, KillLineInput } from './killFeed';
 import { awardBadges, iconSvg, weaponIcon } from './icons';
@@ -32,6 +32,10 @@ function badgeEl(b: AwardBadge, className = 'badge'): HTMLSpanElement {
 /** How long an award banner stays on screen. */
 export const ANNOUNCE_MS = 2200;
 
+/** Flag status glyph for the CTF score bar. */
+const FLAG_GLYPH: Record<FlagStatus, string> = { home: '\u{1F6A9}', carried: '\u{1F3C3}', dropped: '\u26A0\uFE0F' };
+export const TEAM_CLASS: Record<Team, string> = { [TEAM_RED]: 't-red', [TEAM_BLUE]: 't-blue' };
+
 export function formatTime(ms: number): string {
   const s = Math.max(0, Math.ceil(ms / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -58,6 +62,10 @@ export class Hud {
   private readonly announceEl = el('div', 'announce hidden');
   private readonly centerMsg = el('div', 'center-msg hidden');
   private readonly overlay = el('div', 'overlay');
+  private readonly teamRow = el('div', 'teams hidden');
+  private readonly teamButtons = new Map<Team, HTMLButtonElement>();
+  private readonly ctfBar = el('div', 'ctfbar hidden');
+  private readonly carryEl = el('div', 'carry hidden');
   private readonly scoreboard = el('div', 'scoreboard hidden');
   private readonly hitmarker = el('div', 'hitmarker');
   private readonly charge = el('div', 'charge hidden');
@@ -70,10 +78,12 @@ export class Hud {
   private announceTimer = 0;
   onOverlayClick: (() => void) | null = null;
   onLeave: (() => void) | null = null;
+  /** CTF: the player picked a team on the overlay. */
+  onSelectTeam: ((team: Team) => void) | null = null;
 
   constructor(parent: HTMLElement) {
     const top = el('div', 'top');
-    top.append(this.timer, this.roomName);
+    top.append(this.timer, this.roomName, this.ctfBar);
     const weapon = el('div', 'weapon');
     weapon.append(this.weaponName, this.weaponLabel, this.ammo, this.weaponHint);
     const bar = el('div', 'bar');
@@ -88,7 +98,16 @@ export class Hud {
       e.stopPropagation();
       this.onLeave?.();
     });
-    this.overlay.append(title, help, leaveBtn);
+    for (const team of [TEAM_RED, TEAM_BLUE] as const) {
+      const b = el('button', `team ${TEAM_CLASS[team]}`, teamName(team));
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.onSelectTeam?.(team);
+      });
+      this.teamButtons.set(team, b);
+      this.teamRow.append(b);
+    }
+    this.overlay.append(title, help, this.teamRow, leaveBtn);
     this.overlay.addEventListener('click', () => this.onOverlayClick?.());
 
     this.root.append(
@@ -105,6 +124,7 @@ export class Hud {
       this.feedEl,
       this.announceEl,
       this.toastEl,
+      this.carryEl,
       this.centerMsg,
       this.scoreboard,
       this.overlay,
@@ -131,6 +151,41 @@ export class Hud {
 
   setRoomName(name: string): void {
     this.roomName.textContent = name;
+  }
+
+  /** CTF score bar: `🔴 2 – 1 🔵` with each flag's status glyph (home / carried / dropped). */
+  setCtfScore(red: number, blue: number, limit: number, redFlag: FlagStatus, blueFlag: FlagStatus): void {
+    this.ctfBar.classList.remove('hidden');
+    this.ctfBar.replaceChildren(
+      el('span', `side ${TEAM_CLASS[TEAM_RED]}`, `${FLAG_GLYPH[redFlag]} Red ${red}`),
+      el('span', 'limit', `/ ${limit}`),
+      el('span', `side ${TEAM_CLASS[TEAM_BLUE]}`, `${blue} Blue ${FLAG_GLYPH[blueFlag]}`),
+    );
+    this.ctfBar.title = `First to ${limit} captures. Flags: red ${redFlag}, blue ${blueFlag}.`;
+  }
+
+  /** CTF: team buttons on the overlay ("Red (2)" / "Blue (3)"), the own team highlighted. */
+  setTeams(mine: Team | 0, counts: Record<Team, number>): void {
+    this.teamRow.classList.remove('hidden');
+    for (const [team, b] of this.teamButtons) {
+      b.textContent = `${teamName(team)} (${counts[team]})`;
+      b.classList.toggle('mine', team === mine);
+      b.disabled = team === mine;
+    }
+  }
+
+  /** CTF: banner while carrying the enemy flag (null hides it). */
+  setCarrying(flagTeam: Team | null): void {
+    this.carryEl.classList.toggle('hidden', flagTeam === null);
+    if (flagTeam === null) return;
+    this.carryEl.className = `carry ${TEAM_CLASS[flagTeam]}`;
+    this.carryEl.textContent = `\u{1F6A9} You have the ${teamName(flagTeam)} flag \u2014 bring it home! (melee only \u00b7 G to drop)`;
+  }
+
+  /** Plain-text feed line (flag events). */
+  pushFeedText(text: string, kind: FeedKind = 'neutral'): void {
+    this.feed.pushText(text, performance.now(), kind);
+    this.renderFeed();
   }
 
   setTimer(ms: number): void {
@@ -274,18 +329,21 @@ export class Hud {
     this.flashTimer = Math.max(this.flashTimer, performance.now() + durationMs);
   }
 
-  setScoreboard(visible: boolean, rows?: RankRow[], meId?: string): void {
+  /** Tab scoreboard. `ctf` adds a captures column and tints rows by team (rows come pre-ranked). */
+  setScoreboard(visible: boolean, rows?: RankRow[], meId?: string, ctf = false): void {
     this.scoreboard.classList.toggle('hidden', !visible);
     if (!visible || !rows) return;
     const table = el('table');
     const head = el('tr');
-    for (const h of ['#', 'Player', 'K', 'D', 'K/D']) head.append(el('th', undefined, h));
+    for (const h of ctf ? ['#', 'Player', 'C', 'K', 'D', 'K/D'] : ['#', 'Player', 'K', 'D', 'K/D']) head.append(el('th', undefined, h));
     table.append(head);
     rows.forEach((r, i) => {
-      const tr = el('tr', r.id === meId ? 'me' : undefined);
+      const cls = [r.id === meId ? 'me' : '', ctf && (r.team === TEAM_RED || r.team === TEAM_BLUE) ? TEAM_CLASS[r.team as Team] : ''].filter(Boolean).join(' ');
+      const tr = el('tr', cls || undefined);
       tr.append(
         el('td', undefined, String(i + 1)),
         el('td', undefined, r.isBot ? `\u{1F916} ${r.name}` : r.name),
+        ...(ctf ? [el('td', undefined, String(r.captures ?? 0))] : []),
         el('td', undefined, String(r.kills)),
         el('td', undefined, String(r.deaths)),
         el('td', undefined, kdRatio(r.kills, r.deaths).toFixed(2)),
@@ -321,6 +379,11 @@ export class Hud {
     this.feedEl.replaceChildren(
       ...this.feed.entries.map((e) => {
         const row = el('div', e.kind === 'neutral' ? undefined : e.kind);
+        if (!e.line) {
+          row.append(el('span', 'text', e.text));
+          row.title = e.text;
+          return row;
+        }
         row.title = killFeedLine(e.line);
         row.append(
           el('span', 'name', e.line.killer),

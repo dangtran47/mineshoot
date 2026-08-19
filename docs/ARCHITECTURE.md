@@ -57,12 +57,14 @@ Pure TypeScript, `"exports": "./src/index.ts"` (consumed as source by Vite and
 | Tunables | `constants.ts` | every number: world size, movement, weapon timings, damage, hitbox bands, HP, respawn, spawn protection, durations, `MAX_PLAYERS`, `MAX_BOTS` |
 | Protocol | `protocol.ts` | `MSG` names, payload interfaces (`PoseMsg`, `ShootMsg`, `SwingMsg`, `ShotMsg`, `HitMsg`, `KillMsg`, `PickupMsg`, …), `CreateOptions`, `RoomMetadata`, `WeaponMode` + `weaponAllowed()/defaultWeapon()/allowedWeapons()`, `ROOM_NAME` |
 | Data | `types.ts`, `world.ts`, `rng.ts`, `noise.ts` | `World` (flat `Uint8Array` of `Block`), `PlayerPhysState`, `MoveInput`, `Vec3`; `createRng(seed)` (mulberry-style), 2D value noise |
-| World | `worldgen.ts` | `generateWorld(seed) → { world, spawnPoints }`; `PLATEAU_MIN/MAX` |
+| World | `worldgen.ts` | `generateWorld(seed)` (arena) and `generateCtfWorld(seed)` (96×48 CTF map) → `{ world, spawnPoints, dropZone, bases }`; `generateWorldFor(mode, seed)`; `PLATEAU_MIN/MAX` |
 | Physics | `aabb.ts`, `collision.ts`, `playerPhysics.ts` | `moveAABB` (axis-separated swept AABB vs voxels), `stepPlayer(world, state, input, dt)`, `forwardVector` |
 | Hitscan | `raycast.ts`, `hitbox.ts`, `gun.ts` | `raycastVoxels` (DDA), `segmentVsAABB`, `playerHitboxes(feet)` (legs/torso/head boxes), `resolveShot(world, shooter, targets, range)` |
 | Melee | `sword.ts`, `melee.ts`, `drops.ts` | `MELEE_STATS` per `MeleeKind` → `attacks[AttackKind]` (`AttackSpec`: cone, reach, damage, sweep, cooldown, anim), `meleeStats()`, `attackSpec()`, `swordVictims(world, pose, targets, attack, kind)`, `swordDamage()`, `pickDropKind()`, `pickDropSpot()`, `canPickUp()`, drop cadence constants |
-| Match | `spawn.ts`, `ranking.ts`, `kills.ts` | `pickSpawn(points, enemies, rng)` (farthest-from-enemies with randomness), `rankPlayers`, `kdRatio`, `KillTracker` (multi-kill / streak / shutdown awards) |
-| Bots | `bot.ts` | `createBot(rng, waypoints, { weapons, passive })` → `{ compute(world, view, dt), reset() }`; `passive` = training dummy (faces the nearest enemy, never moves or attacks) |
+| Match | `spawn.ts`, `ranking.ts`, `kills.ts` | `pickSpawn(points, enemies, rng)` (farthest-from-enemies with randomness), `rankPlayers`, `rankCtf`, `kdRatio`, `KillTracker` (multi-kill / streak / shutdown awards) |
+| CTF | `ctf.ts` | `FlagState`, `flagTouch()`, `canScore()`, `carriedFlag()`, `teamSpawns()`, `pickTeam()`, `botRebalance()`, `matchWinner()`, `botCtfGoal()` (offence-first bot goal); teams (`TEAM_RED/BLUE`, `Team`, `otherTeam`, `teamName`) live in `protocol.ts` |
+| Bots | `bot.ts` | `createBot(rng, waypoints, { weapons, passive, skill })` → `{ compute(world, view, dt), reset() }`; `passive` = training dummy (faces the nearest enemy, never moves or attacks); `skill` (`BotSkill` in `protocol.ts`, profiles via `botSkillProfile()`) scales sight / turn rate / reaction / aim error / attack interval; `view.goal` / `view.carrying` drive CTF behaviour. Movement toward any destination goes through `nav.ts` |
+| Navigation | `nav.ts` | `standable()`, `nearestStandable(world, x, y, z)`, `findPath(world, from, to)` (A* over standable cells: step up 1 with a jump, drop ≤ `MAX_DROP`, diagonals only with both orthogonal cells free), `cellCentre()`; the bot re-plans every 1.5 s, when its destination moves 2 blocks or when it strays 3 blocks off the route |
 
 Rules for this package: no `Math.random()` (thread an `rng`), no DOM, no
 three.js, no Colyseus, plain objects in and out, a test file per module.
@@ -82,7 +84,7 @@ three.js, no Colyseus, plain objects in and out, a test file per module.
   reloading }`; `DropSchema { kind, x,y,z }`. This is the *only* continuously
   synced data.
 - `rooms/validate.ts` — `parsePose/parseShoot/parseSwing/parseCharge/
-  parseReload/parseDurationMin/parseBotCount/parseWeaponMode`,
+  parseReload/parseDurationMin/parseBotCount/parseBotSkill/parseWeaponMode`,
   `sanitizeName/sanitizeRoomName`. Everything inbound goes through here and
   invalid input is dropped, never thrown.
 - `rooms/ArenaRoom.ts` — the match (see §4).
@@ -156,7 +158,7 @@ can play a one-shot effect exactly once.
 | S→C | `pickup` | `PickupMsg {playerId, melee}` | Someone took a drop |
 
 Room creation options (`CreateOptions`): `name`, `durationMin` (3/5/10/15),
-`nickname`, `bots` (0–7), `weapons` (`'all'|'gun'|'sword'`), `mode`
+`nickname`, `bots` (0–15), `botSkill` (`'easy'|'normal'|'hard'`), `weapons` (`'all'|'gun'|'sword'`), `mode`
 (`'match'|'training'`); plus `testOverrides` honoured only when
 `MINESHOOT_TEST=1`. Room metadata (`RoomMetadata`) mirrors these for the lobby
 list. `meleeSelectable(mode, weapons)` (protocol.ts) is the single rule for
@@ -215,17 +217,19 @@ mode); it waits for `shot`/`hit` for anything that implies damage.
 
 ```
 onCreate(opts)
-  ├ sanitize name/duration/bots/weapons/mode; maxClients = 8 - bots
-  ├ mode 'training': respawnMs = TRAINING_RESPAWN_MS, bots are passive
-  ├ seed = hash(roomId:now); generateWorld(seed) → world, spawnPoints
-  ├ setMetadata({name, durationMin, endsAt, bots, weapons, mode})   ← lobby list
-  ├ onMessage handlers (pose/shoot/swing/charge/chargeCancel/reload/ready/selectMelee/ping)
+  ├ sanitize name/duration/bots/botSkill/weapons/mode(/captureLimit); maxClients = MAX_PLAYERS(16) - bots
+  ├ respawnMs = respawnMsFor(mode) (3 s match / 1 s training / 5 s ctf); training bots are passive
+  ├ mode 'ctf': faster drops, two FlagSchema entries at gen.bases, captureLimit
+  ├ seed = hash(roomId:now); generateWorldFor(mode, seed) → world, spawnPoints, dropZone, bases
+  ├ setMetadata({name, durationMin, endsAt, bots, botSkill, weapons, mode, captureLimit?, teams?})   ← lobby list
+  ├ onMessage handlers (pose/shoot/swing/charge/chargeCancel/reload/ready/selectMelee/selectTeam/dropFlag/ping)
   ├ clock: tickLifecycle every 50 ms, tickTimer every 1 s
   └ addBot()×N; setSimulationInterval(pumpBots, 50 ms) if bots > 0
 
-onJoin(client, {nickname})
+onJoin(client, {nickname, team?})
   └ PlayerSchema parked at a spawn, alive=false, meta.ready=false
      (camera previews the arena; nobody can hit them)
+     ctf: team = requested or the smaller one; colour = team colour; bots rebalance
 
 'ready' → spawn(): pick spawn far from enemies, hp=100, weapon=default,
           melee=sword, shielded for SPAWN_PROTECT_MS, spawnEpoch++
@@ -233,8 +237,14 @@ onJoin(client, {nickname})
 'selectMelee' → training range only (meleeSelectable): p.melee = kind,
           pending charge dropped; the client sees it through the state patch
 
+'selectTeam' → ctf only: switch sides (drop flag, die without a death, respawn
+          on the new side; unspawned players are re-parked), then botRebalance
+'dropFlag' → ctf only, actor(): put the carried flag down (dropper may not
+          re-take it for FLAG_DROP_GRACE_MS)
+
 tickLifecycle (50 ms): respawn dead ready players when respawnAt passes,
-          clear expired shields, mirror charging/reloading flags, tickDrops()
+          clear expired shields, mirror charging/reloading flags, tickDrops(),
+          tickFlags()
 tickTimer  (1 s):   timeLeftMs; at 0 → endMatch()
 endMatch:  phase='ended', lock() (hidden from /rooms), disconnect() after
            ENDED_LINGER_MS (15 s) so clients can show results
@@ -254,11 +264,53 @@ protection and weapon mode automatically. In a training room the brain is
 nearest visible enemy, so dummies are living targets that hit back with nothing.
 
 **Drops** (`tickDrops`): only when melee is allowed. Every 25–45 s (seeded
-rng) place a random `MeleeKind` on the central plateau away from other drops
-and spawn points (`pickDropSpot`), cap `DROP_MAX_ACTIVE`, expire after
+rng; 12–22 s in CTF) place a random `MeleeKind` inside the map's `dropZone`
+(the arena plateau, the CTF ridge) away from other drops and spawn points
+(`pickDropSpot`), cap `DROP_MAX_ACTIVE` (5 in CTF), expire after
 `DROP_LIFETIME_MS`. Any living player whose feet are within the pickup radius
 (`canPickUp`) takes it: `p.melee = kind`, drop removed, `pickup` broadcast.
 Death resets `melee` to the sword.
+
+**Capture the flag** (`mode: 'ctf'`, rules in `shared/ctf.ts`, all numbers in
+`constants.ts`). The room plays on `generateCtfWorld` (96×48, mirrored across
+the middle: a raised fort with parapet/gate/flank stairs at each end on the
+z-centre line, a central plateau with four ramps, rolling side lanes with
+mirrored watchtowers and cover; the straight line between the flag stands is
+always walkable so bots' steer-and-hop pathing works). State:
+`PlayerSchema.team/captures`, `RoomState.flags` (`FlagSchema` per team:
+`status home|carried|dropped`, position, `carrierId`), `redScore/blueScore`,
+`captureLimit`. Flag state machine, run by `tickFlags` every 50 ms:
+
+```
+home ──enemy touch (canPickUp)──▶ carried ──carrier dies / leaves / G──▶ dropped
+  ▲                                  │  x/y/z follow the carrier                │
+  │                                  │  canScore(): inside own base zone         │ owner touch → home
+  │                                  │  (CTF_BASE_ZONE_RADIUS) && own flag home  │ enemy touch → carried
+  └──────── captured (score++, event) ┘                                          │ FLAG_RETURN_MS → home
+```
+
+Server rules that must stay server-side: no friendly fire (`targetsExcluding`
+and the bots' enemy list skip teammates), a carrier's `shoot` is dropped
+(`attackShoot`), spawns come from `teamSpawns()` (the spawn points nearest the
+own base) with only enemy positions as "enemies", team switching is always
+allowed for humans and bots even the sides out (`botRebalance`), the capture
+limit calls `endMatch()`. Every transition broadcasts `MSG.flag`
+(`FlagEventMsg {kind, team, playerId, playerName, redScore, blueScore}`) for
+the feed. The client only *reflects* this: `FlagsView` draws each flag at the
+synced position (carried flags ride on the carrier's rendered body, never on
+the local player's own back), the carrier's `Weapons` is locked to melee and
+walks at `FLAG_CARRY_SPEED_SCALE`, `G` sends `dropFlag`, the overlay offers
+team buttons (`selectTeam`), the HUD shows the score bar, and the results
+screen shows Victory/Defeat/Draw for the local player's team (`ctfOutcome`,
+from `matchWinner`) over one ranked table per team (`splitTeams`).
+
+**CTF bots**: `tickBots` adds `goal` (`botCtfGoal(team, id, self, flags,
+bases)`: offence first — the enemy flag wherever it is, escort a teammate who
+carries it, return the own flag if it lies closer, chase the enemy carrying
+the own flag within `BOT_CHASE_RADIUS`, carriers → home) and `carrying` to the
+`BotView`; the brain walks to the goal when no enemy is in sight, patrols
+nearby waypoints once there, and as a carrier runs for the goal melee-out,
+only swinging at enemies within reach. Teams alternate (bot1 red, bot2 blue, …).
 
 ## 5. Client frame
 
@@ -349,5 +401,11 @@ timer-derived flag), read it in `RemotePlayers`/`Hud`.
 `weaponAllowed`, sender in `screens/game.ts`, integration test.
 
 **New room option** → `CreateOptions` + `RoomMetadata` in `protocol.ts`,
-parser in `validate.ts`, `onCreate` + `setMetadata`, lobby form + list badge,
+parser in `validate.ts`, `onCreate` + `syncMetadata`, lobby form + list badge,
 README.
+
+**New map / room mode** → a generator in `worldgen.ts` returning
+`GeneratedWorld` (world, spawn points, `dropZone`, `bases`), wired through
+`generateWorldFor(mode, seed)` (server `onCreate`, client `screens/game.ts`),
++ a `worldgen.test.ts` block; never read `WORLD_SX/SZ` outside `worldgen.ts`
+— use `world.sx/sz` (poses are clamped to the room's world in `parsePose`).

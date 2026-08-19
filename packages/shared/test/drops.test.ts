@@ -5,7 +5,7 @@ import { createRng } from '../src/rng';
 import { PLATEAU_MAX, PLATEAU_MIN, generateWorld, isStandable } from '../src/worldgen';
 
 describe('drops', () => {
-  const { world, spawnPoints } = generateWorld(42);
+  const { world, spawnPoints, dropZone } = generateWorld(42);
   it('pickDropKind never yields the sword and covers every drop kind', () => {
     const rng = createRng(1);
     const seen = new Set<number>();
@@ -20,7 +20,7 @@ describe('drops', () => {
     const rng = createRng(7);
     const placed: { x: number; z: number }[] = [];
     for (let i = 0; i < 10; i++) {
-      const s = pickDropSpot(world, rng, placed, spawnPoints)!;
+      const s = pickDropSpot(world, rng, placed, spawnPoints, dropZone)!;
       expect(s).not.toBeNull();
       expect(s.x % 1).toBeCloseTo(0.5);
       expect(s.z % 1).toBeCloseTo(0.5);
@@ -34,8 +34,8 @@ describe('drops', () => {
     }
   });
   it('falls back to a spawn point when probes fail', () => {
-    const s = pickDropSpot(world, () => 0.999, [], spawnPoints, 0)!;
+    const s = pickDropSpot(world, () => 0.999, [], spawnPoints, dropZone, 0)!;
     expect(spawnPoints).toContainEqual(s);
-    expect(pickDropSpot(world, () => 0.5, [], [], 0)).toBeNull();
+    expect(pickDropSpot(world, () => 0.5, [], [], dropZone, 0)).toBeNull();
   });
 });

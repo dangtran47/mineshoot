@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { kdRatio, rankPlayers } from '../src/ranking';
+import { kdRatio, rankCtf, rankPlayers } from '../src/ranking';
 
 describe('rankPlayers', () => {
   it('sorts by kills desc, deaths asc, name asc', () => {
@@ -17,5 +17,15 @@ describe('rankPlayers', () => {
   it('kdRatio avoids divide by zero', () => {
     expect(kdRatio(4, 0)).toBe(4);
     expect(kdRatio(4, 2)).toBe(2);
+  });
+
+  it('rankCtf puts captures first, then the usual kills/deaths/name', () => {
+    const rows = [
+      { id: 'a', name: 'A', kills: 9, deaths: 0, captures: 0 },
+      { id: 'b', name: 'B', kills: 1, deaths: 5, captures: 2 },
+      { id: 'c', name: 'C', kills: 3, deaths: 1, captures: 2 },
+      { id: 'd', name: 'D', kills: 3, deaths: 1 },
+    ];
+    expect(rankCtf(rows).map((r) => r.id)).toEqual(['c', 'b', 'a', 'd']);
   });
 });

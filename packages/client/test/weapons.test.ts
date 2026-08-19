@@ -316,4 +316,40 @@ describe('Weapons: melee kinds', () => {
     expect(log).toEqual([`switch:${WEAPON_SWORD}`, 'charge', 'chargeCancel', `melee:${MELEE_SCYTHE}`]);
     expect(w.chargeFraction(6000)).toBeNull();
   });
+
+  describe('flag carrier lock (CTF)', () => {
+    it('locking forces the melee weapon out and ignores gun selection until unlocked', () => {
+      const { w, log } = make();
+      expect(w.current).toBe(WEAPON_GUN);
+      w.setLockedToMelee(true);
+      expect(w.current).toBe(WEAPON_SWORD);
+      expect(log).toEqual([`switch:${WEAPON_SWORD}`]);
+      w.select(WEAPON_GUN);
+      w.toggle();
+      expect(w.current).toBe(WEAPON_SWORD);
+      w.mouseDown(0);
+      expect(log).toContain('swing'); // melee still works
+      w.setLockedToMelee(false);
+      w.select(WEAPON_GUN);
+      expect(w.current).toBe(WEAPON_GUN);
+    });
+    it('in a gun-only room the carrier keeps the gun but cannot fire', () => {
+      const { w, log } = make([WEAPON_GUN]);
+      w.setLockedToMelee(true);
+      expect(w.current).toBe(WEAPON_GUN);
+      w.mouseDown(0);
+      w.update(GUN_COOLDOWN_MS + 1);
+      expect(log).not.toContain('fire');
+      w.mouseUp(GUN_COOLDOWN_MS + 2);
+      w.setLockedToMelee(false);
+      w.mouseDown(GUN_COOLDOWN_MS + 3);
+      expect(log).toContain('fire');
+    });
+    it('locking again is a no-op and does not re-emit switch', () => {
+      const { w, log } = make();
+      w.setLockedToMelee(true);
+      w.setLockedToMelee(true);
+      expect(log.filter((l) => l.startsWith('switch'))).toHaveLength(1);
+    });
+  });
 });

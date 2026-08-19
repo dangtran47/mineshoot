@@ -136,6 +136,10 @@ export const DROP_INTERVAL_MIN_MS = 25_000;
 export const DROP_INTERVAL_MAX_MS = 45_000;
 /** Drops on the ground at once. */
 export const DROP_MAX_ACTIVE = 3;
+/** Capture the flag: drops come roughly twice as often (the map is bigger and melee matters more for carriers). */
+export const CTF_DROP_INTERVAL_MIN_MS = 12_000;
+export const CTF_DROP_INTERVAL_MAX_MS = 22_000;
+export const CTF_DROP_MAX_ACTIVE = 5;
 /** An unclaimed drop vanishes after this long. */
 export const DROP_LIFETIME_MS = 60_000;
 /** Walk within this horizontal distance (and within a block vertically) to pick a drop up. */

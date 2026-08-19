@@ -13,8 +13,15 @@ import type { MeleeKind, SwingAnim, Weapon } from '@mineshoot/shared';
 
 /** Gun: arm level, aiming forward. */
 export const GUN_IDLE_PITCH = Math.PI / 2;
-/** Sword: held low and forward so the long blade reads at a distance. */
-export const SWORD_IDLE_PITCH = 0.7;
+/** Sword: arm reaching forward, a bit below level (guard stance). */
+export const SWORD_IDLE_PITCH = 1.0;
+/**
+ * Sword: wrist bend at rest (radians, about the humanoid's local x) lifting
+ * the blade up off the arm line so it stands in front of the body instead of
+ * pointing at the ground. Straightens out for wind-ups and swings so chops
+ * follow the arm.
+ */
+export const SWORD_IDLE_TILT = 1.0;
 /** Charging: wound back over the shoulder. */
 export const CHARGE_PITCH = Math.PI / 2 + 1.1;
 /** End of a light swing (down-forward). */
@@ -41,6 +48,8 @@ export interface ArmPose {
   armPitch: number;
   /** rotation.z of the shoulder pivot: sideways sweep of a slash (0 = straight). */
   armRoll: number;
+  /** Wrist bend lifting the melee prop off the arm line (0 = prop straight along the arm). */
+  bladeTilt: number;
   /** 0..1 emissive intensity of the blade (charge build-up / heavy swing). */
   swordGlow: number;
   /** 0..1 recoil kick applied to the gun prop. */
@@ -97,12 +106,14 @@ export class HumanoidAnim {
 
   pose(now: number): ArmPose {
     const idle = this.weapon === WEAPON_SWORD ? SWORD_IDLE_PITCH : GUN_IDLE_PITCH;
-    const out: ArmPose = { armPitch: idle, armRoll: 0, swordGlow: 0, gunKick: 0, muzzleFlash: false };
+    const tilt = this.weapon === WEAPON_SWORD ? SWORD_IDLE_TILT : 0;
+    const out: ArmPose = { armPitch: idle, armRoll: 0, bladeTilt: tilt, swordGlow: 0, gunKick: 0, muzzleFlash: false };
 
     // Swing wins over everything: it is the moment that matters to the victim.
     if (this.swingAt >= 0 && now - this.swingAt < SWING_MS) {
       const t = easeOut(clamp01((now - this.swingAt) / SWING_MS));
       out.swordGlow = this.swingHeavy ? 1 - t : 0;
+      out.bladeTilt = 0;
       if (this.swingAnim === 'slash') {
         out.armPitch = lerp(SLASH_PITCH, SLASH_PITCH - 0.4, t);
         out.armRoll = this.slashSide * lerp(SLASH_ROLL, -SLASH_ROLL, t);
@@ -117,6 +128,7 @@ export class HumanoidAnim {
     if (this.chargeSince >= 0 && this.weapon === WEAPON_SWORD) {
       const t = clamp01((now - this.chargeSince) / this.chargeMs);
       out.armPitch = lerp(SWORD_IDLE_PITCH, CHARGE_PITCH, easeOut(t));
+      out.bladeTilt = lerp(SWORD_IDLE_TILT, 0, easeOut(t));
       out.swordGlow = t;
       return out;
     }

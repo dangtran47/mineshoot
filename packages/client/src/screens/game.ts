@@ -1,26 +1,35 @@
 import * as THREE from 'three';
 import {
   EYE_HEIGHT,
+  FLAG_CARRY_SPEED_SCALE,
   GUN_MAG_SIZE,
   MSG,
   PLAYER_HEIGHT,
   POSE_INTERVAL_MS,
   MELEE_KINDS,
   MELEE_SWORD,
-  RESPAWN_MS,
+  TEAM_BLUE,
+  TEAM_RED,
   WEAPON_GUN,
   WEAPON_SWORD,
   allowedWeapons,
   attackSpec,
   forwardVector,
-  generateWorld,
+  generateWorldFor,
+  isCtf,
+  isTeam,
   meleeSelectable,
   meleeStats,
+  otherTeam,
+  rankCtf,
   rankPlayers,
+  respawnMsFor,
+  teamName,
 } from '@mineshoot/shared';
-import type { AttackKind, HitMsg, KillMsg, MeleeKind, PickupMsg, PoseMsg, RankRow, RoomMode, SelectMeleeMsg, ShootMsg, ShotMsg, SwingMsg, SwungMsg, Weapon } from '@mineshoot/shared';
+import type { AttackKind, FlagEventMsg, HitMsg, KillMsg, MeleeKind, PickupMsg, PoseMsg, RankRow, RoomMode, SelectMeleeMsg, ShootMsg, ShotMsg, SwingMsg, SwungMsg, Team, Weapon } from '@mineshoot/shared';
 import { displayName } from '../net';
-import type { GameRoom, NetPlayer } from '../net';
+import type { GameRoom, NetFlag, NetPlayer } from '../net';
+import { FlagsView } from '../render/flagsView';
 import { createScene } from '../render/scene';
 import { buildWorldMeshes } from '../render/worldMesh';
 import { Tracers } from '../render/tracers';
@@ -38,12 +47,19 @@ import { awardBadges } from '../hud/icons';
 /** Keys 3–7 pick a melee weapon directly where the room allows it (training range, offline sandbox). */
 const MELEE_PICK_KEYS: readonly string[] = ['Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7'];
 
+/** CTF outcome handed to the results screen. */
+export interface CtfSummary {
+  redScore: number;
+  blueScore: number;
+  captureLimit: number;
+}
+
 export interface GameScreenOptions {
   container: HTMLElement;
   /** null = offline sandbox (no networking). */
   room: GameRoom | null;
   seed: number;
-  onEnded(ranking: RankRow[], meId: string, roomName: string): void;
+  onEnded(ranking: RankRow[], meId: string, roomName: string, ctf?: CtfSummary): void;
   onLeft(message: string): void;
 }
 
@@ -51,7 +67,11 @@ export interface GameScreenOptions {
 export function startGame(opts: GameScreenOptions): { dispose(): void } {
   const { container, room } = opts;
   const meId = room?.sessionId ?? 'me';
-  const { world, spawnPoints } = generateWorld(opts.seed);
+  const weaponMode = room?.state.weapons ?? 'all';
+  // The offline sandbox behaves like a training range (every melee weapon is a key away).
+  const roomMode: RoomMode = room?.state.mode ?? 'training';
+  const ctf = isCtf(roomMode);
+  const { world, spawnPoints } = generateWorldFor(roomMode, opts.seed);
 
   const bundle = createScene(container);
   const { scene, camera, renderer } = bundle;
@@ -65,6 +85,8 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
   scene.add(remotes.group);
   const drops = new DropsView();
   scene.add(drops.group);
+  const flags = new FlagsView();
+  scene.add(flags.group);
   scene.add(camera); // so the view model (child of camera) renders
   const viewModel = new ViewModel(camera);
 
@@ -79,11 +101,10 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
   let epoch = initial?.spawnEpoch ?? 1;
   let diedAt = 0;
   let ended = false;
-  const weaponMode = room?.state.weapons ?? 'all';
-  // The offline sandbox behaves like a training range (every melee weapon is a key away).
-  const roomMode: RoomMode = room?.state.mode ?? 'training';
+  /** CTF: the flag we carry (its owning team), or null. */
+  let carrying: Team | null = null;
   const canPickMelee = meleeSelectable(roomMode, weaponMode);
-  hud.setRoomName(room ? (roomMode === 'training' ? `\u{1F3AF} ${room.state.name}` : room.state.name) : 'Offline sandbox');
+  hud.setRoomName(room ? (roomMode === 'training' ? `\u{1F3AF} ${room.state.name}` : ctf ? `\u{1F6A9} ${room.state.name}` : room.state.name) : 'Offline sandbox');
   hud.setWeaponRules(weaponMode, roomMode);
 
   // --- weapons ---
@@ -179,6 +200,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     }
   };
   hud.onOverlayClick = () => look.request();
+  hud.onSelectTeam = (team) => room?.send(MSG.selectTeam, team);
   hud.onLeave = () => {
     if (ended) return;
     ended = true;
@@ -196,9 +218,12 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
 
   const rankingRows = (): RankRow[] => {
     const rows: RankRow[] = [];
-    room?.state.players.forEach((p, id) => rows.push({ id, name: p.name, kills: p.kills, deaths: p.deaths, isBot: p.isBot }));
-    return rankPlayers(rows);
+    room?.state.players.forEach((p, id) => rows.push({ id, name: p.name, kills: p.kills, deaths: p.deaths, isBot: p.isBot, team: p.team, captures: p.captures }));
+    return ctf ? rankCtf(rows) : rankPlayers(rows);
   };
+  const ctfSummary = (): CtfSummary | undefined =>
+    room && ctf ? { redScore: room.state.redScore, blueScore: room.state.blueScore, captureLimit: room.state.captureLimit } : undefined;
+  const flagOf = (team: Team): NetFlag | undefined => room?.state.flags?.get(String(team));
 
   const onPatch = (): void => {
     if (!room || ended) return;
@@ -241,6 +266,30 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
       hud.setStats(me.kills, me.deaths);
       hud.setHealth(me.hp);
       hud.setShield(me.alive && me.shielded);
+      if (ctf) {
+        // Team buttons on the overlay (also lets an unspawned player pick a side; the camera follows the new side).
+        const counts: Record<Team, number> = { [TEAM_RED]: 0, [TEAM_BLUE]: 0 };
+        state.players.forEach((p) => {
+          if (isTeam(p.team)) counts[p.team]++;
+        });
+        hud.setTeams(isTeam(me.team) ? me.team : 0, counts);
+        if (me.spawnEpoch === 0 && !local.alive) local.teleport(me.x, me.y, me.z, me.yaw);
+      }
+    }
+    if (ctf) {
+      // Carrying a flag: melee only, slower (see the frame loop), banner + G hint.
+      let mine: Team | null = null;
+      state.flags?.forEach((f) => {
+        if (f.status === 'carried' && f.carrierId === meId && isTeam(f.team)) mine = f.team;
+      });
+      if (mine !== carrying) {
+        carrying = mine;
+        weapons.setLockedToMelee(carrying !== null);
+        hud.setCarrying(carrying);
+      }
+      const red = flagOf(TEAM_RED);
+      const blue = flagOf(TEAM_BLUE);
+      if (red && blue) hud.setCtfScore(state.redScore, state.blueScore, state.captureLimit, red.status, blue.status);
     }
     // Weapon drops on the ground.
     const dropIds = new Set<string>();
@@ -256,8 +305,35 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     if (state.phase === 'ended') {
       ended = true;
       finish();
-      opts.onEnded(rankingRows(), meId, state.name);
+      opts.onEnded(rankingRows(), meId, state.name, ctfSummary());
     }
+  };
+
+  /** CTF flag events → feed line (+ toast on a capture). Colour by whose team acted. */
+  const onFlag = (m: FlagEventMsg): void => {
+    if (!room) return;
+    const myTeam = room.state.players.get(meId)?.team;
+    const actor = room.state.players.get(m.playerId);
+    const actorName = actor ? displayName(actor.name, actor.isBot) : m.playerName;
+    const flag = `${teamName(m.team)} flag`;
+    const actorTeam = actor?.team;
+    let text: string;
+    switch (m.kind) {
+      case 'taken':
+        text = `\u{1F6A9} ${actorName} took the ${flag}`;
+        break;
+      case 'dropped':
+        text = `\u{1F6A9} ${actorName} dropped the ${flag}`;
+        break;
+      case 'returned':
+        text = actorName ? `\u{1F6A9} ${actorName} returned the ${flag}` : `\u{1F6A9} The ${flag} returned home`;
+        break;
+      default:
+        text = `\u{1F6A9} ${actorName} captured the ${flag}! ${m.redScore} \u2013 ${m.blueScore}`;
+    }
+    const kind = actorTeam === undefined || myTeam === undefined ? 'neutral' : actorTeam === myTeam ? 'good' : 'bad';
+    hud.pushFeedText(text, kind);
+    if (m.kind === 'captured') hud.toast(`${teamName(otherTeam(m.team))} scores! ${m.redScore} \u2013 ${m.blueScore}`, 3000);
   };
 
   const onShot = (m: ShotMsg): void => {
@@ -327,6 +403,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     room.onMessage(MSG.pickup, onPickup);
     room.onMessage(MSG.hit, onHit);
     room.onMessage(MSG.kill, onKill);
+    room.onMessage(MSG.flag, onFlag);
     room.onMessage(MSG.pong, onPong);
     room.onStateChange(onPatch);
     room.onLeave(onLeaveRoom);
@@ -354,8 +431,10 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
       if (keys.wasPressed('Digit2')) weapons.select(WEAPON_SWORD);
       if (canPickMelee) MELEE_PICK_KEYS.forEach((code, i) => keys.wasPressed(code) && pickMelee(MELEE_KINDS[i]));
       if (keys.wasPressed('KeyR') && local.alive) weapons.reload(now);
+      if (keys.wasPressed('KeyG') && local.alive && carrying !== null) room?.send(MSG.dropFlag, epoch);
     }
-    const moving = local.update(dt, inputEnabled, weapons.charging ? weapons.chargeSpeedScale : 1);
+    const speedScale = Math.min(weapons.charging ? weapons.chargeSpeedScale : 1, carrying !== null ? FLAG_CARRY_SPEED_SCALE : 1);
+    const moving = local.update(dt, inputEnabled, speedScale);
     if (local.alive) weapons.update(now);
     const charge = weapons.chargeFraction(now);
     viewModel.setCharge(charge);
@@ -366,13 +445,27 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     viewModel.update(dt, moving && local.state.onGround);
     remotes.update(now);
     drops.update(now);
+    if (ctf && room) {
+      // Flags: on their stand / on the ground where the state says; carried ones ride on the carrier's rendered body (never our own back).
+      for (const team of [TEAM_RED, TEAM_BLUE] as const) {
+        const f = flagOf(team);
+        if (!f) continue;
+        if (f.status === 'carried') {
+          const at = f.carrierId === meId ? null : (remotes.position(f.carrierId) ?? { x: f.x, y: f.y, z: f.z });
+          flags.set(team, at ? { status: 'carried', x: at.x, y: at.y, z: at.z } : null);
+        } else {
+          flags.set(team, { status: f.status, x: f.x, y: f.y, z: f.z });
+        }
+      }
+      flags.update(now);
+    }
     tracers.update(now);
     blood.update(now);
     hud.update(now);
     if (room) {
       hud.setTimer(Math.max(0, lastTimeLeft - (now - lastTimeLeftAt)));
-      if (!local.alive && diedAt > 0) hud.setRespawnCountdown(RESPAWN_MS - (now - diedAt));
-      hud.setScoreboard(keys.isDown('Tab'), rankingRows(), meId);
+      if (!local.alive && diedAt > 0) hud.setRespawnCountdown(respawnMsFor(roomMode) - (now - diedAt));
+      hud.setScoreboard(keys.isDown('Tab'), rankingRows(), meId, ctf);
     } else {
       hud.setTimer(0);
     }
@@ -398,6 +491,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     viewModel.dispose();
     remotes.dispose();
     drops.dispose();
+    flags.dispose();
     tracers.dispose();
     blood.dispose();
     worldMesh.dispose();

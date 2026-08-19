@@ -44,9 +44,12 @@ around, and shoot each other for 3–15 minutes. Then argue about the K/D table.
 
 1. Open the demo (or your local build), enter a nickname.
 2. **Create room** — pick a name, duration (3/5/10/15 min), the **room
-   type** (Deathmatch or Training range), how many **AI bots** (0–7) and the
-   **allowed weapons** (Gun + Sword, Gun only, Sword only). Or **Join** an
-   existing room from the public list.
+   type** (Deathmatch, Training range or Capture the Flag), how many **AI
+   bots** (0–15) and how sharp they are (**Easy / Normal / Hard**), and the
+   **allowed weapons** (Gun + Sword, Gun only, Sword only); a CTF room also
+   picks the captures needed to win (3/5/10). Or
+   **Join** an existing room from the public list — CTF rooms offer **Red /
+   Blue / Auto** buttons so you can pick a side.
 3. **Click to play.** You are not in the arena until you click; nobody can
    hit you while you are still reading the overlay.
 4. Fight until the timer runs out. Rankings (kills, deaths, K/D) are shown at
@@ -60,9 +63,10 @@ around, and shoot each other for 3–15 minutes. Then argue about the K/D table.
 | `RMB` hold (≥ charge time), release | **Heavy** melee blow — each weapon's own signature move (overhead, execute, iaido, reap, head-hunt) |
 | `R` | Reload (automatic when the magazine is empty) |
 | `1` / `2` / mouse wheel | Switch gun / melee |
+| `G` | Capture the Flag: put the flag you carry down (hand it to a teammate) |
 | `Tab` (hold) | Scoreboard |
 
-Up to **8 players** per room (bots take player slots). Rooms are public and
+Up to **16 players** per room (bots take player slots). Rooms are public and
 listed in the lobby; there is no password — it's meant to be casual.
 
 ## Gameplay
@@ -85,7 +89,7 @@ Damage depends on where you hit:
 
 In any room where melee is allowed, **weapon drops** land on the central
 plateau every 25–45 s (at most 3 on the ground, gone after 60 s if nobody takes
-them). Walk over the glowing column to pick one up: it replaces your sword until
+them; a CTF room drops on its central plateau every 12–22 s, up to 5). Walk over the glowing column to pick one up: it replaces your sword until
 you die. Bots pick them up too. Every drop beats the sword somewhere and pays
 for it somewhere else:
 
@@ -103,12 +107,27 @@ and "shutdown" when you end someone's streak.
 
 ### Bots
 
-A room can be created with 0–7 bots. They run entirely on the server using
+A room can be created with 0–15 bots. They run entirely on the server using
 the same shared physics and combat rules as humans: wander between spawn
 points, hunt the nearest enemy in line of sight, keep mid-range while strafing,
 aim with a reaction delay and distance-scaled error, shoot the gun and switch
-to melee up close. They die, respawn and rank like everyone else and show a 🤖
-in nametags and the scoreboard.
+to melee up close. They find their way with a grid pathfinder (up ramps and
+stairs one block at a time, down drops of up to 4 blocks, never through
+corners), so they climb the plateau via its ramps instead of hopping at the
+wall. They die, respawn and rank like everyone else and show a 🤖 in nametags
+and the scoreboard.
+
+The room's **bot skill** sets how dangerous they are (rooms with non-default
+bots show 🤖 easy / 🤖 hard in the lobby list):
+
+| Skill | Sees you within | Reaction | Aim jitter (rad per block) | Fires at most every |
+| --- | --- | --- | --- | --- |
+| Easy | 30 blocks | 900 ms | 0.02 | 700 ms |
+| Normal (default) | 39 blocks | 600 ms | 0.01 | 350 ms |
+| Hard | 45 blocks | 450 ms | 0.004 | weapon cooldown |
+
+Easy bots also turn slower (3 rad/s vs 4 / 4.5). Training dummies ignore the
+skill setting.
 
 ### Training range
 
@@ -117,7 +136,7 @@ weapon in peace. Same arena and rules as a match, except:
 
 - Bots are **passive dummies**: they stand on the central plateau (spaced out
   like drops), turn to face you, never attack, and everyone respawns after
-  **1 s** instead of 3 s so the range refills at once. Pick 0–7 of them; the
+  **1 s** instead of 3 s so the range refills at once. Pick 0–15 of them; the
   lobby fills in 3 when you leave the count at zero.
 - Keys **`3`–`7`** put any melee weapon straight into slot 2 — Sword, Battle
   Axe, Katana, Scythe, Pickaxe — no drop needed (drops still fall too). Outside
@@ -128,17 +147,64 @@ weapon in peace. Same arena and rules as a match, except:
 
 The offline sandbox (`?offline`) also honours keys `3`–`7`.
 
+### Capture the Flag
+
+Create a room as **Capture the Flag** (🚩 in the lobby list) for two-team
+play on a **dedicated 96×48 map**, mirrored so both teams get the same ground:
+a raised **fort** with the flag stand at each end (red west, blue east — a
+parapet, a gate on the field side and a stair on each flank), a **central
+plateau** with a ramp on every side as the contested high ground, and rolling
+side lanes with mirrored watchtowers, walls, pillars and trees for cover. The
+straight line between the flag stands (gate → ground → plateau → gate) is
+always walkable.
+
+- **Teams.** Pick Red / Blue when joining (or Auto for the smaller side) and
+  switch any time from the `Esc` overlay — switching drops a carried flag,
+  kills you (no death counted) and respawns you on the new side. Humans switch
+  freely; bots move over on their own whenever the sides differ by two or
+  more. Teams show as red / blue skins and nametags. **No friendly fire.**
+- **Flags.** Touch the enemy flag to carry it. Bring it inside your **base
+  zone** (within 4 blocks of your flag stand) **while your own flag is home** to
+  score. Everyone can see a carried flag: a light column follows the carrier.
+- **Carrying.** You walk at **75 %** speed, are **melee-only** (the gun will not
+  fire; in a gun-only room a carrier cannot attack at all) and can hand the
+  flag off with **`G`** (you cannot pick it straight back up for 1.5 s).
+- **Dropped flags.** A killed (or leaving) carrier drops the flag where they
+  stood. Teammates pick it up and carry on; the owning team touches it to send
+  it home; untouched for **20 s** it returns by itself.
+- **Winning.** First to the capture limit (**3**, 5 or 10) or the higher score
+  when time runs out; equal scores are a draw. The scoreboard adds a captures
+  column and the results screen says **Victory / Defeat / Draw** for your side
+  with the final score and one ranked table per team.
+- **Respawns** take **5 s** (3 s in deathmatch) and land on the **8 spawn
+  points nearest your own base**, so defenders keep coming while an attacker
+  crosses the map — that,
+  the slow melee-only carry and the "own flag must be home" rule are what turn
+  a flag run into a tug of war rather than a sprint.
+- **Bots** join both teams (alternating) and play offence: they go for the
+  enemy flag and run it home, escort a teammate who has it, return their own
+  flag when it lies closer than the enemy flag, and chase the enemy carrying
+  their flag only when they are within 20 blocks.
+
+Weapon modes (`Gun + Sword` / `Gun only` / `Sword only`) apply as usual, and
+weapon drops fall on the central plateau more often than in the arena (see
+above).
+
 ### Tuning
 
 All knobs are constants in `packages/shared`:
 
-- `constants.ts` — world size, walk/jump, gun cooldown/range/magazine/reload,
-  sword range/cone/charge, HP and per-body-part damage, hitbox bands, respawn
-  delay, spawn protection, room durations, max players.
+- `constants.ts` — world size (arena and CTF map), walk/jump, gun
+  cooldown/range/magazine/reload, sword range/cone/charge, HP and per-body-part
+  damage, hitbox bands, respawn delay, spawn protection, room durations, max
+  players, CTF capture limits / carry speed / base zone / flag return timers.
 - `melee.ts` — the melee move-set table (`MELEE_STATS`: light / heavy per
   weapon, each with cone, reach, damage, sweep, cooldown and animation), drop
-  cadence, cap, lifetime and pickup radius.
-- `bot.ts` — bot reaction time, aim error, preferred range, etc.
+  cadence (arena and CTF), cap, lifetime and pickup radius.
+- `bot.ts` — the skill profiles (sight, turn rate, reaction, aim error,
+  attack interval), preferred range, CTF goal/patrol radii, re-plan cadence;
+  `nav.ts` — max drop height; `ctf.ts` — flag/team rules, `worldgen.ts` —
+  both map layouts.
 
 ## Run it locally
 
@@ -195,14 +261,14 @@ keep the backend at **one machine** (`--ha=false`).
 
 ```
 packages/
-  shared/   pure TypeScript game core (no runtime deps) — constants, worldgen,
-            AABB physics, voxel raycasts, gun/melee resolution, drops, spawn,
-            ranking, bot AI, wire protocol types
+  shared/   pure TypeScript game core (no runtime deps) — constants, worldgen
+            (arena + CTF map), AABB physics, voxel raycasts, gun/melee
+            resolution, drops, spawn, CTF rules, ranking, bot AI, wire protocol
   server/   Colyseus 0.16 authoritative "arena" room + GET /rooms + GET /health
   client/   Vite + three.js: lobby, voxel renderer, pointer-lock FPS controls,
             HUD, results screen
 scripts/    smoke.mjs — headless end-to-end test
-docs/       ARCHITECTURE.md and other design notes
+docs/       ARCHITECTURE.md, design plans (docs/plans/) and other notes
 Makefile    start / test / build / deploy shortcuts
 ```
 

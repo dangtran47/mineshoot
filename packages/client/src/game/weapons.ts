@@ -53,6 +53,8 @@ export class Weapons {
   private holding = false;
   private chargeStartAt: number | null = null;
   private reloadStartAt: number | null = null;
+  /** CTF flag carrier: melee only (the gun cannot be selected or fired). */
+  private lockedToMelee = false;
 
   /** `allowed` = the room's weapon rule (default: gun and sword); the first entry is the starting weapon. */
   constructor(
@@ -68,8 +70,24 @@ export class Weapons {
     return this.allowed.length > 1;
   }
 
+  /**
+   * CTF: while carrying a flag the player is melee-only. Locking brings the
+   * melee weapon out where the room allows it; in a gun-only room the gun
+   * stays out but will not fire. Unlocking just lifts the restriction.
+   */
+  setLockedToMelee(locked: boolean): void {
+    if (locked === this.lockedToMelee) return;
+    this.lockedToMelee = locked;
+    if (locked && this.allowed.includes(WEAPON_SWORD)) this.select(WEAPON_SWORD);
+  }
+
+  get meleeLocked(): boolean {
+    return this.lockedToMelee;
+  }
+
   select(w: Weapon): void {
     if (w === this.current || !this.allowed.includes(w)) return;
+    if (w === WEAPON_GUN && this.lockedToMelee) return;
     this.cancel();
     this.reloadStartAt = null;
     this.current = w;
@@ -203,7 +221,7 @@ export class Weapons {
   }
 
   private tryFire(now: number): void {
-    if (this.reloadStartAt !== null) return;
+    if (this.lockedToMelee || this.reloadStartAt !== null) return;
     if (this.ammo <= 0) {
       this.reload(now);
       return;

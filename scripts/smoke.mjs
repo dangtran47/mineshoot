@@ -1,4 +1,5 @@
-// Headless two-player smoke test: lobby → create → join → teleport → gun kill → respawn → match end → results.
+// Headless two-player smoke test: lobby → create → join → teleport → gun kill → respawn → match end → results,
+// then a bot room (weapon drop), a training range, and a capture-the-flag room (take → carry → score).
 // Usage: node scripts/smoke.mjs [outDir]
 // Needs: MINESHOOT_TEST=1 server on :2567 and vite client on :5173 (override the client with SMOKE_URL).
 import { createRequire } from 'node:module';
@@ -202,6 +203,43 @@ await shot(a, 'training-range.png');
 await a.click('button:has-text("Leave match")');
 await a.waitForSelector('.lobby', { timeout: 5000 });
 console.log('alice left training range');
+
+// --- Capture the flag: Alice (red) creates, Bob joins blue from the lobby, Alice takes the blue flag and scores.
+await a.fill('.roomname', 'Flags');
+await a.selectOption('.mode', 'ctf');
+await a.selectOption('.bots', '0');
+console.log('ctf captures field visible:', await a.evaluate(() => !document.querySelector('.field.captures').classList.contains('hidden')));
+await a.click('.create');
+// The CTF map is 2.25× the arena: under swiftshader the first frames are slow, so wait for the canvas to exist rather than be "visible".
+await a.waitForSelector('canvas.game', { state: 'attached', timeout: 15000 });
+await ready(a);
+const flag = (p, team) => p.evaluate((t) => { const f = window.__mineshoot.room.state.flags.get(String(t)); return { status: f.status, x: f.x, y: f.y, z: f.z, carrierId: f.carrierId }; }, team);
+const meState = (p) => p.evaluate(() => { const g = window.__mineshoot; const m = g.room.state.players.get(g.room.sessionId); return { team: m.team, x: m.x, captures: m.captures }; });
+console.log('ctf room:', await a.textContent('.roomname'), '| score bar:', (await a.textContent('.ctfbar')).replace(/\s+/g, ' ').trim(), '| alice:', JSON.stringify(await meState(a)));
+await b.waitForFunction(() => document.querySelector('.rooms')?.textContent.includes('Flags'), null, { timeout: 6000 });
+console.log('lobby rows (ctf):', (await b.textContent('.rooms')).replace(/\s+/g, ' ').trim());
+await b.click('button.join.t-blue');
+await b.waitForSelector('canvas.game', { state: 'attached', timeout: 15000 });
+await ready(b);
+console.log('bob:', JSON.stringify(await meState(b)), '| overlay team buttons:', (await b.textContent('.overlay .teams')).replace(/\s+/g, ' ').trim());
+const blueFlag = await flag(a, 2);
+await a.evaluate(([x, y, z]) => window.__mineshoot.local.teleport(x, y, z, 0), [blueFlag.x, blueFlag.y, blueFlag.z]);
+await a.waitForFunction(() => window.__mineshoot.room.state.flags.get('2').status === 'carried', null, { timeout: 4000 });
+await a.waitForFunction(() => window.__mineshoot.weapons.current === 1 && !document.querySelector('.carry').classList.contains('hidden'), null, { timeout: 4000 });
+console.log('alice carries blue flag | banner:', await a.textContent('.carry'), '| bob sees flag:', JSON.stringify(await flag(b, 2)));
+await a.waitForTimeout(300);
+await shot(a, 'ctf-carrying.png');
+const redFlag = await flag(a, 1);
+await a.evaluate(([x, y, z]) => window.__mineshoot.local.teleport(x + 2, y, z, 0), [redFlag.x, redFlag.y, redFlag.z]);
+await a.waitForFunction(() => window.__mineshoot.room.state.redScore === 1, null, { timeout: 4000 });
+await a.waitForFunction(() => document.querySelector('.carry').classList.contains('hidden'), null, { timeout: 4000 });
+console.log('alice scored | score bar:', (await a.textContent('.ctfbar')).replace(/\s+/g, ' ').trim(), '| feed:', (await b.textContent('.feed')).replace(/\s+/g, ' ').trim());
+await shot(b, 'ctf-scored-bob.png');
+await b.click('button:has-text("Leave match")');
+await b.waitForSelector('.lobby', { timeout: 5000 });
+await a.click('button:has-text("Leave match")');
+await a.waitForSelector('.lobby', { timeout: 5000 });
+console.log('both left ctf room');
 await browser.close();
 console.log('console errors:', errors.length ? errors : 'none');
 process.exit(errors.length ? 1 : 0);

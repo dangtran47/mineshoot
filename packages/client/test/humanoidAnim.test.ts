@@ -9,6 +9,7 @@ import {
   SHOT_KICK_MS,
   SWING_MS,
   SWORD_IDLE_PITCH,
+  SWORD_IDLE_TILT,
 } from '../src/render/humanoidAnim';
 
 describe('HumanoidAnim', () => {
@@ -19,6 +20,29 @@ describe('HumanoidAnim', () => {
     a.setWeapon(WEAPON_SWORD);
     expect(a.pose(0).armPitch).toBe(SWORD_IDLE_PITCH);
     expect(Math.abs(GUN_IDLE_PITCH - SWORD_IDLE_PITCH)).toBeGreaterThan(0.5);
+  });
+
+  it('rests the sword in a guard stance: arm forward, blade tilted up off the arm', () => {
+    const a = new HumanoidAnim();
+    a.setWeapon(WEAPON_SWORD);
+    // Arm reaches forward (not hanging), blade bent up at the wrist so it stands in front of the body.
+    expect(SWORD_IDLE_PITCH).toBeGreaterThan(Math.PI / 4);
+    expect(SWORD_IDLE_TILT).toBeGreaterThan(0.6);
+    expect(a.pose(0).bladeTilt).toBe(SWORD_IDLE_TILT);
+    a.setWeapon(WEAPON_GUN);
+    expect(a.pose(0).bladeTilt).toBe(0);
+  });
+
+  it('straightens the wrist for the wind-up and the swings so chops follow the arm', () => {
+    const a = new HumanoidAnim();
+    a.setWeapon(WEAPON_SWORD);
+    a.setCharging(true, 1000);
+    expect(a.pose(1000).bladeTilt).toBeCloseTo(SWORD_IDLE_TILT, 5);
+    expect(a.pose(1000 + SWORD_CHARGE_MS).bladeTilt).toBe(0);
+    a.setCharging(false, 1000 + SWORD_CHARGE_MS);
+    a.swing(1000 + SWORD_CHARGE_MS, 'overhead', true);
+    expect(a.pose(1000 + SWORD_CHARGE_MS + SWING_MS / 2).bladeTilt).toBe(0);
+    expect(a.pose(1000 + SWORD_CHARGE_MS + SWING_MS + 1).bladeTilt).toBe(SWORD_IDLE_TILT);
   });
 
   it('winds the sword arm back and glows while charging, reaching full at SWORD_CHARGE_MS', () => {

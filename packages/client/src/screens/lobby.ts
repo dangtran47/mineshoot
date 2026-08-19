@@ -1,5 +1,5 @@
-import { DEFAULT_DURATION_MIN, DURATION_OPTIONS_MIN, MAX_BOTS, MAX_NAME_LEN, MAX_PLAYERS, ROOM_MODES, WEAPON_MODES } from '@mineshoot/shared';
-import type { RoomMode, WeaponMode } from '@mineshoot/shared';
+import { BOT_SKILLS, CTF_CAPTURE_LIMIT_OPTIONS, CTF_DEFAULT_CAPTURE_LIMIT, DEFAULT_BOT_SKILL, DEFAULT_DURATION_MIN, DURATION_OPTIONS_MIN, MAX_BOTS, MAX_NAME_LEN, MAX_PLAYERS, ROOM_MODES, TEAM_BLUE, TEAM_NONE, TEAM_RED, WEAPON_MODES } from '@mineshoot/shared';
+import type { BotSkill, RoomMode, WeaponMode } from '@mineshoot/shared';
 import { createRoom, joinRoom, listRooms } from '../net';
 import type { GameRoom, RoomListEntry } from '../net';
 import { formatTime } from '../hud/hud';
@@ -8,16 +8,26 @@ const NICK_KEY = 'mineshoot.nick';
 const POLL_MS = 2000;
 
 const WEAPON_MODE_LABEL: Record<WeaponMode, string> = { all: 'Gun + Sword', gun: 'Gun only', sword: 'Sword only' };
-const ROOM_MODE_LABEL: Record<RoomMode, string> = { match: 'Deathmatch', training: 'Training range' };
+const ROOM_MODE_LABEL: Record<RoomMode, string> = { match: 'Deathmatch', training: 'Training range', ctf: 'Capture the Flag' };
+const BOT_SKILL_LABEL: Record<BotSkill, string> = { easy: 'Easy bots', normal: 'Normal bots', hard: 'Hard bots' };
 /** Bots a training range gets when the creator left the bot count at zero (a range needs dummies). */
 const TRAINING_DEFAULT_BOTS = 3;
 /** Short badge for the room list ('' for the default rule). */
 export function weaponModeBadge(mode: WeaponMode | undefined): string {
   return mode === 'gun' ? '\u{1F52B} only' : mode === 'sword' ? '\u{1F5E1}\uFE0F only' : '';
 }
+/** Short badge for the room list ('' when there are no bots or they are the default level). */
+export function botSkillBadge(bots: number | undefined, skill: BotSkill | undefined): string {
+  if (!bots || !skill || skill === DEFAULT_BOT_SKILL) return '';
+  return skill === 'easy' ? '\u{1F916} easy' : '\u{1F916} hard';
+}
 /** Short badge for the room list ('' for a normal match). */
 export function roomModeBadge(mode: RoomMode | undefined): string {
-  return mode === 'training' ? '\u{1F3AF} training' : '';
+  return mode === 'training' ? '\u{1F3AF} training' : mode === 'ctf' ? '\u{1F6A9} CTF' : '';
+}
+/** CTF room row: `🔴 2 · 🔵 3` from the metadata head counts. */
+export function teamCountsLabel(teams: [number, number] | undefined): string {
+  return teams ? `\u{1F534} ${teams[0]} \u00b7 \u{1F535} ${teams[1]}` : '';
 }
 
 export interface LobbyOptions {
@@ -32,29 +42,47 @@ export function showLobby(opts: LobbyOptions): { dispose(): void } {
   root.className = 'lobby';
   root.innerHTML = `
     <div class="card">
-      <h1>MINE<span>SHOOT</span></h1>
-      <div class="sub">Blocky arena deathmatch — one hit kills. Gun or sword, your call.</div>
-      <div class="row">
-        <label>Nickname</label>
-        <input class="nick" maxlength="${MAX_NAME_LEN}" placeholder="Your name" />
-      </div>
-      <div class="row">
-        <label>New room</label>
-        <input class="roomname" maxlength="24" placeholder="Room name" />
-        <select class="duration"></select>
-        <select class="mode" title="Room type"></select>
-        <select class="bots" title="AI bots"></select>
-        <select class="weapons" title="Allowed weapons"></select>
-        <button class="primary create">Create room</button>
-      </div>
-      <table>
-        <thead><tr><th>Room</th><th>Players</th><th>Time left</th><th></th></tr></thead>
-        <tbody class="rooms"><tr><td colspan="4" class="empty">Loading rooms…</td></tr></tbody>
-      </table>
+      <header class="head">
+        <h1>MINE<span>SHOOT</span></h1>
+        <p class="sub">Blocky arena deathmatch — one hit kills. Gun or sword, your call.</p>
+      </header>
+      <section class="panel">
+        <label class="field grow">
+          <span>Nickname</span>
+          <input class="nick" maxlength="${MAX_NAME_LEN}" placeholder="Your name" autocomplete="off" />
+        </label>
+      </section>
+      <section class="panel">
+        <h2>Create a room</h2>
+        <div class="fields">
+          <label class="field name"><span>Room name</span><input class="roomname" maxlength="24" placeholder="Room name" autocomplete="off" /></label>
+          <label class="field"><span>Duration</span><select class="duration"></select></label>
+          <label class="field"><span>Mode</span><select class="mode" title="Room type"></select></label>
+          <label class="field"><span>Bots</span><select class="bots" title="AI bots"></select></label>
+          <label class="field botskill hidden"><span>Bot skill</span><select class="skill" title="How sharp the bots are"></select></label>
+          <label class="field"><span>Weapons</span><select class="weapons" title="Allowed weapons"></select></label>
+          <label class="field captures hidden"><span>Captures</span><select class="capturelimit" title="Captures to win"></select></label>
+          <button class="primary create">Create room</button>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Open rooms <span class="live" title="Refreshes every ${POLL_MS / 1000}s"><i></i>live</span></h2>
+        <table>
+          <thead><tr><th>Room</th><th>Players</th><th>Time left</th><th></th></tr></thead>
+          <tbody class="rooms"><tr><td colspan="4" class="empty">Loading rooms…</td></tr></tbody>
+        </table>
+      </section>
       <div class="error"></div>
-      <div class="help">WASD move · Space jump · Mouse aim · LMB attack · RMB charge sword · 1/2 or wheel switch weapon · Tab scoreboard.
-        Training range: bots are passive dummies and keys 3–7 pick any melee weapon.
-        <a href="#" class="offline">Offline sandbox</a></div>
+      <footer class="help">
+        <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move</span>
+        <span><kbd>Space</kbd> jump</span>
+        <span><kbd>LMB</kbd> attack</span>
+        <span><kbd>RMB</kbd> charge sword</span>
+        <span><kbd>1</kbd><kbd>2</kbd> / wheel switch weapon</span>
+        <span><kbd>Tab</kbd> scoreboard</span>
+        <span class="note">Training range: bots are passive dummies and <kbd>3</kbd>–<kbd>7</kbd> pick any melee weapon.</span>
+        <a href="#" class="offline">Offline sandbox →</a>
+      </footer>
     </div>`;
   opts.container.appendChild(root);
 
@@ -63,7 +91,11 @@ export function showLobby(opts: LobbyOptions): { dispose(): void } {
   const duration = root.querySelector<HTMLSelectElement>('.duration')!;
   const mode = root.querySelector<HTMLSelectElement>('.mode')!;
   const bots = root.querySelector<HTMLSelectElement>('.bots')!;
+  const skillField = root.querySelector<HTMLElement>('.botskill')!;
+  const skill = root.querySelector<HTMLSelectElement>('.skill')!;
   const weapons = root.querySelector<HTMLSelectElement>('.weapons')!;
+  const captureField = root.querySelector<HTMLElement>('.captures')!;
+  const captureLimit = root.querySelector<HTMLSelectElement>('.capturelimit')!;
   const createBtn = root.querySelector<HTMLButtonElement>('.create')!;
   const rooms = root.querySelector<HTMLElement>('.rooms')!;
   const error = root.querySelector<HTMLElement>('.error')!;
@@ -86,13 +118,34 @@ export function showLobby(opts: LobbyOptions): { dispose(): void } {
   // A training range without dummies is an empty field: give it a few unless the creator chose some.
   mode.addEventListener('change', () => {
     if (mode.value === 'training' && Number(bots.value) === 0) bots.value = String(TRAINING_DEFAULT_BOTS);
+    captureField.classList.toggle('hidden', mode.value !== 'ctf');
+    syncSkillField();
   });
+  for (const n of CTF_CAPTURE_LIMIT_OPTIONS) {
+    const o = document.createElement('option');
+    o.value = String(n);
+    o.textContent = `First to ${n}`;
+    if (n === CTF_DEFAULT_CAPTURE_LIMIT) o.selected = true;
+    captureLimit.appendChild(o);
+  }
   for (let n = 0; n <= MAX_BOTS; n++) {
     const o = document.createElement('option');
     o.value = String(n);
     o.textContent = n === 0 ? 'No bots' : `${n} bot${n > 1 ? 's' : ''}`;
     bots.appendChild(o);
   }
+  for (const s of BOT_SKILLS) {
+    const o = document.createElement('option');
+    o.value = s;
+    o.textContent = BOT_SKILL_LABEL[s];
+    if (s === DEFAULT_BOT_SKILL) o.selected = true;
+    skill.appendChild(o);
+  }
+  // The skill picker only matters when there are bots (training dummies ignore it).
+  const syncSkillField = (): void => {
+    skillField.classList.toggle('hidden', Number(bots.value) === 0 || mode.value === 'training');
+  };
+  bots.addEventListener('change', syncSkillField);
   for (const m of WEAPON_MODES) {
     const o = document.createElement('option');
     o.value = m;
@@ -128,8 +181,10 @@ export function showLobby(opts: LobbyOptions): { dispose(): void } {
         durationMin: Number(duration.value),
         nickname: n,
         bots: Number(bots.value),
+        botSkill: skill.value as BotSkill,
         weapons: weapons.value as WeaponMode,
         mode: mode.value as RoomMode,
+        ...(mode.value === 'ctf' ? { captureLimit: Number(captureLimit.value) } : {}),
       };
       // Dev-only: ?testDurationMs=... shortens the match, ?testDropMs=... speeds up weapon drops
       // (the server honours them only with MINESHOOT_TEST=1).
@@ -159,7 +214,7 @@ export function showLobby(opts: LobbyOptions): { dispose(): void } {
     setBusy(true);
     error.textContent = '';
     try {
-      const room = await joinRoom(btn.dataset.id!, n);
+      const room = await joinRoom(btn.dataset.id!, n, Number(btn.dataset.team ?? TEAM_NONE));
       dispose();
       opts.onJoined(room);
     } catch (err) {
@@ -187,10 +242,20 @@ export function showLobby(opts: LobbyOptions): { dispose(): void } {
         const full = r.clients >= r.maxClients;
         const botCount = r.metadata.bots ?? 0;
         const players = `${r.clients + botCount}/${MAX_PLAYERS}${botCount ? ` (\u{1F916} ${botCount})` : ''}`;
-        const badges = [roomModeBadge(r.metadata.mode), weaponModeBadge(r.metadata.weapons)].filter(Boolean);
+        const ctf = r.metadata.mode === 'ctf';
+        const badges = [roomModeBadge(r.metadata.mode), weaponModeBadge(r.metadata.weapons), botSkillBadge(botCount, r.metadata.botSkill)].filter(Boolean);
         const name = `${escapeHtml(r.metadata.name)}${badges.map((b) => ` <span class="badge">${b}</span>`).join('')}`;
-        tr.innerHTML = `<td>${name}</td><td>${players}</td><td>${formatTime(left)}</td>
-          <td><button class="join" data-id="${r.roomId}" ${full || busy ? 'disabled' : ''}>${full ? 'Full' : 'Join'}</button></td>`;
+        const teams = ctf ? ` <span class="teams">${teamCountsLabel(r.metadata.teams)}</span>` : '';
+        const dis = full || busy ? 'disabled' : '';
+        // CTF: pick a side (or let the server balance); other rooms: one Join button.
+        const joinBtns = full
+          ? '<button class="join" disabled>Full</button>'
+          : ctf
+            ? `<button class="join team t-red" data-id="${r.roomId}" data-team="${TEAM_RED}" ${dis} title="Join the red team">Red</button>` +
+              `<button class="join team t-blue" data-id="${r.roomId}" data-team="${TEAM_BLUE}" ${dis} title="Join the blue team">Blue</button>` +
+              `<button class="join" data-id="${r.roomId}" data-team="${TEAM_NONE}" ${dis} title="Join the smaller team">Auto</button>`
+            : `<button class="join" data-id="${r.roomId}" ${dis}>Join</button>`;
+        tr.innerHTML = `<td>${name}</td><td>${players}${teams}</td><td>${formatTime(left)}</td><td class="actions">${joinBtns}</td>`;
         return tr;
       }),
     );

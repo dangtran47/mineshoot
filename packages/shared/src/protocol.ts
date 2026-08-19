@@ -1,3 +1,4 @@
+import { CTF_RESPAWN_MS, RESPAWN_MS, TRAINING_RESPAWN_MS } from './constants';
 import type { Vec3 } from './types';
 import type { HitPart } from './hitbox';
 import type { SwordPart } from './sword';
@@ -30,13 +31,46 @@ export function allowedWeapons(mode: WeaponMode): Weapon[] {
  * deathmatch. `training` is a practice range: bots are passive dummies parked
  * on the central plateau (they never attack, respawn fast) and any melee
  * weapon can be picked directly (MSG.selectMelee) instead of waiting for a drop.
+ * `ctf` is capture the flag: two teams on a dedicated long map, see ctf.ts.
  */
-export const ROOM_MODES = ['match', 'training'] as const;
+export const ROOM_MODES = ['match', 'training', 'ctf'] as const;
 export type RoomMode = (typeof ROOM_MODES)[number];
 export const DEFAULT_ROOM_MODE: RoomMode = 'match';
 export function isRoomMode(v: unknown): v is RoomMode {
   return (ROOM_MODES as readonly unknown[]).includes(v);
 }
+export function isCtf(mode: RoomMode): boolean {
+  return mode === 'ctf';
+}
+/** Respawn delay for a room mode (server rule; the client uses it for the countdown). */
+export function respawnMsFor(mode: RoomMode): number {
+  return mode === 'training' ? TRAINING_RESPAWN_MS : mode === 'ctf' ? CTF_RESPAWN_MS : RESPAWN_MS;
+}
+
+/** Teams (capture the flag). TEAM_NONE = no team (deathmatch / training). */
+export const TEAM_NONE = 0;
+export const TEAM_RED = 1;
+export const TEAM_BLUE = 2;
+export type Team = typeof TEAM_RED | typeof TEAM_BLUE;
+export const TEAMS: readonly Team[] = [TEAM_RED, TEAM_BLUE];
+export function isTeam(v: unknown): v is Team {
+  return v === TEAM_RED || v === TEAM_BLUE;
+}
+export function otherTeam(t: Team): Team {
+  return t === TEAM_RED ? TEAM_BLUE : TEAM_RED;
+}
+export function teamName(t: Team): string {
+  return t === TEAM_RED ? 'Red' : 'Blue';
+}
+
+/** Bot difficulty, chosen at room creation; the numbers behind each level live in bot.ts. */
+export const BOT_SKILLS = ['easy', 'normal', 'hard'] as const;
+export type BotSkill = (typeof BOT_SKILLS)[number];
+export const DEFAULT_BOT_SKILL: BotSkill = 'normal';
+export function isBotSkill(v: unknown): v is BotSkill {
+  return (BOT_SKILLS as readonly unknown[]).includes(v);
+}
+
 /** True when players may switch their melee weapon at will (training rooms with melee allowed). */
 export function meleeSelectable(mode: RoomMode, weapons: WeaponMode): boolean {
   return mode === 'training' && weaponAllowed(weapons, WEAPON_SWORD);
@@ -48,13 +82,19 @@ export interface CreateOptions {
   nickname: string;
   /** Number of AI bots to add at creation (0..MAX_BOTS). */
   bots?: number;
+  /** Bot difficulty (default 'normal'; see BOT_SKILLS in bot.ts). */
+  botSkill?: BotSkill;
   /** Allowed weapons (default 'all'). */
   weapons?: WeaponMode;
-  /** Deathmatch or training range (default 'match'). */
+  /** Deathmatch, training range or capture the flag (default 'match'). */
   mode?: RoomMode;
+  /** CTF: captures needed to win (one of CTF_CAPTURE_LIMIT_OPTIONS). */
+  captureLimit?: number;
 }
 export interface JoinOptions {
   nickname: string;
+  /** CTF: team to join (TEAM_NONE / omitted = the server picks the smaller team). */
+  team?: number;
 }
 export interface RoomMetadata {
   name: string;
@@ -62,8 +102,14 @@ export interface RoomMetadata {
   /** Server epoch ms when the match ends (lobby display only). */
   endsAt: number;
   bots: number;
+  /** Difficulty of the bots (only meaningful when bots > 0). */
+  botSkill?: BotSkill;
   weapons: WeaponMode;
   mode: RoomMode;
+  /** CTF only: captures needed to win. */
+  captureLimit?: number;
+  /** CTF only: [red, blue] head counts (humans + bots), for the lobby list. */
+  teams?: [number, number];
 }
 
 export interface PoseMsg {
@@ -99,6 +145,22 @@ export type ReadyMsg = null;
 export interface SelectMeleeMsg {
   epoch: number;
   melee: MeleeKind;
+}
+
+/** CTF: switch (or pick, before playing) a team; payload is the team. */
+export type SelectTeamMsg = number;
+/** CTF: let go of the carried flag (hand-off); payload is the spawn epoch. */
+export type DropFlagMsg = number;
+
+export type FlagEventKind = 'taken' | 'dropped' | 'returned' | 'captured';
+/** CTF: something happened to a flag; `team` is the flag's owner. */
+export interface FlagEventMsg {
+  kind: FlagEventKind;
+  team: Team;
+  playerId: string;
+  playerName: string;
+  redScore: number;
+  blueScore: number;
 }
 
 export interface ShotMsg {
@@ -153,6 +215,8 @@ export const MSG = {
   reload: 'reload',
   ready: 'ready',
   selectMelee: 'selectMelee',
+  selectTeam: 'selectTeam',
+  dropFlag: 'dropFlag',
   ping: 'ping',
   pong: 'pong',
   shot: 'shot',
@@ -160,6 +224,7 @@ export const MSG = {
   hit: 'hit',
   kill: 'kill',
   pickup: 'pickup',
+  flag: 'flag',
 } as const;
 
 export const ROOM_NAME = 'arena';

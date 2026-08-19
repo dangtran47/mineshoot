@@ -1,5 +1,5 @@
 import { MapSchema, Schema, type } from '@colyseus/schema';
-import { MAX_HP, MELEE_SWORD } from '@mineshoot/shared';
+import { CTF_DEFAULT_CAPTURE_LIMIT, MAX_HP, MELEE_SWORD, TEAM_NONE } from '@mineshoot/shared';
 
 export class PlayerSchema extends Schema {
   @type('string') name = '';
@@ -25,6 +25,10 @@ export class PlayerSchema extends Schema {
   @type('boolean') charging = false;
   /** Reloading the gun. */
   @type('boolean') reloading = false;
+  /** CTF: TEAM_RED / TEAM_BLUE; TEAM_NONE in other modes. */
+  @type('uint8') team = TEAM_NONE;
+  /** CTF: flags captured. */
+  @type('uint16') captures = 0;
 }
 
 /** A melee weapon lying on the ground, waiting to be picked up. */
@@ -33,6 +37,18 @@ export class DropSchema extends Schema {
   @type('float32') x = 0;
   @type('float32') y = 0;
   @type('float32') z = 0;
+}
+
+/** CTF: one team's flag. While carried, x/y/z follow the carrier. */
+export class FlagSchema extends Schema {
+  @type('uint8') team = TEAM_NONE;
+  /** 'home' | 'carried' | 'dropped' */
+  @type('string') status = 'home';
+  @type('float32') x = 0;
+  @type('float32') y = 0;
+  @type('float32') z = 0;
+  /** Session id of the carrier while carried, '' otherwise. */
+  @type('string') carrierId = '';
 }
 
 export class RoomState extends Schema {
@@ -48,4 +64,10 @@ export class RoomState extends Schema {
   @type('uint32') timeLeftMs = 0;
   @type({ map: PlayerSchema }) players = new MapSchema<PlayerSchema>();
   @type({ map: DropSchema }) drops = new MapSchema<DropSchema>();
+  /** CTF: flags keyed by team ('1' red, '2' blue); empty in other modes. */
+  @type({ map: FlagSchema }) flags = new MapSchema<FlagSchema>();
+  @type('uint8') redScore = 0;
+  @type('uint8') blueScore = 0;
+  /** CTF: captures needed to win. */
+  @type('uint8') captureLimit = CTF_DEFAULT_CAPTURE_LIMIT;
 }

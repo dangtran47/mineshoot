@@ -3,12 +3,29 @@ import type { Client } from 'colyseus';
 import {
   ATTACK_HEAVY,
   ATTACK_LIGHT,
+  CTF_DROP_INTERVAL_MAX_MS,
+  CTF_DROP_INTERVAL_MIN_MS,
+  CTF_DROP_MAX_ACTIVE,
   ENDED_LINGER_MS,
+  FLAG_DROP_GRACE_MS,
+  FLAG_RETURN_MS,
+  TEAM_BLUE,
+  TEAM_RED,
+  TEAMS,
+  botCtfGoal,
+  botRebalance,
+  canScore,
+  carriedFlag,
+  flagTouch,
+  isCtf,
+  pickTeam,
+  teamSpawns,
   PHYSICS_DT,
   SERVER_TICK_MS,
   DROP_INTERVAL_MAX_MS,
   DROP_INTERVAL_MIN_MS,
   DROP_LIFETIME_MS,
+  DEFAULT_BOT_SKILL,
   DROP_MAX_ACTIVE,
   MELEE_SWORD,
   canPickUp,
@@ -30,13 +47,13 @@ import {
   PLAYER_COLOR_COUNT,
   RESPAWN_MS,
   SPAWN_PROTECT_MS,
-  TRAINING_RESPAWN_MS,
+  respawnMsFor,
   WEAPON_GUN,
   WEAPON_SWORD,
   attackSpec,
   createRng,
   defaultWeapon,
-  generateWorld,
+  generateWorldFor,
   hashSeed,
   meleeSelectable,
   pickSpawn,
@@ -45,12 +62,15 @@ import {
   swordVictims,
   weaponAllowed,
 } from '@mineshoot/shared';
-import type { AttackKind, Bot, BotView, HitMsg, KillMsg, MeleeKind, PickupMsg, PlayerPhysState, PlayerPose, RoomMode, ShotMsg, ShotTarget, SpawnPoint, SwungMsg, Weapon, WeaponMode, World } from '@mineshoot/shared';
-import { DropSchema, PlayerSchema, RoomState } from './schema';
+import type { AttackKind, Bot, BotSkill, BotView, FlagEventKind, FlagEventMsg, FlagState, HitMsg, KillMsg, MeleeKind, PickupMsg, PlayerPhysState, PlayerPose, Rect, RoomMode, ShotMsg, ShotTarget, SpawnPoint, SwungMsg, Team, Weapon, WeaponMode, World } from '@mineshoot/shared';
+import { DropSchema, FlagSchema, PlayerSchema, RoomState } from './schema';
 import {
   parseBotCount,
+  parseBotSkill,
+  parseCaptureLimit,
   parseCharge,
   parseChargeCancel,
+  parseDropFlag,
   parseDurationMin,
   parsePose,
   parseReload,
@@ -58,6 +78,7 @@ import {
   parseSelectMelee,
   parseShoot,
   parseSwing,
+  parseTeam,
   parseWeaponMode,
   sanitizeName,
   sanitizeRoomName,
@@ -103,6 +124,8 @@ interface TestOverrides {
   /** Fixed interval between weapon drops (replaces the random DROP_INTERVAL range). */
   dropIntervalMs?: number;
   dropLifetimeMs?: number;
+  /** CTF: how long a dropped flag lies around before returning home. */
+  flagReturnMs?: number;
 }
 
 /** Server-side bot runtime: brain + simulated body. */
@@ -111,12 +134,18 @@ interface BotRuntime {
   phys: PlayerPhysState;
 }
 
+/** Humanoid palette indices used for the teams (render/humanoid.ts PLAYER_COLORS: 0 red, 1 blue). */
+const teamColor = (team: Team): number => (team === TEAM_RED ? 0 : 1);
+const flagKey = (team: Team): string => String(team);
+
 interface CreateOptionsRaw {
   name?: unknown;
   durationMin?: unknown;
   bots?: unknown;
+  botSkill?: unknown;
   weapons?: unknown;
   mode?: unknown;
+  captureLimit?: unknown;
   nickname?: unknown;
   testOverrides?: TestOverrides;
 }
@@ -126,16 +155,25 @@ export class ArenaRoom extends Room<RoomState> {
 
   private world!: World;
   private spawnPoints: SpawnPoint[] = [];
+  private dropZone!: Rect;
+  /** CTF: flag stand per team. */
+  private bases!: Record<Team, SpawnPoint>;
+  /** CTF: when each dropped flag hit the ground (server-only; returns home after FLAG_RETURN_MS). */
+  private readonly flagDroppedAt = new Map<Team, number>();
+  /** CTF: who put a flag down on purpose and until when they may not take it back (server-only). */
+  private readonly flagDropGrace = new Map<Team, { id: string; until: number }>();
   private rng: () => number = Math.random;
   private endsAt = 0;
   private respawnMs = RESPAWN_MS;
   private spawnProtectMs = SPAWN_PROTECT_MS;
   private lingerMs = ENDED_LINGER_MS;
+  private flagReturnMs = FLAG_RETURN_MS;
   private weaponMode: WeaponMode = 'all';
   private mode: RoomMode = 'match';
   private dropIntervalMin = DROP_INTERVAL_MIN_MS;
   private dropIntervalMax = DROP_INTERVAL_MAX_MS;
   private dropLifetimeMs = DROP_LIFETIME_MS;
+  private dropMaxActive = DROP_MAX_ACTIVE;
   private nextDropAt = 0;
   private dropSeq = 0;
   /** When each drop on the ground expires (server-only). */
@@ -144,6 +182,8 @@ export class ArenaRoom extends Room<RoomState> {
   private readonly bots = new Map<string, BotRuntime>();
   private readonly killTracker = new KillTracker();
   private botAcc = 0;
+  private botCount = 0;
+  private botSkill: BotSkill = DEFAULT_BOT_SKILL;
 
   onCreate(options: CreateOptionsRaw = {}): void {
     this.state = new RoomState();
@@ -153,8 +193,15 @@ export class ArenaRoom extends Room<RoomState> {
     this.state.weapons = this.weaponMode;
     this.mode = parseRoomMode(options.mode);
     this.state.mode = this.mode;
-    if (this.mode === 'training') this.respawnMs = TRAINING_RESPAWN_MS;
+    this.respawnMs = respawnMsFor(this.mode);
+    if (this.ctf) {
+      // Weapons matter more (carriers are melee-only) and the map is bigger: drops come more often.
+      this.dropIntervalMin = CTF_DROP_INTERVAL_MIN_MS;
+      this.dropIntervalMax = CTF_DROP_INTERVAL_MAX_MS;
+      this.dropMaxActive = CTF_DROP_MAX_ACTIVE;
+    }
     const botCount = parseBotCount(options.bots);
+    this.botSkill = parseBotSkill(options.botSkill);
     // Bots occupy player slots: humans + bots never exceed MAX_PLAYERS.
     this.maxClients = MAX_PLAYERS - botCount;
     let durationMs = this.state.durationMin * 60_000;
@@ -166,26 +213,34 @@ export class ArenaRoom extends Room<RoomState> {
       if (typeof t.spawnProtectMs === 'number') this.spawnProtectMs = t.spawnProtectMs;
       if (typeof t.dropIntervalMs === 'number') this.dropIntervalMin = this.dropIntervalMax = t.dropIntervalMs;
       if (typeof t.dropLifetimeMs === 'number') this.dropLifetimeMs = t.dropLifetimeMs;
+      if (typeof t.flagReturnMs === 'number') this.flagReturnMs = t.flagReturnMs;
     }
 
     const seed = hashSeed(`${this.roomId}:${Date.now()}`);
     this.state.seed = seed;
-    const gen = generateWorld(seed);
+    const gen = generateWorldFor(this.mode, seed);
     this.world = gen.world;
     this.spawnPoints = gen.spawnPoints;
+    this.dropZone = gen.dropZone;
+    this.bases = gen.bases;
     this.rng = createRng(seed ^ 0xabcdef);
+    if (this.ctf) {
+      this.state.captureLimit = parseCaptureLimit(options.captureLimit);
+      for (const team of TEAMS) {
+        const f = new FlagSchema();
+        f.team = team;
+        f.x = this.bases[team].x;
+        f.y = this.bases[team].y;
+        f.z = this.bases[team].z;
+        this.state.flags.set(flagKey(team), f);
+      }
+    }
 
     this.endsAt = Date.now() + durationMs;
     this.state.timeLeftMs = durationMs;
     this.scheduleDrop(Date.now());
-    this.setMetadata({
-      name: this.state.name,
-      durationMin: this.state.durationMin,
-      endsAt: this.endsAt,
-      bots: botCount,
-      weapons: this.weaponMode,
-      mode: this.mode,
-    });
+    this.botCount = botCount;
+    this.syncMetadata();
 
     this.onMessage(MSG.pose, (client, raw: unknown) => this.handlePose(client, raw));
     this.onMessage(MSG.shoot, (client, raw: unknown) => this.handleShoot(client, raw));
@@ -195,6 +250,8 @@ export class ArenaRoom extends Room<RoomState> {
     this.onMessage(MSG.reload, (client, raw: unknown) => this.handleReload(client, raw));
     this.onMessage(MSG.ready, (client) => this.handleReady(client));
     this.onMessage(MSG.selectMelee, (client, raw: unknown) => this.handleSelectMelee(client, raw));
+    this.onMessage(MSG.selectTeam, (client, raw: unknown) => this.handleSelectTeam(client, raw));
+    this.onMessage(MSG.dropFlag, (client, raw: unknown) => this.handleDropFlag(client, raw));
     this.onMessage(MSG.ping, (client, t: unknown) => {
       if (typeof t === 'number') client.send(MSG.pong, t);
     });
@@ -204,18 +261,52 @@ export class ArenaRoom extends Room<RoomState> {
 
     for (let i = 0; i < botCount; i++) this.addBot(i + 1);
     if (botCount > 0) this.setSimulationInterval((deltaMs) => this.pumpBots(deltaMs), SERVER_TICK_MS);
+    this.syncMetadata();
   }
 
+  private get ctf(): boolean {
+    return isCtf(this.mode);
+  }
+
+  /** Lobby metadata; CTF rooms also carry the capture limit and the team head counts. */
+  private syncMetadata(): void {
+    this.setMetadata({
+      name: this.state.name,
+      durationMin: this.state.durationMin,
+      endsAt: this.endsAt,
+      bots: this.botCount,
+      botSkill: this.botSkill,
+      weapons: this.weaponMode,
+      mode: this.mode,
+      ...(this.ctf ? { captureLimit: this.state.captureLimit, teams: [this.teamCount(TEAM_RED), this.teamCount(TEAM_BLUE)] } : {}),
+    });
+  }
+
+  private teamCount(team: Team): number {
+    let n = 0;
+    for (const p of this.state.players.values()) if (p.team === team) n++;
+    return n;
+  }
+  private teamCounts(): Record<Team, number> {
+    return { [TEAM_RED]: this.teamCount(TEAM_RED), [TEAM_BLUE]: this.teamCount(TEAM_BLUE) };
+  }
+
+  /** Bots alternate teams (bot1 red, bot2 blue, …). */
   private addBot(n: number): void {
     const id = `bot${n}`;
     const p = new PlayerSchema();
     p.name = `Bot ${n}`;
     p.isBot = true;
-    p.color = this.freeColor();
+    if (this.ctf) {
+      p.team = n % 2 === 1 ? TEAM_RED : TEAM_BLUE;
+      p.color = teamColor(p.team as Team);
+    } else {
+      p.color = this.freeColor();
+    }
     this.state.players.set(id, p);
     this.meta.set(id, freshMeta(true));
     this.bots.set(id, {
-      brain: createBot(createRng(this.state.seed + n * 7919), this.spawnPoints, { weapons: this.weaponMode, passive: this.mode === 'training' }),
+      brain: createBot(createRng(this.state.seed + n * 7919), this.spawnPoints, { weapons: this.weaponMode, passive: this.mode === 'training', skill: this.botSkill }),
       phys: createPhysState(0, 0, 0),
     });
     this.spawn(id, p);
@@ -239,9 +330,15 @@ export class ArenaRoom extends Room<RoomState> {
       if (!p || !p.alive) continue;
       const enemies: BotView['enemies'] = [];
       for (const [sid, other] of this.state.players) {
-        if (sid !== id && this.targetable(sid, other, now)) enemies.push({ id: sid, x: other.x, y: other.y, z: other.z });
+        if (sid !== id && this.targetable(sid, other, now) && !this.sameTeam(p, other)) enemies.push({ id: sid, x: other.x, y: other.y, z: other.z });
       }
-      const d = rt.brain.compute(this.world, { self: rt.phys, enemies, now }, dt);
+      const view: BotView = { self: rt.phys, enemies, now };
+      if (this.ctf) {
+        const flags = this.flagStates();
+        view.goal = botCtfGoal(p.team as Team, id, rt.phys, flags, this.bases);
+        view.carrying = carriedFlag(flags, id) !== null;
+      }
+      const d = rt.brain.compute(this.world, view, dt);
       let phys = { ...rt.phys, yaw: d.yaw, pitch: d.pitch };
       const substeps = Math.round(dt / PHYSICS_DT);
       for (let i = 0; i < substeps; i++) phys = stepPlayer(this.world, phys, d.input, PHYSICS_DT);
@@ -253,19 +350,27 @@ export class ArenaRoom extends Room<RoomState> {
     }
   }
 
-  onJoin(client: Client, options?: { nickname?: unknown }): void {
+  onJoin(client: Client, options?: { nickname?: unknown; team?: unknown }): void {
     const p = new PlayerSchema();
     p.name = sanitizeName(options?.nickname, `Player${this.state.players.size + 1}`);
-    p.color = this.freeColor();
+    if (this.ctf) {
+      // Requested team, or the smaller one.
+      p.team = parseTeam(options?.team) || pickTeam(this.teamCounts(), this.rng);
+      p.color = teamColor(p.team as Team);
+    } else {
+      p.color = this.freeColor();
+    }
     this.state.players.set(client.sessionId, p);
     this.meta.set(client.sessionId, freshMeta(false));
     // Not spawned until the client clicks to play (MSG.ready): parked at a spawn point, not alive,
     // so nobody can target them and their own inputs are ignored. Their camera previews the arena.
     p.alive = false;
-    const s = pickSpawn(this.spawnPoints, [], this.rng);
+    const s = pickSpawn(this.spawnsFor(p), [], this.rng);
     p.x = s.x;
     p.y = s.y;
     p.z = s.z;
+    this.rebalanceBots();
+    this.syncMetadata();
   }
 
   /** "Click to play": spawn the player for real. Later readies (pointer re-lock) are ignored. */
@@ -279,9 +384,13 @@ export class ArenaRoom extends Room<RoomState> {
   }
 
   onLeave(client: Client): void {
+    const p = this.state.players.get(client.sessionId);
+    if (p) this.dropCarriedFlag(client.sessionId, p, Date.now());
     this.state.players.delete(client.sessionId);
     this.meta.delete(client.sessionId);
     this.killTracker.remove(client.sessionId);
+    this.rebalanceBots();
+    this.syncMetadata();
   }
 
   // --- messages ---
@@ -303,7 +412,7 @@ export class ArenaRoom extends Room<RoomState> {
   }
 
   private handlePose(client: Client, raw: unknown): void {
-    const m = parsePose(raw);
+    const m = parsePose(raw, this.world);
     if (!m) return;
     const p = this.actor(client, m.epoch);
     if (!p) return;
@@ -336,10 +445,17 @@ export class ArenaRoom extends Room<RoomState> {
     return !meta || now >= meta.protectedUntil;
   }
 
+  /** CTF: no friendly fire (teammates are never targets). */
+  private sameTeam(a: PlayerSchema, b: PlayerSchema): boolean {
+    return this.ctf && a.team === b.team;
+  }
+
   private targetsExcluding(id: string, now: number): ShotTarget[] {
+    const self = this.state.players.get(id);
     const out: ShotTarget[] = [];
     for (const [sid, other] of this.state.players) {
       if (sid === id || !this.targetable(sid, other, now)) continue;
+      if (self && this.sameTeam(self, other)) continue;
       out.push({ id: sid, pose: { x: other.x, y: other.y, z: other.z } });
     }
     return out;
@@ -390,7 +506,7 @@ export class ArenaRoom extends Room<RoomState> {
 
   private handleShoot(client: Client, raw: unknown): void {
     if (!weaponAllowed(this.weaponMode, WEAPON_GUN)) return;
-    const m = parseShoot(raw);
+    const m = parseShoot(raw, this.world);
     if (!m) return;
     const p = this.actor(client, m.epoch);
     if (!p) return;
@@ -401,6 +517,8 @@ export class ArenaRoom extends Room<RoomState> {
   /** Server-authoritative gun shot for humans and bots alike (rate-limited per shooter). */
   private attackShoot(id: string, p: PlayerSchema, pose: PlayerPose, now: number): void {
     const meta = this.meta.get(id)!;
+    // CTF: a flag carrier is melee-only.
+    if (this.ctf && carriedFlag(this.flagStates(), id)) return;
     if (now - meta.lastShotAt < GUN_SERVER_MIN_INTERVAL_MS) return;
     const fired = this.takeRound(id, meta, now);
     this.syncFlags(id, p, now);
@@ -461,7 +579,7 @@ export class ArenaRoom extends Room<RoomState> {
 
   private handleSwing(client: Client, raw: unknown): void {
     if (!weaponAllowed(this.weaponMode, WEAPON_SWORD)) return;
-    const m = parseSwing(raw);
+    const m = parseSwing(raw, this.world);
     if (!m) return;
     const p = this.actor(client, m.epoch);
     if (!p) return;
@@ -513,7 +631,7 @@ export class ArenaRoom extends Room<RoomState> {
   private spawnDrop(now: number): void {
     const avoid: { x: number; z: number }[] = [];
     for (const d of this.state.drops.values()) avoid.push({ x: d.x, z: d.z });
-    const spot = pickDropSpot(this.world, this.rng, avoid, this.spawnPoints);
+    const spot = pickDropSpot(this.world, this.rng, avoid, this.spawnPoints, this.dropZone);
     if (!spot) return;
     const d = new DropSchema();
     d.kind = pickDropKind(this.rng);
@@ -534,7 +652,7 @@ export class ArenaRoom extends Room<RoomState> {
   private tickDrops(now: number): void {
     if (!this.dropsEnabled) return;
     if (now >= this.nextDropAt) {
-      if (this.state.drops.size < DROP_MAX_ACTIVE) this.spawnDrop(now);
+      if (this.state.drops.size < this.dropMaxActive) this.spawnDrop(now);
       this.scheduleDrop(now);
     }
     for (const [id, expiresAt] of this.dropExpiry) if (now >= expiresAt) this.removeDrop(id);
@@ -572,6 +690,7 @@ export class ArenaRoom extends Room<RoomState> {
     if (killer) killer.kills++;
     const meta = this.meta.get(victimId);
     if (meta) meta.respawnAt = now + this.respawnMs;
+    this.dropCarriedFlag(victimId, victim, now);
     const awards = this.killTracker.recordKill(killerId, victimId, now);
     const msg: KillMsg = {
       ...awards,
@@ -586,21 +705,26 @@ export class ArenaRoom extends Room<RoomState> {
     this.broadcast(MSG.kill, msg);
   }
 
+  /** Spawn points available to a player: CTF teams respawn near their own base. */
+  private spawnsFor(p: PlayerSchema): SpawnPoint[] {
+    return this.ctf ? teamSpawns(this.spawnPoints, this.bases[p.team as Team]) : this.spawnPoints;
+  }
+
   /** Training dummies stand on the central plateau, spaced out like drops; everyone else uses spawn points. */
-  private pickSpawnFor(id: string, others: { x: number; z: number }[]): SpawnPoint {
+  private pickSpawnFor(id: string, p: PlayerSchema, others: { x: number; z: number }[]): SpawnPoint {
     if (this.mode === 'training' && this.bots.has(id)) {
-      const spot = pickDropSpot(this.world, this.rng, others, this.spawnPoints);
+      const spot = pickDropSpot(this.world, this.rng, others, this.spawnPoints, this.dropZone);
       if (spot) return spot;
     }
-    return pickSpawn(this.spawnPoints, others, this.rng);
+    return pickSpawn(this.spawnsFor(p), others, this.rng);
   }
 
   private spawn(id: string, p: PlayerSchema): void {
     const enemies: { x: number; z: number }[] = [];
     for (const [sid, other] of this.state.players) {
-      if (sid !== id && other.alive) enemies.push({ x: other.x, z: other.z });
+      if (sid !== id && other.alive && !this.sameTeam(p, other)) enemies.push({ x: other.x, z: other.z });
     }
-    const s = this.pickSpawnFor(id, enemies);
+    const s = this.pickSpawnFor(id, p, enemies);
     p.x = s.x;
     p.y = s.y;
     p.z = s.z;
@@ -642,6 +766,172 @@ export class ArenaRoom extends Room<RoomState> {
       this.syncFlags(id, p, now);
     }
     this.tickDrops(now);
+    this.tickFlags(now);
+  }
+
+  // --- capture the flag ---
+
+  private flagStates(): FlagState[] {
+    const out: FlagState[] = [];
+    for (const f of this.state.flags.values()) {
+      out.push({ team: f.team as Team, status: f.status as FlagState['status'], x: f.x, y: f.y, z: f.z, carrierId: f.carrierId });
+    }
+    return out;
+  }
+
+  private flagEvent(kind: FlagEventKind, f: FlagSchema, playerId: string): void {
+    const p = this.state.players.get(playerId);
+    const msg: FlagEventMsg = {
+      kind,
+      team: f.team as Team,
+      playerId,
+      playerName: p?.name ?? '',
+      redScore: this.state.redScore,
+      blueScore: this.state.blueScore,
+    };
+    this.broadcast(MSG.flag, msg);
+  }
+
+  private returnFlag(f: FlagSchema, playerId: string): void {
+    const base = this.bases[f.team as Team];
+    f.status = 'home';
+    f.carrierId = '';
+    f.x = base.x;
+    f.y = base.y;
+    f.z = base.z;
+    this.flagDroppedAt.delete(f.team as Team);
+    this.flagEvent('returned', f, playerId);
+  }
+
+  /** The flag `id` carries (if any) falls where they stand. `voluntary` (G): the dropper can't take it straight back. */
+  private dropCarriedFlag(id: string, p: PlayerSchema, now: number, voluntary = false): void {
+    if (!this.ctf) return;
+    for (const f of this.state.flags.values()) {
+      if (f.status !== 'carried' || f.carrierId !== id) continue;
+      f.status = 'dropped';
+      f.carrierId = '';
+      f.x = p.x;
+      f.y = p.y;
+      f.z = p.z;
+      this.flagDroppedAt.set(f.team as Team, now);
+      if (voluntary) this.flagDropGrace.set(f.team as Team, { id, until: now + FLAG_DROP_GRACE_MS });
+      else this.flagDropGrace.delete(f.team as Team);
+      this.flagEvent('dropped', f, id);
+    }
+  }
+
+  private score(id: string, p: PlayerSchema, enemyFlag: FlagSchema): void {
+    if (p.team === TEAM_RED) this.state.redScore++;
+    else this.state.blueScore++;
+    p.captures++;
+    const base = this.bases[enemyFlag.team as Team];
+    enemyFlag.status = 'home';
+    enemyFlag.carrierId = '';
+    enemyFlag.x = base.x;
+    enemyFlag.y = base.y;
+    enemyFlag.z = base.z;
+    this.flagEvent('captured', enemyFlag, id);
+    if (Math.max(this.state.redScore, this.state.blueScore) >= this.state.captureLimit) this.endMatch();
+  }
+
+  /**
+   * Flags: carried ones follow their carrier, dropped ones go home after
+   * FLAG_RETURN_MS, carriers inside their own base zone (own flag home) score,
+   * and anyone alive touching a flag takes / picks up / returns it.
+   */
+  private tickFlags(now: number): void {
+    if (!this.ctf) return;
+    for (const f of this.state.flags.values()) {
+      if (f.status === 'carried') {
+        const c = this.state.players.get(f.carrierId);
+        if (c && c.alive) {
+          if (f.x !== c.x) f.x = c.x;
+          if (f.y !== c.y) f.y = c.y;
+          if (f.z !== c.z) f.z = c.z;
+        } else {
+          this.returnFlag(f, '');
+        }
+      } else if (f.status === 'dropped' && now - (this.flagDroppedAt.get(f.team as Team) ?? now) >= this.flagReturnMs) {
+        this.returnFlag(f, '');
+      }
+    }
+    for (const [id, p] of this.state.players) {
+      if (!p.alive) continue;
+      const flags = this.flagStates();
+      const player = { id, team: p.team as Team, x: p.x, z: p.z };
+      if (canScore(player, flags, this.bases)) {
+        this.score(id, p, this.state.flags.get(flagKey(player.team === TEAM_RED ? TEAM_BLUE : TEAM_RED))!);
+        if (this.state.phase !== 'playing') return;
+        continue;
+      }
+      for (const f of this.state.flags.values()) {
+        if (!canPickUp(p, f)) continue;
+        const grace = this.flagDropGrace.get(f.team as Team);
+        if (grace && grace.id === id && now < grace.until) continue;
+        const touch = flagTouch({ team: f.team as Team, status: f.status as FlagState['status'], x: f.x, y: f.y, z: f.z, carrierId: f.carrierId }, player);
+        if (!touch) continue;
+        if (touch === 'return') {
+          this.returnFlag(f, id);
+        } else {
+          f.status = 'carried';
+          f.carrierId = id;
+          this.flagDroppedAt.delete(f.team as Team);
+          this.flagEvent('taken', f, id);
+        }
+      }
+    }
+  }
+
+  /** CTF: pick / switch team (always allowed; bots even the teams out afterwards). */
+  private handleSelectTeam(client: Client, raw: unknown): void {
+    if (!this.ctf || this.state.phase !== 'playing') return;
+    const team = parseTeam(raw);
+    const p = this.state.players.get(client.sessionId);
+    if (!team || !p || p.team === team) return;
+    this.setTeam(client.sessionId, p, team, Date.now());
+    this.rebalanceBots();
+    this.syncMetadata();
+  }
+
+  /** CTF: bots keep the sides even (humans pick freely). */
+  private rebalanceBots(): void {
+    if (!this.ctf) return;
+    const now = Date.now();
+    for (let guard = 0; guard < this.bots.size; guard++) {
+      const botsByTeam: Record<Team, string[]> = { [TEAM_RED]: [], [TEAM_BLUE]: [] };
+      for (const [id] of this.bots) botsByTeam[this.state.players.get(id)!.team as Team].push(id);
+      const move = botRebalance(this.teamCounts(), botsByTeam);
+      if (!move) break;
+      this.setTeam(move.id, this.state.players.get(move.id)!, move.to, now);
+    }
+  }
+
+  /** Change sides: a carried flag drops, a living player dies (no death counted) and respawns on the new side. */
+  private setTeam(id: string, p: PlayerSchema, team: Team, now: number): void {
+    this.dropCarriedFlag(id, p, now);
+    p.team = team;
+    p.color = teamColor(team);
+    const meta = this.meta.get(id);
+    if (p.alive) {
+      p.alive = false;
+      if (meta) meta.respawnAt = now + this.respawnMs;
+    } else if (meta && !meta.ready) {
+      // Not playing yet: park the preview camera on the new side.
+      const s = pickSpawn(this.spawnsFor(p), [], this.rng);
+      p.x = s.x;
+      p.y = s.y;
+      p.z = s.z;
+    }
+  }
+
+  /** CTF: hand-off — put the carried flag down right here. */
+  private handleDropFlag(client: Client, raw: unknown): void {
+    if (!this.ctf) return;
+    const epoch = parseDropFlag(raw);
+    if (epoch === null) return;
+    const p = this.actor(client, epoch);
+    if (!p) return;
+    this.dropCarriedFlag(client.sessionId, p, Date.now(), true);
   }
 
   private tickTimer(): void {

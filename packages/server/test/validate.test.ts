@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   parseBotCount,
+  parseBotSkill,
+  parseCaptureLimit,
   parseCharge,
   parseChargeCancel,
+  parseDropFlag,
   parseDurationMin,
   parsePose,
   parseReload,
@@ -10,11 +13,12 @@ import {
   parseSelectMelee,
   parseShoot,
   parseSwing,
+  parseTeam,
   parseWeaponMode,
   sanitizeName,
   sanitizeRoomName,
 } from '../src/rooms/validate';
-import { ATTACK_HEAVY, ATTACK_LIGHT, MELEE_KATANA, MELEE_SWORD } from '@mineshoot/shared';
+import { ATTACK_HEAVY, ATTACK_LIGHT, CTF_DEFAULT_CAPTURE_LIMIT, MAX_BOTS, MELEE_KATANA, MELEE_SWORD, TEAM_BLUE, TEAM_NONE, TEAM_RED } from '@mineshoot/shared';
 
 describe('sanitizeName', () => {
   it('trims, strips junk, limits length, falls back', () => {
@@ -58,6 +62,13 @@ describe('parsePose / parseShoot', () => {
     expect(p.pitch).toBeCloseTo(Math.PI / 2);
     expect(p.weapon).toBe(0);
   });
+  it('clamps to the given world bounds (the CTF map is 96 wide)', () => {
+    const p = parsePose({ ...good, x: 200, z: 200 }, { sx: 96, sz: 48 })!;
+    expect(p.x).toBe(95.5);
+    expect(p.z).toBe(47.5);
+    expect(parseShoot({ ...good, x: 200 }, { sx: 96, sz: 48 })!.x).toBe(95.5);
+    expect(parseSwing({ ...good, x: 200, attack: ATTACK_LIGHT }, { sx: 96, sz: 48 })!.x).toBe(95.5);
+  });
   it('parseShoot ignores weapon', () => {
     const s = parseShoot(good)!;
     expect(s.epoch).toBe(1);
@@ -85,13 +96,22 @@ describe('parsePose / parseShoot', () => {
 });
 
 describe('parseBotCount', () => {
-  it('clamps to 0..7 integers, default 0', () => {
+  it('clamps to 0..MAX_BOTS integers, default 0', () => {
     expect(parseBotCount(undefined)).toBe(0);
     expect(parseBotCount(3)).toBe(3);
-    expect(parseBotCount(99)).toBe(7);
+    expect(parseBotCount(99)).toBe(MAX_BOTS);
     expect(parseBotCount(-1)).toBe(0);
     expect(parseBotCount(2.5)).toBe(0);
     expect(parseBotCount('2')).toBe(0);
+  });
+
+  it('parseBotSkill accepts only known levels, default normal', () => {
+    expect(parseBotSkill('easy')).toBe('easy');
+    expect(parseBotSkill('hard')).toBe('hard');
+    expect(parseBotSkill('normal')).toBe('normal');
+    expect(parseBotSkill(undefined)).toBe('normal');
+    expect(parseBotSkill('EASY')).toBe('normal');
+    expect(parseBotSkill(2)).toBe('normal');
   });
 
   it('parseWeaponMode accepts only known modes', () => {
@@ -106,6 +126,7 @@ describe('parseBotCount', () => {
   it('parseRoomMode accepts only known modes, default match', () => {
     expect(parseRoomMode('training')).toBe('training');
     expect(parseRoomMode('match')).toBe('match');
+    expect(parseRoomMode('ctf')).toBe('ctf');
     expect(parseRoomMode('sandbox')).toBe('match');
     expect(parseRoomMode(undefined)).toBe('match');
     expect(parseRoomMode(2)).toBe('match');
@@ -122,5 +143,28 @@ describe('parseSelectMelee', () => {
     expect(parseSelectMelee({ epoch: 1 })).toBeNull();
     expect(parseSelectMelee(null)).toBeNull();
     expect(parseSelectMelee(2)).toBeNull();
+  });
+});
+
+describe('ctf options', () => {
+  it('parseCaptureLimit accepts only the offered options', () => {
+    expect(parseCaptureLimit(5)).toBe(5);
+    expect(parseCaptureLimit(10)).toBe(10);
+    expect(parseCaptureLimit(4)).toBe(CTF_DEFAULT_CAPTURE_LIMIT);
+    expect(parseCaptureLimit('3')).toBe(CTF_DEFAULT_CAPTURE_LIMIT);
+    expect(parseCaptureLimit(undefined)).toBe(CTF_DEFAULT_CAPTURE_LIMIT);
+  });
+  it('parseTeam knows red and blue, everything else is no preference', () => {
+    expect(parseTeam(TEAM_RED)).toBe(TEAM_RED);
+    expect(parseTeam(TEAM_BLUE)).toBe(TEAM_BLUE);
+    expect(parseTeam(TEAM_NONE)).toBe(TEAM_NONE);
+    expect(parseTeam(3)).toBe(TEAM_NONE);
+    expect(parseTeam('1')).toBe(TEAM_NONE);
+    expect(parseTeam(undefined)).toBe(TEAM_NONE);
+  });
+  it('parseDropFlag wants an integer epoch', () => {
+    expect(parseDropFlag(2)).toBe(2);
+    expect(parseDropFlag(1.5)).toBeNull();
+    expect(parseDropFlag('2')).toBeNull();
   });
 });

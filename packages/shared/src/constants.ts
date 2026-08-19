@@ -3,6 +3,9 @@ export const WORLD_SX = 64;
 export const WORLD_SY = 24;
 export const WORLD_SZ = 64;
 export const CHUNK = 16;
+/** Capture-the-flag map: a long rectangle so the carry home is a real trek. */
+export const CTF_WORLD_SX = 96;
+export const CTF_WORLD_SZ = 48;
 
 // Player body
 export const PLAYER_HALF_W = 0.3;
@@ -47,15 +50,31 @@ export const SWORD_SERVER_MIN_INTERVAL_MS = 450;
 export const RESPAWN_MS = 3000;
 /** Respawn delay in training rooms (dummies and players alike): the range refills almost at once. */
 export const TRAINING_RESPAWN_MS = 1000;
+/** Respawn delay in capture-the-flag rooms: dying while carrying or defending costs a little more. */
+export const CTF_RESPAWN_MS = 5000;
 /** Damage immunity after every (re)spawn; ends early when the player attacks. */
 export const SPAWN_PROTECT_MS = 2000;
-export const MAX_PLAYERS = 8;
-export const MAX_BOTS = 7;
+export const MAX_PLAYERS = 16;
+export const MAX_BOTS = 15;
 export const MAX_NAME_LEN = 12;
 export const DURATION_OPTIONS_MIN = [3, 5, 10, 15] as const;
 export const DEFAULT_DURATION_MIN = 10;
 export const ENDED_LINGER_MS = 15_000;
-export const PLAYER_COLOR_COUNT = 8;
+export const PLAYER_COLOR_COUNT = 16;
+
+// Capture the flag
+export const CTF_CAPTURE_LIMIT_OPTIONS = [3, 5, 10] as const;
+export const CTF_DEFAULT_CAPTURE_LIMIT = 3;
+/** Walk-speed multiplier while carrying a flag (client-side, like the sword charge). */
+export const FLAG_CARRY_SPEED_SCALE = 0.75;
+/** A dropped flag nobody touches returns home after this long. */
+export const FLAG_RETURN_MS = 20_000;
+/** After putting a flag down on purpose (G) the dropper cannot pick it back up for this long (hand-off, not juggling). */
+export const FLAG_DROP_GRACE_MS = 1500;
+/** A carrier scores anywhere within this horizontal distance of the own flag stand (own flag must be home). */
+export const CTF_BASE_ZONE_RADIUS = 4;
+/** Each team respawns on the spawn points nearest its base: this many of them. */
+export const CTF_TEAM_SPAWN_COUNT = 8;
 
 // Health / damage
 export const MAX_HP = 100;

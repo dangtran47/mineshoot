@@ -18,3 +18,5 @@ export * from './spawn';
 export * from './ranking';
 export * from './bot';
 export * from './kills';
+export * from './ctf';
+export * from './nav';

@@ -10,7 +10,7 @@ describe('KillFeedModel', () => {
     const f = new KillFeedModel();
     for (let i = 0; i < FEED_MAX + 3; i++) f.push(line(`k${i}`), 0);
     expect(f.entries).toHaveLength(FEED_MAX);
-    expect(f.entries[0].line.killer).toBe('k3');
+    expect(f.entries[0].line?.killer).toBe('k3');
     expect(f.entries[0].kind).toBe('neutral');
     expect(f.prune(FEED_TTL_MS - 1)).toBe(false);
     expect(f.prune(FEED_TTL_MS)).toBe(true);
@@ -45,5 +45,16 @@ describe('killFeedLine melee kinds', () => {
     expect(killFeedLine({ ...base, weapon: WEAPON_SWORD, melee: MELEE_AXE })).toContain('🪓');
     expect(killFeedLine({ ...base, weapon: WEAPON_SWORD, melee: MELEE_PICKAXE })).toContain('⛏️');
     expect(killFeedLine({ ...base, weapon: WEAPON_GUN, melee: MELEE_AXE })).toContain('🔫');
+  });
+
+  it('pushText adds plain lines that share the cap and TTL', () => {
+    const f = new KillFeedModel();
+    f.pushText('🚩 Bob took the Red flag', 0, 'bad');
+    expect(f.entries).toHaveLength(1);
+    expect(f.entries[0].line).toBeNull();
+    expect(f.entries[0].text).toBe('🚩 Bob took the Red flag');
+    expect(f.entries[0].kind).toBe('bad');
+    expect(f.prune(FEED_TTL_MS)).toBe(true);
+    expect(f.entries).toHaveLength(0);
   });
 });
