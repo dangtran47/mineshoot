@@ -2,20 +2,31 @@ import * as THREE from 'three';
 import {
   EYE_HEIGHT,
   FLAG_CARRY_SPEED_SCALE,
-  GUN_MAG_SIZE,
+  GRENADE_MAX,
+  GUN_NONE,
+  GUN_PISTOL,
+  GUN_TASER,
   MSG,
   PLAYER_HEIGHT,
   POSE_INTERVAL_MS,
   MELEE_KINDS,
   MELEE_SWORD,
+  PRIMARY_KINDS,
   TEAM_BLUE,
+  TEAM_NONE,
   TEAM_RED,
-  WEAPON_GUN,
-  WEAPON_SWORD,
+  WEAPONS,
+  WEAPON_GRENADE,
+  WEAPON_MELEE,
+  WEAPON_PISTOL,
+  WEAPON_PRIMARY,
+  WEAPON_TASER,
   allowedWeapons,
   attackSpec,
+  dropName,
   forwardVector,
   generateWorldFor,
+  gunSpec,
   isCtf,
   isTeam,
   meleeSelectable,
@@ -23,10 +34,12 @@ import {
   otherTeam,
   rankCtf,
   rankPlayers,
+  recoilKick,
   respawnMsFor,
   teamName,
+  weaponAllowed,
 } from '@mineshoot/shared';
-import type { AttackKind, FlagEventMsg, HitMsg, KillMsg, MeleeKind, PickupMsg, PoseMsg, RankRow, RoomMode, SelectMeleeMsg, ShootMsg, ShotMsg, SwingMsg, SwungMsg, Team, Weapon } from '@mineshoot/shared';
+import type { AttackKind, DropSlot, ExplodeMsg, FlagEventMsg, GunKind, HitMsg, KillMsg, MeleeKind, PickupMsg, PoseMsg, RankRow, RoomMode, SelectWeaponMsg, ShootMsg, ShotMsg, SwingMsg, SwungMsg, Team, ThrowMsg, Weapon } from '@mineshoot/shared';
 import { displayName } from '../net';
 import type { GameRoom, NetFlag, NetPlayer } from '../net';
 import { FlagsView } from '../render/flagsView';
@@ -35,17 +48,21 @@ import { buildWorldMeshes } from '../render/worldMesh';
 import { Tracers } from '../render/tracers';
 import { BloodFx } from '../render/bloodFx';
 import { DropsView } from '../render/dropsView';
+import { GrenadesView } from '../render/grenadesView';
 import { ViewModel } from '../render/viewmodel';
 import { Keyboard } from '../input/keyboard';
 import { PointerLook } from '../input/pointerLock';
 import { LocalPlayer } from '../game/localPlayer';
+import { RecoilController } from '../game/recoil';
 import { RemotePlayers } from '../game/remotePlayers';
 import { Weapons } from '../game/weapons';
 import { Hud } from '../hud/hud';
 import { awardBadges } from '../hud/icons';
 
-/** Keys 3–7 pick a melee weapon directly where the room allows it (training range, offline sandbox). */
-const MELEE_PICK_KEYS: readonly string[] = ['Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7'];
+/** Keys 6–0 pick a melee weapon directly where the room allows it (training range, offline sandbox). */
+const MELEE_PICK_KEYS: readonly string[] = ['Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0'];
+/** Z X C V pick a primary gun, B the taser, directly (training range, offline sandbox). */
+const PRIMARY_PICK_KEYS: readonly string[] = ['KeyZ', 'KeyX', 'KeyC', 'KeyV'];
 
 /** CTF outcome handed to the results screen. */
 export interface CtfSummary {
@@ -75,6 +92,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
 
   const bundle = createScene(container);
   const { scene, camera, renderer } = bundle;
+  const baseFov = camera.fov;
   const worldMesh = buildWorldMeshes(world);
   scene.add(worldMesh.group);
   const tracers = new Tracers();
@@ -85,6 +103,8 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
   scene.add(remotes.group);
   const drops = new DropsView();
   scene.add(drops.group);
+  const grenades = new GrenadesView();
+  scene.add(grenades.group);
   const flags = new FlagsView();
   scene.add(flags.group);
   scene.add(camera); // so the view model (child of camera) renders
@@ -92,6 +112,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
 
   const keys = new Keyboard();
   const look = new PointerLook(renderer.domElement);
+  const recoil = new RecoilController(look);
   const hud = new Hud(container);
 
   const meNet = (): NetPlayer | undefined => room?.state.players.get(meId);
@@ -104,11 +125,12 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
   /** CTF: the flag we carry (its owning team), or null. */
   let carrying: Team | null = null;
   const canPickMelee = meleeSelectable(roomMode, weaponMode);
+  const canPickPrimary = roomMode === 'training' && weaponAllowed(weaponMode, WEAPON_PRIMARY);
   hud.setRoomName(room ? (roomMode === 'training' ? `\u{1F3AF} ${room.state.name}` : ctf ? `\u{1F6A9} ${room.state.name}` : room.state.name) : 'Offline sandbox');
   hud.setWeaponRules(weaponMode, roomMode);
 
   // --- weapons ---
-  const currentPose = (): ShootMsg => ({
+  const currentPose = (): Omit<ThrowMsg, 'charge'> => ({
     x: local.state.x,
     y: local.state.y,
     z: local.state.z,
@@ -125,14 +147,24 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
       .addScaledVector(new THREE.Vector3(f.x, f.y, f.z), 0.5);
   };
   const weapons = new Weapons({
-    onFire() {
-      viewModel.fire();
-      if (room) room.send(MSG.shoot, currentPose());
-      else {
+    onFire(slot: Weapon) {
+      const kind: GunKind = slot === WEAPON_PRIMARY ? weapons.gun : slot === WEAPON_TASER ? weapons.taser : GUN_PISTOL;
+      viewModel.fire(0.55 + recoilKick(kind, 0).pitchDeg * 0.28);
+      if (room) {
+        const m: ShootMsg = { ...currentPose(), weapon: slot };
+        room.send(MSG.shoot, m);
+      } else {
         const f = forwardVector(look.yaw, look.pitch);
         const m = muzzle();
         tracers.spawn(m, { x: m.x + f.x * 40, y: m.y + f.y * 40, z: m.z + f.z * 40 });
       }
+      // Kick after the shot is on the wire: the recoil pattern bends the *next* bullet.
+      recoil.kick(kind, performance.now());
+    },
+    onThrow(charge: number) {
+      viewModel.throwAnim();
+      const m: ThrowMsg = { ...currentPose(), charge };
+      room?.send(MSG.throw, m);
     },
     onChargeStart() {
       room?.send(MSG.charge, epoch);
@@ -147,29 +179,55 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     },
     onSwitch(w: Weapon) {
       viewModel.setWeapon(w);
-      hud.setWeapon(w, weapons.melee);
+      hud.setWeapon(w, weapons.melee, weapons.gun);
     },
-    onReload() {
-      room?.send(MSG.reload, epoch);
+    onReload(slot: Weapon) {
+      room?.send(MSG.reload, { epoch, weapon: slot });
     },
     onMeleeChange(kind: MeleeKind) {
       viewModel.setMelee(kind);
-      hud.setWeapon(weapons.current, kind);
+      hud.setWeapon(weapons.current, kind, weapons.gun);
+    },
+    onGunChange(kind: GunKind) {
+      viewModel.setGun(kind);
+      hud.setWeapon(weapons.current, weapons.melee, kind);
+    },
+    onTaserChange() {
+      hud.setWeapon(weapons.current, weapons.melee, weapons.gun);
+    },
+    onGrenadesChange(n: number) {
+      hud.setGrenades(n);
     },
   }, allowedWeapons(weaponMode));
   viewModel.setWeapon(weapons.current);
-  hud.setWeapon(weapons.current, weapons.melee);
+  hud.setWeapon(weapons.current, weapons.melee, weapons.gun);
+  hud.setGrenades(weapons.grenades);
   /** Training range / sandbox: arm `kind` in the melee slot and bring it out (the server confirms via the state patch). */
   const pickMelee = (kind: MeleeKind): void => {
     if (!canPickMelee || !local.alive) return;
     if (room) {
-      const m: SelectMeleeMsg = { epoch, melee: kind };
-      room.send(MSG.selectMelee, m);
+      const m: SelectWeaponMsg = { epoch, slot: WEAPON_MELEE, kind };
+      room.send(MSG.selectWeapon, m);
     } else {
       weapons.setMelee(kind);
     }
-    weapons.select(WEAPON_SWORD);
+    weapons.select(WEAPON_MELEE);
     hud.toast(meleeStats(kind).name);
+  };
+  /** Training range / sandbox: arm a primary gun (or the taser, into its own slot) directly. */
+  const pickPrimary = (kind: GunKind): void => {
+    if (!canPickPrimary || !local.alive) return;
+    const slot = kind === GUN_TASER ? WEAPON_TASER : WEAPON_PRIMARY;
+    if (room) {
+      const m: SelectWeaponMsg = { epoch, slot, kind };
+      room.send(MSG.selectWeapon, m);
+    } else if (kind === GUN_TASER) {
+      weapons.setTaser(kind);
+    } else {
+      weapons.setGun(kind);
+    }
+    weapons.select(slot);
+    hud.toast(gunSpec(kind).name);
   };
 
   // --- input wiring ---
@@ -182,7 +240,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     if (b === 0) weapons.mouseUp(performance.now());
     else if (b === 2) weapons.altUp(performance.now());
   };
-  look.onWheel = () => weapons.toggle();
+  look.onWheel = (deltaY) => weapons.next(deltaY > 0 ? 1 : -1);
   // "Click to play": the server spawns us only once we have locked the pointer for the first time,
   // so nobody can be hurt while still staring at the overlay. Later re-locks (after Esc) don't re-arm it.
   let readySent = false;
@@ -254,6 +312,8 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
         local.teleport(me.x, me.y, me.z, me.yaw);
         local.alive = true;
         weapons.resetAmmo();
+        // Gun-deathmatch spawn roll: bring the rolled primary out right away.
+        if (weapons.gun !== GUN_NONE) weapons.select(WEAPON_PRIMARY);
         hud.hideDeath();
         renderer.domElement.classList.remove('dead');
       } else if (!me.alive && local.alive) {
@@ -264,8 +324,11 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
         // Grey out the world while dead (not on the initial click-to-play overlay).
         renderer.domElement.classList.toggle('dead', epoch > 0);
       }
-      // Melee slot follows the server (drop pickups arm it, death resets it to the sword).
+      // Weapon slots follow the server (drop pickups arm them, death resets them).
       weapons.setMelee(me.melee as MeleeKind);
+      weapons.setGun(me.gun as GunKind);
+      weapons.setTaser(me.taser as GunKind);
+      weapons.setGrenades(me.grenades);
       hud.setStats(me.kills, me.deaths);
       hud.setHealth(me.hp);
       hud.setShield(me.alive && me.shielded);
@@ -294,13 +357,14 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
       const blue = flagOf(TEAM_BLUE);
       if (red && blue) hud.setCtfScore(state.redScore, state.blueScore, state.captureLimit, red.status, blue.status);
     }
-    // Weapon drops on the ground.
+    // Weapon drops on the ground; live grenades in the air.
     const dropIds = new Set<string>();
     state.drops?.forEach((d, id) => {
       dropIds.add(id);
-      if (!drops.has(id)) drops.add(id, d.kind as MeleeKind, d.x, d.y, d.z);
+      if (!drops.has(id)) drops.add(id, d.slot as Weapon, d.kind, d.x, d.y, d.z);
     });
     drops.retain(dropIds);
+    grenades.sync(state.grenades);
     if (state.timeLeftMs !== lastTimeLeft) {
       lastTimeLeft = state.timeLeftMs;
       lastTimeLeftAt = now;
@@ -341,13 +405,33 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
 
   const onShot = (m: ShotMsg): void => {
     const from = m.shooterId === meId ? muzzle() : m.from;
-    tracers.spawn(from, m.to, m.shooterId === meId ? 0xfff2a8 : 0xffb46b);
-    if (m.shooterId === meId && m.hitPlayerId) hud.hitmark(m.part === 'head');
-    if (m.hitPlayerId === meId) hud.damageFlash(m.damage);
-    if (m.hitPlayerId && m.hitPlayerId !== meId) {
-      blood.burst(m.to, m.damage, { x: m.to.x - from.x, y: m.to.y - from.y, z: m.to.z - from.z });
+    let hitMe = 0;
+    let hitOther = false;
+    let head = false;
+    for (const r of m.rays) {
+      tracers.spawn(from, r.to, m.shooterId === meId ? 0xfff2a8 : 0xffb46b);
+      if (r.hitPlayerId === meId) {
+        hitMe += r.damage;
+      } else if (r.hitPlayerId) {
+        hitOther = true;
+        head ||= r.part === 'head';
+        blood.burst(r.to, r.damage, { x: r.to.x - from.x, y: r.to.y - from.y, z: r.to.z - from.z });
+      }
     }
+    if (m.shooterId === meId && hitOther) hud.hitmark(head);
+    if (hitMe > 0) hud.damageFlash(hitMe);
     if (m.shooterId !== meId) remotes.shot(m.shooterId, performance.now());
+  };
+  /** A grenade burst: flash + spray on every victim; damage feedback like a shot. */
+  const onExplode = (m: ExplodeMsg): void => {
+    grenades.burst(m, performance.now());
+    const mine = m.victims.find((v) => v.id === meId);
+    if (mine) hud.damageFlash(mine.damage);
+    if (m.ownerId === meId && m.victims.some((v) => v.id !== meId)) hud.hitmark(false);
+    for (const v of m.victims) {
+      const at = v.id === meId ? null : remotes.position(v.id);
+      if (at) blood.burst({ x: at.x, y: at.y + PLAYER_HEIGHT * 0.55, z: at.z }, v.damage, { x: at.x - m.x, y: 0.5, z: at.z - m.z });
+    }
   };
   const onSwung = (m: SwungMsg): void => {
     if (m.attackerId !== meId) remotes.swing(m.attackerId, m.attack, m.melee, performance.now());
@@ -355,9 +439,19 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
   const onPickup = (m: PickupMsg): void => {
     if (m.playerId !== meId) return;
     // Arm it right away (the state patch will confirm) and bring it out if the room allows.
-    weapons.setMelee(m.melee);
-    weapons.select(WEAPON_SWORD);
-    hud.toast(`Picked up ${meleeStats(m.melee).name}`);
+    if (m.slot === WEAPON_MELEE) {
+      weapons.setMelee(m.kind as MeleeKind);
+      weapons.select(WEAPON_MELEE);
+    } else if (m.slot === WEAPON_PRIMARY) {
+      weapons.setGun(m.kind as GunKind);
+      weapons.select(WEAPON_PRIMARY);
+    } else if (m.slot === WEAPON_TASER) {
+      weapons.setTaser(m.kind as GunKind);
+      weapons.select(WEAPON_TASER);
+    } else {
+      weapons.setGrenades(Math.min(GRENADE_MAX, weapons.grenades + m.kind));
+    }
+    hud.toast(`Picked up ${dropName({ slot: m.slot as DropSlot, kind: m.kind })}`);
   };
   const onHit = (m: HitMsg): void => {
     if (m.attackerId === meId) hud.hitmark(m.part === 'head');
@@ -383,7 +477,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     );
     if (mine) hud.announce(badges);
     if (m.victimId === meId) {
-      hud.showDeath(killerName, m.weapon, m.headshot, badges, m.melee ?? MELEE_SWORD);
+      hud.showDeath(killerName, m.weapon, m.headshot, badges, m.melee ?? MELEE_SWORD, m.gun ?? GUN_NONE);
       hud.deathFlash();
     }
   };
@@ -404,6 +498,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     room.onMessage(MSG.shot, onShot);
     room.onMessage(MSG.swung, onSwung);
     room.onMessage(MSG.pickup, onPickup);
+    room.onMessage(MSG.explode, onExplode);
     room.onMessage(MSG.hit, onHit);
     room.onMessage(MSG.kill, onKill);
     room.onMessage(MSG.flag, onFlag);
@@ -430,24 +525,46 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
 
     const inputEnabled = look.locked;
     if (inputEnabled) {
-      if (keys.wasPressed('Digit1')) weapons.select(WEAPON_GUN);
-      if (keys.wasPressed('Digit2')) weapons.select(WEAPON_SWORD);
+      if (keys.wasPressed('Digit1')) weapons.select(WEAPON_PRIMARY);
+      if (keys.wasPressed('Digit2')) weapons.select(WEAPON_PISTOL);
+      if (keys.wasPressed('Digit3')) weapons.select(WEAPON_MELEE);
+      if (keys.wasPressed('Digit4')) weapons.select(WEAPON_GRENADE);
+      if (keys.wasPressed('Digit5')) weapons.select(WEAPON_TASER);
       if (canPickMelee) MELEE_PICK_KEYS.forEach((code, i) => keys.wasPressed(code) && pickMelee(MELEE_KINDS[i]));
+      if (canPickPrimary) PRIMARY_PICK_KEYS.forEach((code, i) => keys.wasPressed(code) && pickPrimary(PRIMARY_KINDS[i]));
+      if (canPickPrimary && keys.wasPressed('KeyB')) pickPrimary(GUN_TASER);
       if (keys.wasPressed('KeyR') && local.alive) weapons.reload(now);
       if (keys.wasPressed('KeyG') && local.alive && carrying !== null) room?.send(MSG.dropFlag, epoch);
     }
     const speedScale = Math.min(weapons.charging ? weapons.chargeSpeedScale : 1, carrying !== null ? FLAG_CARRY_SPEED_SCALE : 1);
     const moving = local.update(dt, inputEnabled, speedScale);
     if (local.alive) weapons.update(now);
+    recoil.update(dt, now);
     const charge = weapons.chargeFraction(now);
     viewModel.setCharge(charge);
-    hud.setCharge(charge);
+    hud.setCharge(charge ?? weapons.throwChargeFraction(now));
     const reload = weapons.reloadFraction(now);
     viewModel.setReload(reload);
-    hud.setAmmo(weapons.ammo, GUN_MAG_SIZE, reload !== null);
+    hud.setAmmo(weapons.ammo, weapons.magOf(weapons.current), reload !== null);
+    const usable: Record<number, boolean> = {};
+    for (const w of WEAPONS) usable[w] = weapons.canUse(w);
+    hud.setSlots(usable, weapons.current);
+    // Sniper zoom: narrow the FOV while RMB is held.
+    const zoom = weapons.zoomFactor;
+    if (camera.fov !== baseFov / zoom) {
+      camera.fov = baseFov / zoom;
+      camera.updateProjectionMatrix();
+    }
+    hud.setScope(weapons.zooming, weapons.zoomCapable);
     viewModel.update(dt, moving && local.state.onGround);
-    remotes.update(now);
+    remotes.update(now, {
+      world,
+      eye: { x: local.state.x, y: local.state.y + EYE_HEIGHT, z: local.state.z },
+      dir: forwardVector(look.yaw, look.pitch),
+      team: meNet()?.team ?? TEAM_NONE,
+    });
     drops.update(now);
+    grenades.update(now);
     if (ctf && room) {
       // Flags: on their stand / on the ground where the state says; carried ones ride on the carrier's rendered body (never our own back).
       for (const team of [TEAM_RED, TEAM_BLUE] as const) {
@@ -488,12 +605,14 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
       room.onStateChange.remove(onPatch);
       room.onLeave.remove(onLeaveRoom);
     }
+    recoil.dispose();
     look.dispose();
     keys.dispose();
     hud.dispose();
     viewModel.dispose();
     remotes.dispose();
     drops.dispose();
+    grenades.dispose();
     flags.dispose();
     tracers.dispose();
     blood.dispose();
@@ -506,7 +625,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
 
   if (import.meta.env.DEV) {
     // Dev-only hook for the headless smoke test (scripts/smoke.mjs); stripped from production builds.
-    (window as unknown as { __mineshoot?: unknown }).__mineshoot = { room, local, look, weapons, hud, ready: sendReady, pickMelee };
+    (window as unknown as { __mineshoot?: unknown }).__mineshoot = { room, local, look, weapons, hud, ready: sendReady, pickMelee, pickPrimary };
   }
 
   return { dispose: finish };

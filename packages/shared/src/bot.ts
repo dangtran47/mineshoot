@@ -1,5 +1,7 @@
 import { EYE_HEIGHT, GUN_RANGE, PLAYER_HEIGHT, SWORD_RANGE, WALK_SPEED } from './constants';
-import { DEFAULT_BOT_SKILL, DEFAULT_WEAPON_MODE, WEAPON_GUN, WEAPON_SWORD, weaponAllowed } from './protocol';
+import { DEFAULT_BOT_SKILL, DEFAULT_WEAPON_MODE, WEAPON_MELEE, WEAPON_PISTOL, WEAPON_PRIMARY, weaponAllowed } from './protocol';
+import { GUN_NONE, GUN_PISTOL, gunSpec } from './guns';
+import type { GunKind } from './guns';
 import type { BotSkill, Weapon, WeaponMode } from './protocol';
 import { cellCentre, findPath, nearestStandable } from './nav';
 import type { NavCell } from './nav';
@@ -17,6 +19,8 @@ export interface BotView {
   goal?: Vec3 | null;
   /** CTF: carrying a flag — run for the goal, melee only. */
   carrying?: boolean;
+  /** Primary gun held (slot 1); GUN_NONE / absent = empty, the bot uses the pistol. */
+  gun?: GunKind;
 }
 
 /** What the bot wants to do this tick; the server applies it like client input. */
@@ -109,8 +113,8 @@ function wrapAngle(a: number): number {
  */
 export function createBot(rng: () => number, waypoints: SpawnPoint[], options: BotOptions = {}): Bot {
   const mode = options.weapons ?? DEFAULT_WEAPON_MODE;
-  const gunOk = weaponAllowed(mode, WEAPON_GUN);
-  const swordOk = weaponAllowed(mode, WEAPON_SWORD);
+  const gunOk = weaponAllowed(mode, WEAPON_PISTOL);
+  const swordOk = weaponAllowed(mode, WEAPON_MELEE);
   const passive = options.passive === true;
   const skill = botSkillProfile(options.skill ?? DEFAULT_BOT_SKILL);
   let targetId: string | null = null;
@@ -250,6 +254,13 @@ export function createBot(rng: () => number, waypoints: SpawnPoint[], options: B
       const { self, enemies, now } = view;
       const goal = view.goal ?? null;
       const carrying = view.carrying === true;
+      const gunKind: GunKind = view.gun || GUN_PISTOL;
+      const gunSlot: Weapon = gunKind === GUN_PISTOL ? WEAPON_PISTOL : WEAPON_PRIMARY;
+      const gun = gunSpec(gunKind);
+      // Short guns (shotgun, taser) want to be close; long ones keep the usual band.
+      const shortGun = gun.range < PREFERRED_MAX * 2;
+      const preferredMax = shortGun ? gun.range * 0.8 : PREFERRED_MAX;
+      const preferredMin = shortGun ? 0 : PREFERRED_MIN;
       if (!initialised) {
         yaw = self.yaw;
         pitch = self.pitch;
@@ -280,7 +291,7 @@ export function createBot(rng: () => number, waypoints: SpawnPoint[], options: B
       if (!best) targetId = null;
 
       const input: MoveInput = { forward: 0, strafe: 0, jump: false };
-      let weapon: Weapon = gunOk ? WEAPON_GUN : WEAPON_SWORD;
+      let weapon: Weapon = gunOk ? gunSlot : WEAPON_MELEE;
       let shoot = false;
       let swing = false;
 
@@ -296,7 +307,7 @@ export function createBot(rng: () => number, waypoints: SpawnPoint[], options: B
 
       if (carrying) {
         // Flag carrier: no shooting, melee out; run for the goal, but cut down anyone within reach.
-        weapon = swordOk ? WEAPON_SWORD : WEAPON_GUN;
+        weapon = swordOk ? WEAPON_MELEE : gunSlot;
         if (best && swordOk && best.d <= SWORD_RANGE * 0.9) {
           const dx = best.x - eye.x;
           const dz = best.z - eye.z;
@@ -320,18 +331,18 @@ export function createBot(rng: () => number, waypoints: SpawnPoint[], options: B
         // Position: with a gun, close in / back off to the preferred band and strafe a bit;
         // sword-only, charge straight in. Closing in follows a route (the enemy may be
         // up on the plateau); the rest is relative to where we're aiming.
-        const closeIn = !gunOk || best.d > PREFERRED_MAX || (swordOk && best.d <= SWORD_RANGE * 0.9);
+        const closeIn = !gunOk || best.d > preferredMax || (swordOk && best.d <= SWORD_RANGE * 0.9);
         if (closeIn) navigate(world, self, best, input, dt, now, false);
-        else if (best.d < PREFERRED_MIN && best.d > SWORD_RANGE) input.forward = -0.6;
+        else if (best.d < preferredMin && best.d > SWORD_RANGE) input.forward = -0.6;
         if (!closeIn) input.strafe = strafeDir * 0.8;
 
         const aligned = Math.abs(wrapAngle(wantYaw - yaw)) < skill.aimTolerance && Math.abs(wantPitch - pitch) < skill.aimTolerance;
         const reacted = now - acquiredAt >= skill.reactionMs;
         if (swordOk && best.d <= SWORD_RANGE * 0.9) {
-          weapon = WEAPON_SWORD;
+          weapon = WEAPON_MELEE;
           swing = reacted;
         } else if (gunOk) {
-          shoot = aligned && reacted;
+          shoot = aligned && reacted && best.d <= gun.range;
         }
       } else if (goal && !goalReached(goal, self)) {
         // CTF: head for the goal.

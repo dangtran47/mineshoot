@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { MELEE_KINDS } from '@mineshoot/shared';
+import { GUN_KINDS, MELEE_KINDS, WEAPON_GRENADE, WEAPON_MELEE, WEAPON_PRIMARY } from '@mineshoot/shared';
 import { DropsView } from '../src/render/dropsView';
 
 /** World-space bounding box of everything under a drop's root (excluding the beacon/pad). */
@@ -18,7 +18,7 @@ function propBox(view: DropsView, id: string): THREE.Box3 {
 describe('DropsView', () => {
   it.each(MELEE_KINDS)('keeps melee kind %i fully above the ground while it bobs', (kind) => {
     const view = new DropsView();
-    view.add('d', kind, 10, 5, 10);
+    view.add('d', WEAPON_MELEE, kind, 10, 5, 10);
     for (let t = 0; t < 4000; t += 250) {
       view.update(t);
       const box = propBox(view, 'd');
@@ -27,6 +27,26 @@ describe('DropsView', () => {
       // ...but stay low enough to still read as lying near the ground (well under head height).
       expect(box.max.y).toBeLessThan(6.4);
     }
+    view.dispose();
+  });
+  it.each(GUN_KINDS)('keeps gun kind %i above the ground too', (kind) => {
+    const view = new DropsView();
+    view.add('g', WEAPON_PRIMARY, kind, 10, 5, 10);
+    for (let t = 0; t < 4000; t += 250) {
+      view.update(t);
+      const box = propBox(view, 'g');
+      expect(box.min.y).toBeGreaterThan(5.15);
+      expect(box.max.y).toBeLessThan(6.4);
+    }
+    view.dispose();
+  });
+  it('renders a grenade pack hovering low', () => {
+    const view = new DropsView();
+    view.add('n', WEAPON_GRENADE, 2, 10, 5, 10);
+    view.update(0);
+    const box = propBox(view, 'n');
+    expect(box.min.y).toBeGreaterThan(5.15);
+    expect(box.max.y).toBeLessThan(6.0);
     view.dispose();
   });
 });

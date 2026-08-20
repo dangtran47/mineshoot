@@ -105,13 +105,16 @@ three.js, no Colyseus, plain objects in and out, a test file per module.
   loop; hands off to results when `state.phase === 'ended'`.
 - `game/localPlayer.ts` — fixed-step 60 Hz `stepPlayer` with an accumulator;
   camera at eye height; frozen while dead.
-- `game/weapons.ts` — client-side weapon state machine: selection, gun
-  cooldown/auto-fire/magazine/reload; melee light (LMB, repeats every
-  cooldown while held) and heavy (RMB held = charge; release swings once
-  ≥ `MELEE_MIN_CHARGE_FRACTION` of `chargeMs` is held — the server scales
-  damage by `chargeFraction`, full at `chargeMs` — a shorter tap cancels,
-  auto-release past `chargeMaxMs`; LMB is ignored while charging); each
-  attack's own `cooldownMs` gates the next;
+- `game/weapons.ts` — client-side weapon state machine over the four slots
+  (primary gun / pistol / melee / grenade): per-slot selection (empty slots
+  unselectable, fall back on emptying), per-gun-slot ammo/cooldown/reload from
+  `gunSpec` (auto guns repeat while LMB is held; the taser empties the primary
+  slot with its last charge; sniper RMB = zoom), grenade throw cooldown and
+  stock; melee light (LMB, repeats every cooldown while held) and heavy (RMB
+  held = charge; release swings once ≥ `MELEE_MIN_CHARGE_FRACTION` of
+  `chargeMs` is held — the server scales damage by `chargeFraction`, full at
+  `chargeMs` — a shorter tap cancels, auto-release past `chargeMaxMs`; LMB is
+  ignored while charging); each attack's own `cooldownMs` gates the next;
   per-`MeleeKind` timings.
 - `game/remotePlayers.ts` + `game/interpolation.ts` — a `SnapshotBuffer` per
   remote player, rendered `INTERP_DELAY_MS` (100 ms) in the past with
@@ -122,15 +125,17 @@ three.js, no Colyseus, plain objects in and out, a test file per module.
   (canvas-painted 8×1 tile atlas), `mesher.ts`/`worldMesh.ts` (per-region face
   culled meshes with per-face shading), `humanoid.ts` (box body, colour per
   player), `humanoidAnim.ts` (walk cycle, swing, charge, reload poses),
-  `viewmodel.ts` (first-person gun / melee, fire and swing animation),
-  `meleeProps.ts` (geometry for sword/axe/katana/scythe/pickaxe),
-  `dropsView.ts` (glowing columns for `state.drops`), `tracers.ts` (gun
+  `viewmodel.ts` (first-person guns / grenade / melee, fire and swing
+  animation), `meleeProps.ts` (geometry for sword/axe/katana/scythe/pickaxe),
+  `gunProps.ts` (geometry for the six guns + the grenade),
+  `dropsView.ts` (glowing columns for `state.drops`, tinted per slot),
+  `grenadesView.ts` (live grenades + blast flash), `tracers.ts` (gun
   lines), `bloodFx.ts`/`bloodParams.ts` (voxel particle spray), `nametag.ts`.
 - `hud/*` — DOM overlay: `hud.ts` (health, ammo, timer, weapon slots, room
   rules, click-to-play / dead / spawn-protection overlays, Tab scoreboard),
   `killFeed.ts`, `damageFx.ts` (vignette + floating `-N`), `icons.ts` (inline
   SVG weapon/award icons), `style.css`.
-- `input/*` — `keyboard.ts` (WASD/Space/R/1/2/Tab), `pointerLock.ts` (yaw/
+- `input/*` — `keyboard.ts` (WASD/Space/R/1–4/Tab + training pick keys), `pointerLock.ts` (yaw/
   pitch, mouse buttons, wheel, lock/unlock events).
 
 ## 3. Networking model
@@ -146,21 +151,23 @@ can play a one-shot effect exactly once.
 | --- | --- | --- | --- |
 | C→S | `pose` | `PoseMsg {x,y,z,yaw,pitch,epoch,weapon}` @ 20 Hz | Movement + current weapon slot |
 | C→S | `ready` | – | "Click to play": spawn me |
-| C→S | `selectMelee` | `SelectMeleeMsg {epoch, melee}` | Training range only: put this melee weapon in slot 2 now |
-| C→S | `shoot` | `ShootMsg` (pose + epoch) | Fire the gun from this pose |
+| C→S | `selectWeapon` | `SelectWeaponMsg {epoch, slot, kind}` | Training range only: arm this melee/primary kind now |
+| C→S | `shoot` | `ShootMsg` (pose + epoch + `weapon` gun slot) | Fire the pistol / primary from this pose |
+| C→S | `throw` | `ThrowMsg` (pose + epoch + `charge` 0..1) | Throw a grenade from this pose at the held wind-up's speed |
 | C→S | `charge` | `epoch` | Started holding RMB with melee (charge) |
 | C→S | `chargeCancel` | `epoch` | RMB let go before the heavy could swing (no swing) |
 | C→S | `swing` | `SwingMsg` (pose + `attack`) | Melee attack: light / heavy |
-| C→S | `reload` | `epoch` | Started a gun reload |
+| C→S | `reload` | `ReloadMsg {epoch, weapon}` | Started a reload of a gun slot |
 | C→S | `ping` / S→C `pong` | `number` | RTT display |
-| S→C | `shot` | `ShotMsg {shooterId, from, to, hitPlayerId, part, damage}` | Tracer + hit feedback for everyone |
+| S→C | `shot` | `ShotMsg {shooterId, gun, from, rays: ShotRay[]}` | One ray per pellet: tracers + hit feedback |
+| S→C | `explode` | `ExplodeMsg {ownerId, x, y, z, victims}` | A grenade burst (blast fx + damage feedback) |
 | S→C | `swung` | `SwungMsg {attackerId, attack, melee}` | Animate the attacker on other clients |
 | S→C | `hit` | `HitMsg {attackerId, victimId, part, damage, attack, melee}` | Melee connected |
-| S→C | `kill` | `KillMsg {killer*, victim*, weapon, melee, headshot, awards…}` | Kill feed, awards |
-| S→C | `pickup` | `PickupMsg {playerId, melee}` | Someone took a drop |
+| S→C | `kill` | `KillMsg {killer*, victim*, weapon, melee, gun, headshot, awards…}` | Kill feed, awards |
+| S→C | `pickup` | `PickupMsg {playerId, slot, kind}` | Someone took a drop |
 
 Room creation options (`CreateOptions`): `name`, `durationMin` (3/5/10/15),
-`nickname`, `bots` (0–15), `botSkill` (`'easy'|'normal'|'hard'`), `weapons` (`'all'|'gun'|'sword'`), `mode`
+`nickname`, `bots` (0–15), `botSkill` (`'easy'|'normal'|'hard'`), `weapons` (`'all'|'sword'`), `mode`
 (`'match'|'training'`); plus `testOverrides` honoured only when
 `MINESHOOT_TEST=1`. Room metadata (`RoomMetadata`) mirrors these for the lobby
 list. `meleeSelectable(mode, weapons)` (protocol.ts) is the single rule for
@@ -185,11 +192,15 @@ owning client detects the epoch change and teleports (`LocalPlayer.teleport`).
 everyone else as targets, filtered by `targetable()` (alive and not spawn-
 protected). Then:
 
-- **Gun** — `resolveShot()`: ray from eye along yaw/pitch, `raycastVoxels`
-  vs `segmentVsAABB` against each target's three body boxes; nearest wins;
-  damage from `GUN_DAMAGE[part]`. Server rate-limits by
-  `GUN_SERVER_MIN_INTERVAL_MS`, and keeps the magazine (`takeRound`) so an
-  empty client cannot fire.
+- **Guns** — the shot names its gun slot (`ShootMsg.weapon`); the kind comes
+  from the schema (pistol, or `p.gun` in the primary slot — an empty slot
+  fires nothing). `pelletDirections()` yields one exact ray, or the shotgun's
+  8 spread rays from the server's seeded rng; each ray runs `resolveRay()`:
+  `raycastVoxels` vs `segmentVsAABB` against each target's three body boxes;
+  nearest wins; damage from the gun's own table. Server rate-limits per slot
+  by the gun's `serverMinIntervalMs` and keeps per-slot magazines
+  (`takeRound`) so an empty client cannot fire; a consumable gun (taser)
+  empties the primary slot with its last charge.
 - **Melee** — `swordVictims()`: candidates within the attack's `range` and
   inside its half-angle cone, line-of-sight checked with `raycastVoxels`,
   head vs body decided by the aim ray; sweeping attacks hit everyone in the
@@ -211,7 +222,7 @@ mode); it waits for `shot`/`hit` for anything that implies damage.
 2. `actor(client, epoch)`: room is `playing`, player exists, `alive`, and
    `spawnEpoch` matches (drops messages from a dead body or a client that has
    not clicked to play).
-3. `weaponAllowed(mode, weapon)` for weapon-specific messages.
+3. `weaponAllowed(mode, slot)` for weapon-specific messages.
 4. Server-side cooldown / magazine / charge bookkeeping in `PlayerMeta`
    (private per-player state that is *not* synced).
 
@@ -265,13 +276,25 @@ protection and weapon mode automatically. In a training room the brain is
 `passive`: it returns no input and never shoots/swings, only turns toward the
 nearest visible enemy, so dummies are living targets that hit back with nothing.
 
-**Drops** (`tickDrops`): only when melee is allowed. Every 25–45 s (seeded
-rng; 12–22 s in CTF) place a random `MeleeKind` inside the map's `dropZone`
-(the arena plateau, the CTF ridge) away from other drops and spawn points
-(`pickDropSpot`), cap `DROP_MAX_ACTIVE` (5 in CTF), expire after
+**Drops** (`tickDrops`): the pool follows the weapon mode (`dropPool`):
+primaries + grenade packs where guns are allowed, blades where melee is.
+Every 25–45 s (seeded rng; 12–22 s in CTF) place a random pick inside the
+map's `dropZone` (the arena plateau, the CTF ridge) away from other drops and
+spawn points (`pickDropSpot`), cap `DROP_MAX_ACTIVE` (5 in CTF), expire after
 `DROP_LIFETIME_MS`. Any living player whose feet are within the pickup radius
-(`canPickUp`) takes it: `p.melee = kind`, drop removed, `pickup` broadcast.
-Death resets `melee` to the sword.
+(`canPickUp`) takes it (`givePickup`): a blade sets `p.melee`, a gun arms the
+primary slot with a full magazine, a grenade pack tops up `p.grenades` (capped
+at `GRENADE_MAX`; skipped while full so someone else can take it). Death
+resets the melee to the sword, empties the primary (except the gun-deathmatch
+`spawnPrimary` roll) and refills `GRENADE_START` grenades.
+
+**Grenades** (`tickGrenades`): a validated `throw` spends one grenade and
+creates a `GrenadeSchema` (rendered by every client) plus private
+`GrenadeState` physics. Each 50 ms tick advances every grenade in
+`GRENADE_SUBSTEPS` sub-steps of `stepGrenade` (gravity + swept voxel bounce);
+after `GRENADE_FUSE_MS` it bursts: `explosionVictims` (linear falloff
+`blastDamage`, walls block, thrower included, CTF teammates excluded) are
+damaged and `explode` is broadcast. A self-kill counts a death but no kill.
 
 **Capture the flag** (`mode: 'ctf'`, rules in `shared/ctf.ts`, all numbers in
 `constants.ts`). The room plays on `generateCtfWorld` (96×48, mirrored across

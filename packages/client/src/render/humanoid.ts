@@ -1,7 +1,8 @@
 import * as THREE from 'three';
-import { MELEE_SWORD, PLAYER_COLOR_COUNT, WEAPON_SWORD } from '@mineshoot/shared';
-import type { MeleeKind, SwingAnim, Weapon } from '@mineshoot/shared';
+import { GUN_NONE, GUN_PISTOL, GUN_TASER, MELEE_SWORD, PLAYER_COLOR_COUNT, WEAPON_GRENADE, WEAPON_MELEE, WEAPON_PISTOL, WEAPON_PRIMARY, WEAPON_TASER } from '@mineshoot/shared';
+import type { GunKind, MeleeKind, SwingAnim, Weapon } from '@mineshoot/shared';
 import { HumanoidAnim } from './humanoidAnim';
+import { buildGrenadeProp, buildGunProp } from './gunProps';
 import { buildMeleeProp, disposeProp } from './meleeProps';
 import type { MeleeProp } from './meleeProps';
 
@@ -27,8 +28,17 @@ export class Humanoid {
   private readonly legR: THREE.Mesh;
   private readonly armL: THREE.Mesh;
   private readonly armR: THREE.Group;
-  private readonly gun: THREE.Group;
-  private readonly muzzle: THREE.Mesh;
+  /** Gun slot holders: the pistol and the primary (prop swapped by setGun); the grenade in hand. */
+  private readonly pistol: THREE.Group;
+  private readonly primary: THREE.Group;
+  private readonly taserH: THREE.Group;
+  private readonly nade: THREE.Group;
+  private pistolProp: MeleeProp;
+  private primaryProp: MeleeProp;
+  private taserProp: MeleeProp;
+  private nadeProp: MeleeProp;
+  private gunKind: GunKind = GUN_NONE;
+  private weapon: Weapon = WEAPON_PISTOL;
   /** Melee slot holder; contains the current melee prop. */
   private readonly sword: THREE.Group;
   private prop: MeleeProp;
@@ -37,8 +47,13 @@ export class Humanoid {
   private walkPhase = 0;
   private lastX = 0;
   private lastZ = 0;
+  private colorIndex: number;
+  /** Body materials repainted on a colour change (team switch): full colour / darkened trim. */
+  private readonly bodyMats: THREE.MeshLambertMaterial[] = [];
+  private readonly trimMats: THREE.MeshLambertMaterial[] = [];
 
   constructor(colorIndex: number) {
+    this.colorIndex = colorIndex;
     const color = PLAYER_COLORS[colorIndex % PLAYER_COLOR_COUNT];
     const dark = new THREE.Color(color).multiplyScalar(0.55).getHex();
 
@@ -59,23 +74,23 @@ export class Humanoid {
     this.armR.add(armMesh);
     // Props are modelled along -z and the holder groups are rotated so -z runs along the
     // arm (local -y): a level arm points the weapon forward, a raised arm points it up.
-    // Gun: chunky dark body + barrel + a muzzle flash that only shows for a frame or two.
-    this.gun = new THREE.Group();
-    this.gun.position.set(0, -0.6, 0);
-    this.gun.rotation.x = -Math.PI / 2;
-    const gunBody = box(0.12, 0.16, 0.45, 0x2b2b2b);
-    gunBody.position.set(0, 0, -0.15);
-    const barrel = box(0.06, 0.06, 0.4, 0x555555);
-    barrel.position.set(0, 0.03, -0.55);
-    const grip = box(0.08, 0.16, 0.08, 0x3a2a1a);
-    grip.position.set(0, -0.14, 0.02);
-    this.muzzle = new THREE.Mesh(
-      new THREE.BoxGeometry(0.22, 0.22, 0.22),
-      new THREE.MeshBasicMaterial({ color: 0xffd36b, transparent: true, opacity: 0.95 }),
-    );
-    this.muzzle.position.set(0, 0.03, -0.85);
-    this.muzzle.visible = false;
-    this.gun.add(gunBody, barrel, grip, this.muzzle);
+    const gunHolder = (prop: MeleeProp): THREE.Group => {
+      const h = new THREE.Group();
+      h.position.set(0, -0.6, 0);
+      h.rotation.x = -Math.PI / 2;
+      h.add(prop.group);
+      return h;
+    };
+    this.pistolProp = buildGunProp(GUN_PISTOL);
+    this.pistol = gunHolder(this.pistolProp);
+    this.primaryProp = buildGunProp(GUN_NONE);
+    this.primary = gunHolder(this.primaryProp);
+    this.taserProp = buildGunProp(GUN_TASER);
+    this.taserH = gunHolder(this.taserProp);
+    this.nadeProp = buildGrenadeProp();
+    this.nade = new THREE.Group();
+    this.nade.position.set(0, -0.55, 0);
+    this.nade.add(this.nadeProp.group);
 
     // Melee slot: the sword (or a picked-up drop weapon); its blade glows while charging.
     this.sword = new THREE.Group();
@@ -83,7 +98,7 @@ export class Humanoid {
     this.sword.rotation.x = -Math.PI / 2;
     this.prop = buildMeleeProp(MELEE_SWORD);
     this.sword.add(this.prop.group);
-    this.armR.add(this.gun, this.sword);
+    this.armR.add(this.pistol, this.primary, this.taserH, this.nade, this.sword);
 
     this.head = box(0.45, 0.45, 0.45, SKIN);
     this.head.position.set(0, 1.575, 0);
@@ -96,13 +111,47 @@ export class Humanoid {
     this.head.add(hair, eyeL, eyeR);
 
     this.group.add(this.legL, this.legR, torso, this.armL, this.armR, this.head);
+    for (const m of [torso, this.armL, armMesh]) this.bodyMats.push(m.material as THREE.MeshLambertMaterial);
+    for (const m of [this.legL, this.legR, hair]) this.trimMats.push(m.material as THREE.MeshLambertMaterial);
     this.setWeapon(0);
   }
 
+  /** Repaint body and trim (server-synced `color`; changes on a team switch). */
+  setColor(colorIndex: number): void {
+    if (colorIndex === this.colorIndex) return;
+    this.colorIndex = colorIndex;
+    const color = PLAYER_COLORS[colorIndex % PLAYER_COLOR_COUNT];
+    const dark = new THREE.Color(color).multiplyScalar(0.55).getHex();
+    for (const m of this.bodyMats) m.color.setHex(color);
+    for (const m of this.trimMats) m.color.setHex(dark);
+  }
+
   setWeapon(w: Weapon): void {
-    this.gun.visible = w !== WEAPON_SWORD;
-    this.sword.visible = w === WEAPON_SWORD;
+    this.weapon = w;
+    this.pistol.visible = w === WEAPON_PISTOL;
+    this.primary.visible = w === WEAPON_PRIMARY;
+    this.taserH.visible = w === WEAPON_TASER;
+    this.nade.visible = w === WEAPON_GRENADE;
+    this.sword.visible = w === WEAPON_MELEE;
     this.anim.setWeapon(w);
+  }
+
+  /** Swap the primary gun prop (server-synced `gun` kind). */
+  setGun(kind: GunKind): void {
+    if (kind === this.gunKind) return;
+    this.gunKind = kind;
+    disposeProp(this.primaryProp);
+    this.primary.clear();
+    this.primaryProp = buildGunProp(kind);
+    this.primary.add(this.primaryProp.group);
+  }
+
+  /** The gun holder + prop for the held slot (null for melee / grenades). */
+  private activeGun(): { holder: THREE.Group; prop: MeleeProp } | null {
+    if (this.weapon === WEAPON_PISTOL) return { holder: this.pistol, prop: this.pistolProp };
+    if (this.weapon === WEAPON_PRIMARY) return { holder: this.primary, prop: this.primaryProp };
+    if (this.weapon === WEAPON_TASER) return { holder: this.taserH, prop: this.taserProp };
+    return null;
   }
 
   /** Swap the melee prop (server-synced `melee` kind). */
@@ -145,8 +194,14 @@ export class Humanoid {
     // the blade's absolute pitch is armPitch + bladeTilt.
     this.sword.rotation.x = -Math.PI / 2 + p.bladeTilt;
     for (const m of this.prop.glow) m.emissiveIntensity = p.swordGlow * 1.5;
-    this.gun.position.y = -0.6 + p.gunKick * 0.12; // recoil: gun jolts back up the arm
-    this.muzzle.visible = p.muzzleFlash;
+    const gun = this.activeGun();
+    if (gun) {
+      gun.holder.position.y = -0.6 + p.gunKick * 0.12; // recoil: gun jolts back up the arm
+      for (const m of gun.prop.glow) {
+        m.opacity = p.muzzleFlash ? 1 : 0;
+        m.emissiveIntensity = p.muzzleFlash ? 1 : 0;
+      }
+    }
   }
 
   setPose(x: number, y: number, z: number, yaw: number, pitch: number, dt: number): void {

@@ -14,11 +14,11 @@ import {
   ROOM_NAME,
   SWORD_CHARGE_MS,
   SWORD_SERVER_MIN_INTERVAL_MS,
-  WEAPON_GUN,
-  WEAPON_SWORD,
+  WEAPON_PISTOL,
+  WEAPON_MELEE,
 } from '@mineshoot/shared';
-import type { FlagEventMsg, HitMsg, KillMsg, PickupMsg, ShotMsg, SwungMsg } from '@mineshoot/shared';
-import { CTF_WORLD_SX, DROP_MAX_ACTIVE, MAX_PLAYERS, MELEE_KATANA, MELEE_STATS, MELEE_SWORD, PLATEAU_MAX, PLATEAU_MIN, TEAM_BLUE, TEAM_RED } from '@mineshoot/shared';
+import type { ExplodeMsg, FlagEventMsg, HitMsg, KillMsg, PickupMsg, ShotMsg, SwungMsg } from '@mineshoot/shared';
+import { CTF_WORLD_SX, DROP_MAX_ACTIVE, GRENADE_DROP_AMOUNT, GRENADE_FUSE_MS, GRENADE_SERVER_MIN_INTERVAL_MS, GRENADE_START, GUN_NONE, GUN_PISTOL, GUN_SHOTGUN, GUN_SNIPER, GUN_TASER, MAX_PLAYERS, MELEE_KATANA, MELEE_STATS, MELEE_SWORD, PLATEAU_MAX, PLATEAU_MIN, SPAWN_PRIMARY_KINDS, TEAM_BLUE, TEAM_RED, WEAPON_GRENADE, WEAPON_PRIMARY, WEAPON_TASER, gunSpec } from '@mineshoot/shared';
 import { createApp } from '../src/app';
 import type { RoomListEntry } from '../src/app';
 
@@ -58,7 +58,7 @@ const SKY_Y = 20; // above every structure: clean hitscan lines
 function me(room: AnyRoom): any {
   return room.state?.players?.get(room.sessionId);
 }
-function poseOf(room: AnyRoom, x: number, z: number, yaw: number, weapon = WEAPON_GUN, pitch = 0): Record<string, number> {
+function poseOf(room: AnyRoom, x: number, z: number, yaw: number, weapon = WEAPON_PISTOL, pitch = 0): Record<string, number> {
   return { x, y: SKY_Y, z, yaw, pitch, epoch: me(room).spawnEpoch, weapon };
 }
 /** Pitch (yaw 0, shooting toward -Z) that lands the ray `height` above a target's feet `dz` blocks ahead. */
@@ -146,16 +146,18 @@ describe('arena room', () => {
       expect(bobView().hp).toBe(100);
 
       // Alice shoots Bob in the chest (yaw 0 → -Z, 10 blocks ahead), two shots quickly: 2nd is rate-limited.
-      const chest = poseOf(alice, 32, 40, 0, WEAPON_GUN, pitchToHeight(1.0, 10));
+      const chest = poseOf(alice, 32, 40, 0, WEAPON_PISTOL, pitchToHeight(1.0, 10));
       alice.send(MSG.shoot, chest);
       alice.send(MSG.shoot, chest);
       await until(() => shots.length === 1, 3000, 'shot broadcast');
       await sleep(100);
       expect(shots).toHaveLength(1);
       expect(shots[0].shooterId).toBe(alice.sessionId);
-      expect(shots[0].hitPlayerId).toBe(bob.sessionId);
-      expect(shots[0].part).toBe('torso');
-      expect(shots[0].damage).toBe(30);
+      expect(shots[0].gun).toBe(GUN_PISTOL);
+      expect(shots[0].rays).toHaveLength(1);
+      expect(shots[0].rays[0].hitPlayerId).toBe(bob.sessionId);
+      expect(shots[0].rays[0].part).toBe('torso');
+      expect(shots[0].rays[0].damage).toBe(30);
       await until(() => bobView().hp === 70, 3000, 'bob hp 70');
       expect(bobView().alive).toBe(true);
       expect(kills).toHaveLength(0);
@@ -166,13 +168,13 @@ describe('arena room', () => {
       await until(() => kills.length === 1, 3000, 'kill broadcast');
       await sleep(100);
       expect(shots).toHaveLength(2);
-      expect(shots[1]).toMatchObject({ hitPlayerId: bob.sessionId, part: 'head', damage: 100 });
+      expect(shots[1].rays[0]).toMatchObject({ hitPlayerId: bob.sessionId, part: 'head', damage: 100 });
       expect(kills[0]).toMatchObject({
         killerId: alice.sessionId,
         killerName: 'Alice',
         victimId: bob.sessionId,
         victimName: 'Bob',
-        weapon: WEAPON_GUN,
+        weapon: WEAPON_PISTOL,
         headshot: true,
         multi: 1,
         streak: 1,
@@ -193,7 +195,7 @@ describe('arena room', () => {
       // Sword: Bob walks up in front of Alice. A plain (level) light swing lands on the head for 45.
       await sleep(350); // let gun cooldown lapse (irrelevant for sword but keeps timings sane)
       alice.send(MSG.pose, poseOf(alice, 32, 40, 0));
-      bob.send(MSG.pose, poseOf(bob, 32, 42, 0, WEAPON_SWORD)); // 2 blocks behind Alice, facing -Z toward her
+      bob.send(MSG.pose, poseOf(bob, 32, 42, 0, WEAPON_MELEE)); // 2 blocks behind Alice, facing -Z toward her
       await until(() => Math.abs(bobView().z - 42) < 0.01, 3000, 'bob repositioned');
       // Claiming the heavy without having announced a charge lands as a light slash.
       bob.send(MSG.swing, { ...poseOf(bob, 32, 42, 0), attack: ATTACK_HEAVY });
@@ -205,14 +207,14 @@ describe('arena room', () => {
       // Heavy swing: announce the charge, hold ≥ SWORD_CHARGE_MS, release aiming at the chest → 70 → kill.
       bob.send(MSG.charge, me(bob).spawnEpoch);
       await sleep(SWORD_CHARGE_MS + 100);
-      bob.send(MSG.swing, { ...poseOf(bob, 32, 42, 0, WEAPON_SWORD, pitchToHeight(1.0, 2)), attack: ATTACK_HEAVY });
+      bob.send(MSG.swing, { ...poseOf(bob, 32, 42, 0, WEAPON_MELEE, pitchToHeight(1.0, 2)), attack: ATTACK_HEAVY });
       await until(() => kills.length === 2, 3000, 'sword kill');
       expect(hits[1]).toMatchObject({ victimId: alice.sessionId, part: 'body', damage: 70, attack: ATTACK_HEAVY });
       // Body hit, and Bob was last killed by Alice → revenge.
       expect(kills[1]).toMatchObject({
         killerId: bob.sessionId,
         victimId: alice.sessionId,
-        weapon: WEAPON_SWORD,
+        weapon: WEAPON_MELEE,
         headshot: false,
         multi: 1,
         streak: 1,
@@ -224,18 +226,18 @@ describe('arena room', () => {
 
       // Light swings repeat while LMB is held; the light's own recovery gates each one server-side.
       alice.send(MSG.pose, poseOf(alice, 32, 40, 0));
-      bob.send(MSG.pose, poseOf(bob, 32, 42, 0, WEAPON_SWORD));
+      bob.send(MSG.pose, poseOf(bob, 32, 42, 0, WEAPON_MELEE));
       await until(() => Math.abs(bobView().z - 42) < 0.01, 3000, 'bob back behind alice');
       await sleep(SWORD_SERVER_MIN_INTERVAL_MS);
       const swungBefore = swings.length;
-      bob.send(MSG.swing, { ...poseOf(bob, 32, 42, 0, WEAPON_SWORD), attack: ATTACK_LIGHT });
-      bob.send(MSG.swing, { ...poseOf(bob, 32, 42, 0, WEAPON_SWORD), attack: ATTACK_LIGHT }); // too soon: dropped
+      bob.send(MSG.swing, { ...poseOf(bob, 32, 42, 0, WEAPON_MELEE), attack: ATTACK_LIGHT });
+      bob.send(MSG.swing, { ...poseOf(bob, 32, 42, 0, WEAPON_MELEE), attack: ATTACK_LIGHT }); // too soon: dropped
       await until(() => hits.length === 3, 3000, 'third hit');
       await sleep(100);
       expect(swings).toHaveLength(swungBefore + 1);
       expect(hits[2]).toMatchObject({ victimId: alice.sessionId, part: 'head', damage: 45, attack: ATTACK_LIGHT, melee: MELEE_SWORD });
       await sleep(SWORD_SERVER_MIN_INTERVAL_MS + 20);
-      bob.send(MSG.swing, { ...poseOf(bob, 32, 42, 0, WEAPON_SWORD), attack: ATTACK_LIGHT });
+      bob.send(MSG.swing, { ...poseOf(bob, 32, 42, 0, WEAPON_MELEE), attack: ATTACK_LIGHT });
       await until(() => hits.length === 4, 3000, 'fourth hit');
       expect(swings).toHaveLength(swungBefore + 2);
 
@@ -243,7 +245,7 @@ describe('arena room', () => {
       await sleep(SWORD_SERVER_MIN_INTERVAL_MS + 20);
       bob.send(MSG.charge, me(bob).spawnEpoch);
       await sleep(SWORD_CHARGE_MS / 2);
-      bob.send(MSG.swing, { ...poseOf(bob, 32, 42, 0, WEAPON_SWORD, pitchToHeight(1.0, 2)), attack: ATTACK_HEAVY });
+      bob.send(MSG.swing, { ...poseOf(bob, 32, 42, 0, WEAPON_MELEE, pitchToHeight(1.0, 2)), attack: ATTACK_HEAVY });
       await until(() => hits.length === 5, 3000, 'partial heavy hit');
       expect(hits[4]).toMatchObject({ victimId: alice.sessionId, part: 'body', attack: ATTACK_HEAVY, melee: MELEE_SWORD });
       expect(hits[4].damage).toBeGreaterThanOrEqual(28);
@@ -251,12 +253,12 @@ describe('arena room', () => {
       await until(() => kills.length === 3, 3000, 'third kill');
       await until(() => me(alice).alive && me(alice).spawnEpoch === 3, 5000, 'alice respawned again');
       alice.send(MSG.pose, poseOf(alice, 32, 40, 0));
-      bob.send(MSG.pose, poseOf(bob, 32, 42, 0, WEAPON_SWORD));
+      bob.send(MSG.pose, poseOf(bob, 32, 42, 0, WEAPON_MELEE));
       await until(() => Math.abs(me(alice).z - 40) < 0.01 && Math.abs(bobView().z - 42) < 0.01, 3000, 'both repositioned');
       // Released almost at once (under the minimum fraction): it is only a light.
       await sleep(SWORD_SERVER_MIN_INTERVAL_MS + 20);
       bob.send(MSG.charge, me(bob).spawnEpoch);
-      bob.send(MSG.swing, { ...poseOf(bob, 32, 42, 0, WEAPON_SWORD, pitchToHeight(1.0, 2)), attack: ATTACK_HEAVY });
+      bob.send(MSG.swing, { ...poseOf(bob, 32, 42, 0, WEAPON_MELEE, pitchToHeight(1.0, 2)), attack: ATTACK_HEAVY });
       await until(() => hits.length === 6, 3000, 'tap heavy → light');
       expect(hits[5]).toMatchObject({ victimId: alice.sessionId, part: 'body', damage: 30, attack: ATTACK_LIGHT });
       await until(() => me(alice).hp === 70, 3000, 'alice hp 70');
@@ -282,7 +284,7 @@ describe('arena room', () => {
     const alice: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, {
       nickname: 'Alice',
       durationMin: 3,
-      testOverrides: { respawnMs: 200, spawnProtectMs: 0, dropIntervalMs: 100 },
+      testOverrides: { respawnMs: 200, spawnProtectMs: 0, dropIntervalMs: 100, dropLifetimeMs: 1500 },
     });
     const pickups: PickupMsg[] = [];
     const hits: HitMsg[] = [];
@@ -296,18 +298,22 @@ describe('arena room', () => {
     try {
       await ready(alice);
       expect(me(alice).melee).toBe(MELEE_SWORD);
-      // Drops appear on the central plateau and are capped.
+      // Drops appear on the central plateau and are capped; in an 'all' room guns and knives both drop — wait for a knife.
       await until(() => alice.state.drops.size >= 1, 3000, 'first drop');
       await sleep(600);
       expect(alice.state.drops.size).toBeLessThanOrEqual(DROP_MAX_ACTIVE);
       let dropId = '';
       let drop: any = null;
-      alice.state.drops.forEach((d: any, id: string) => {
-        if (!drop) {
-          drop = d;
-          dropId = id;
-        }
-      });
+      await until(() => {
+        drop = null;
+        alice.state.drops.forEach((d: any, id: string) => {
+          if (!drop && d.slot === WEAPON_MELEE) {
+            drop = d;
+            dropId = id;
+          }
+        });
+        return drop !== null;
+      }, 8000, 'a melee drop');
       expect(drop.kind).not.toBe(MELEE_SWORD);
       expect(drop.x).toBeGreaterThanOrEqual(PLATEAU_MIN);
       expect(drop.x).toBeLessThanOrEqual(PLATEAU_MAX + 1);
@@ -316,9 +322,9 @@ describe('arena room', () => {
       const kind = drop.kind as number;
 
       // Walk onto it: picked up, gone from the state, everyone told.
-      alice.send(MSG.pose, { x: drop.x, y: drop.y, z: drop.z, yaw: 0, pitch: 0, epoch: me(alice).spawnEpoch, weapon: WEAPON_SWORD });
+      alice.send(MSG.pose, { x: drop.x, y: drop.y, z: drop.z, yaw: 0, pitch: 0, epoch: me(alice).spawnEpoch, weapon: WEAPON_MELEE });
       await until(() => pickups.length === 1, 3000, 'pickup broadcast');
-      expect(pickups[0]).toEqual({ playerId: alice.sessionId, melee: kind });
+      expect(pickups[0]).toEqual({ playerId: alice.sessionId, slot: WEAPON_MELEE, kind });
       await until(() => me(alice).melee === kind, 3000, 'melee synced');
       expect(alice.state.drops.has(dropId)).toBe(false);
 
@@ -334,9 +340,9 @@ describe('arena room', () => {
       const bobView = (): any => alice.state.players.get(bob!.sessionId);
       bob.send(MSG.pose, poseOf(bob, 32, 40, 0));
       await until(() => Math.abs(bobView().x - 32) < 0.01 && Math.abs(bobView().y - SKY_Y) < 0.01, 3000, 'bob in the sky');
-      alice.send(MSG.pose, poseOf(alice, 32, 42, 0, WEAPON_SWORD));
+      alice.send(MSG.pose, poseOf(alice, 32, 42, 0, WEAPON_MELEE));
       await until(() => Math.abs(me(alice).z - 42) < 0.01, 3000, 'alice behind bob');
-      alice.send(MSG.swing, { ...poseOf(alice, 32, 42, 0, WEAPON_SWORD), attack: ATTACK_LIGHT });
+      alice.send(MSG.swing, { ...poseOf(alice, 32, 42, 0, WEAPON_MELEE), attack: ATTACK_LIGHT });
       await until(() => hits.length === 1, 3000, 'melee hit');
       const expected = MELEE_STATS[kind as keyof typeof MELEE_STATS].attacks[ATTACK_LIGHT].damage.head;
       expect(hits[0]).toMatchObject({ attackerId: alice.sessionId, victimId: bob.sessionId, part: 'head', damage: expected, attack: ATTACK_LIGHT, melee: kind });
@@ -345,7 +351,7 @@ describe('arena room', () => {
       await until(() => Math.abs(bobView().z - 44) < 0.01, 3000, 'bob repositioned');
       bob.send(MSG.shoot, poseOf(bob, 32, 44, 0));
       await until(() => kills.length === 1, 3000, 'alice killed');
-      expect(kills[0]).toMatchObject({ killerId: bob.sessionId, victimId: alice.sessionId, weapon: WEAPON_GUN, melee: MELEE_SWORD });
+      expect(kills[0]).toMatchObject({ killerId: bob.sessionId, victimId: alice.sessionId, weapon: WEAPON_PISTOL, melee: MELEE_SWORD });
       // Death loses the drop weapon.
       await until(() => me(alice).alive && me(alice).spawnEpoch === 2, 3000, 'alice respawned');
       expect(me(alice).melee).toBe(MELEE_SWORD);
@@ -355,21 +361,204 @@ describe('arena room', () => {
     }
   }, 15000);
 
-  it('gun-only rooms never spawn drops', async () => {
-    const room: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, {
-      nickname: 'Solo',
+  it('CTF rooms drop from the full pool (guns, grenade packs, knives); picking a gun fills the primary slot', async () => {
+    const alice: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, {
+      name: 'ctfdrops',
       durationMin: 3,
-      weapons: 'gun',
-      testOverrides: { dropIntervalMs: 50 },
+      nickname: 'Alice',
+      weapons: 'all',
+      mode: 'ctf',
+      testOverrides: { dropIntervalMs: 60, dropLifetimeMs: 10_000, spawnProtectMs: 0 },
+    });
+    const pickups: PickupMsg[] = [];
+    alice.onMessage(MSG.pickup, (m: PickupMsg) => pickups.push(m));
+    alice.onMessage(MSG.flag, () => {});
+    const stepOn = (d: { x: number; y: number; z: number }): void =>
+      alice.send(MSG.pose, { x: d.x, y: d.y, z: d.z, yaw: 0, pitch: 0, epoch: me(alice).spawnEpoch, weapon: WEAPON_PISTOL });
+    try {
+      await ready(alice);
+      // CTF spawns are pistol-only (no deathmatch roll).
+      expect(me(alice).gun).toBe(GUN_NONE);
+      await until(() => alice.state.drops.size >= 3, 4000, 'drops');
+      for (const d of alice.state.drops.values()) expect([WEAPON_PRIMARY, WEAPON_GRENADE, WEAPON_MELEE]).toContain((d as any).slot);
+      // Hunt a primary drop: consume whatever is on the ground until one appears (uniform 10-item pool → fast).
+      let gunDrop: any = null;
+      const deadline = Date.now() + 12_000;
+      while (!gunDrop && Date.now() < deadline) {
+        const drops: [string, any][] = [...alice.state.drops.entries()];
+        const primary = drops.find(([, d]) => d.slot === WEAPON_PRIMARY);
+        if (primary) {
+          gunDrop = { ...primary[1] };
+          break;
+        }
+        if (drops.length > 0) {
+          const [id, d] = drops[0];
+          stepOn(d);
+          await until(() => !alice.state.drops.has(id), 3000, 'drop consumed');
+        } else {
+          await sleep(100);
+        }
+      }
+      expect(gunDrop).not.toBeNull();
+      const before = pickups.length;
+      stepOn(gunDrop);
+      await until(() => pickups.length > before && pickups.at(-1)!.slot === WEAPON_PRIMARY, 3000, 'primary pickup');
+      expect(pickups.at(-1)).toMatchObject({ playerId: alice.sessionId, slot: WEAPON_PRIMARY, kind: gunDrop.kind });
+      await until(() => me(alice).gun === gunDrop.kind, 3000, 'primary armed');
+    } finally {
+      await alice.leave();
+    }
+  }, 20000);
+
+  it('a deathmatch with guns spawns you with a random primary; bots get one too', async () => {
+    const alice: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, {
+      name: 'roll',
+      durationMin: 3,
+      nickname: 'Alice',
+      weapons: 'all',
+      bots: 1,
+      testOverrides: { spawnProtectMs: 0 },
     });
     try {
-      await ready(room);
-      await sleep(400);
-      expect(room.state.drops.size).toBe(0);
+      await ready(alice);
+      expect(SPAWN_PRIMARY_KINDS).toContain(me(alice).gun);
+      expect(SPAWN_PRIMARY_KINDS).toContain(alice.state.players.get('bot1').gun);
     } finally {
-      await room.leave();
+      await alice.leave();
     }
   });
+
+  it('sword-only rooms drop only knives', async () => {
+    const alice: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, {
+      name: 'swords',
+      durationMin: 3,
+      nickname: 'Alice',
+      weapons: 'sword',
+      testOverrides: { dropIntervalMs: 60, dropLifetimeMs: 10_000 },
+    });
+    try {
+      await ready(alice);
+      await until(() => alice.state.drops.size >= 2, 4000, 'drops');
+      for (const d of alice.state.drops.values()) expect((d as any).slot).toBe(WEAPON_MELEE);
+    } finally {
+      await alice.leave();
+    }
+  });
+
+  it('shots carry the gun kind and one ray per pellet; outside a deathmatch the primary slot starts empty', async () => {
+    const alice: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, { name: 'guns', durationMin: 3, nickname: 'Alice', mode: 'training', bots: 0, testOverrides: { spawnProtectMs: 0 } });
+    const shots: ShotMsg[] = [];
+    alice.onMessage(MSG.shot, (m: ShotMsg) => shots.push(m));
+    alice.onMessage(MSG.kill, () => {});
+    try {
+      await ready(alice);
+      expect(me(alice).gun).toBe(GUN_NONE);
+      expect(me(alice).grenades).toBe(GRENADE_START);
+      // Primary slot empty: a primary shot is dropped, a pistol shot goes through.
+      alice.send(MSG.shoot, { ...poseOf(alice, 32, 40, 0), weapon: WEAPON_PRIMARY });
+      alice.send(MSG.shoot, { ...poseOf(alice, 32, 40, 0), weapon: WEAPON_PISTOL });
+      await until(() => shots.length === 1, 3000, 'pistol shot');
+      await sleep(100);
+      expect(shots).toHaveLength(1);
+      expect(shots[0].gun).toBe(GUN_PISTOL);
+      expect(shots[0].rays).toHaveLength(1);
+      expect(shots[0].rays[0].hitPlayerId).toBe('');
+    } finally {
+      await alice.leave();
+    }
+  });
+
+  it('training room: a picked shotgun fires 8 rays; the taser is gone after two shots', async () => {
+    const alice: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, { name: 'range', durationMin: 3, nickname: 'Alice', mode: 'training', bots: 0, testOverrides: { spawnProtectMs: 0 } });
+    const shots: ShotMsg[] = [];
+    alice.onMessage(MSG.shot, (m: ShotMsg) => shots.push(m));
+    try {
+      await ready(alice);
+      alice.send(MSG.selectWeapon, { epoch: me(alice).spawnEpoch, slot: WEAPON_PRIMARY, kind: GUN_SHOTGUN });
+      await until(() => me(alice).gun === GUN_SHOTGUN, 3000, 'shotgun armed');
+      alice.send(MSG.shoot, { ...poseOf(alice, 32, 40, 0), weapon: WEAPON_PRIMARY });
+      await until(() => shots.length === 1, 3000, 'shotgun shot');
+      expect(shots[0].gun).toBe(GUN_SHOTGUN);
+      expect(shots[0].rays).toHaveLength(gunSpec(GUN_SHOTGUN).pellets);
+      // The taser lives in its own slot (key 5) and leaves after two charges.
+      alice.send(MSG.selectWeapon, { epoch: me(alice).spawnEpoch, slot: WEAPON_TASER, kind: GUN_TASER });
+      await until(() => me(alice).taser === GUN_TASER, 3000, 'taser armed');
+      expect(me(alice).gun).toBe(GUN_SHOTGUN); // the primary slot is untouched
+      alice.send(MSG.shoot, { ...poseOf(alice, 32, 40, 0), weapon: WEAPON_TASER });
+      await until(() => shots.length === 2, 3000, 'taser shot 1');
+      expect(shots[1].gun).toBe(GUN_TASER);
+      await sleep(gunSpec(GUN_TASER).cooldownMs);
+      alice.send(MSG.shoot, { ...poseOf(alice, 32, 40, 0), weapon: WEAPON_TASER });
+      await until(() => shots.length === 3, 3000, 'taser shot 2');
+      await until(() => me(alice).taser === GUN_NONE, 3000, 'taser consumed');
+      expect(me(alice).weapon).toBe(WEAPON_PISTOL);
+      await sleep(gunSpec(GUN_TASER).cooldownMs);
+      alice.send(MSG.shoot, { ...poseOf(alice, 32, 40, 0), weapon: WEAPON_TASER });
+      await sleep(150);
+      expect(shots).toHaveLength(3);
+    } finally {
+      await alice.leave();
+    }
+  });
+
+  it('grenades: thrown from slot 4, burst after the fuse and hurt by distance (thrower included); stock is limited', async () => {
+    const alice: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, { name: 'nades', durationMin: 3, nickname: 'Alice', testOverrides: { spawnProtectMs: 0, respawnMs: 200 } });
+    const bursts: ExplodeMsg[] = [];
+    alice.onMessage(MSG.explode, (m: ExplodeMsg) => bursts.push(m));
+    alice.onMessage(MSG.kill, () => {});
+    alice.onMessage(MSG.shot, () => {});
+    let bob: AnyRoom | null = null;
+    try {
+      await ready(alice);
+      bob = await new Client(wsUrl).joinById(alice.roomId, { nickname: 'Bob' });
+      bob.onMessage(MSG.explode, () => {});
+      bob.onMessage(MSG.kill, () => {});
+      await until(() => me(bob!) !== undefined, 3000, 'bob');
+      await ready(bob);
+      // Both on the ground where Alice spawned; Bob 2 blocks ahead. Alice lobs one almost straight down at her feet.
+      const ax = me(alice).x;
+      const ay = me(alice).y;
+      const az = me(alice).z;
+      bob.send(MSG.pose, { x: ax, y: ay, z: az - 2, yaw: 0, pitch: 0, epoch: me(bob).spawnEpoch, weapon: WEAPON_PISTOL });
+      await until(() => Math.abs(alice.state.players.get(bob!.sessionId).z - (az - 2)) < 0.01, 3000, 'poses');
+      alice.send(MSG.throw, { x: ax, y: ay, z: az, yaw: 0, pitch: -1.5, epoch: me(alice).spawnEpoch });
+      await until(() => alice.state.grenades.size === 1, 3000, 'grenade in state');
+      expect(me(alice).grenades).toBe(GRENADE_START - 1);
+      const g: any = [...alice.state.grenades.values()][0];
+      expect(g.ownerId).toBe(alice.sessionId);
+      await until(() => bursts.length === 1, GRENADE_FUSE_MS + 2000, 'burst');
+      expect(alice.state.grenades.size).toBe(0);
+      const b = bursts[0];
+      expect(b.ownerId).toBe(alice.sessionId);
+      // The thrower stands at the burst: always hit. Bob (2 blocks off) is hit unless terrain occludes him.
+      const bobHit = b.victims.find((v) => v.id === bob!.sessionId);
+      const aliceHit = b.victims.find((v) => v.id === alice.sessionId);
+      expect(aliceHit).toBeDefined();
+      expect(aliceHit!.damage).toBeGreaterThan(0);
+      await sleep(100);
+      if (bobHit) {
+        expect(bobHit.damage).toBeGreaterThan(0);
+        expect(alice.state.players.get(bob.sessionId).hp).toBe(Math.max(0, 100 - bobHit.damage));
+      }
+      // Stock: 2 at spawn; the third throw is ignored.
+      await until(() => me(alice).alive, 3000, 'alice alive');
+      const ep = me(alice).spawnEpoch;
+      alice.send(MSG.throw, { x: ax, y: ay, z: az, yaw: 0, pitch: 0.5, epoch: ep });
+      await until(() => alice.state.grenades.size === 1, 3000, 'second grenade');
+      const left = me(alice).grenades;
+      await sleep(GRENADE_SERVER_MIN_INTERVAL_MS + 100);
+      alice.send(MSG.throw, { x: ax, y: ay, z: az, yaw: 0, pitch: 0.5, epoch: ep });
+      await sleep(GRENADE_SERVER_MIN_INTERVAL_MS + 100);
+      alice.send(MSG.throw, { x: ax, y: ay, z: az, yaw: 0, pitch: 0.5, epoch: ep });
+      await sleep(200);
+      // Either she had 1 left (2nd throw ok, 3rd ignored) or respawned with 2 (both ok): never more than the stock.
+      expect(alice.state.grenades.size).toBeLessThanOrEqual(1 + left);
+      expect(me(alice).grenades).toBe(0);
+    } finally {
+      await bob?.leave();
+      await alice.leave();
+    }
+  }, 15000);
 
   it('adds bots that occupy slots, move around and hunt players', async () => {
     const room: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, {
@@ -458,8 +647,8 @@ describe('arena room', () => {
       await until(() => Math.abs(bobView().x - 32) < 0.01, 3000, 'bob pose synced');
       alice.send(MSG.shoot, poseOf(alice, 32, 40, 0));
       await until(() => shots.length === 1, 3000, 'shot broadcast');
-      expect(shots[0].hitPlayerId).toBe('');
-      expect(shots[0].damage).toBe(0);
+      expect(shots[0].rays[0].hitPlayerId).toBe('');
+      expect(shots[0].rays[0].damage).toBe(0);
       await sleep(100);
       expect(bobView().hp).toBe(100);
       expect(bobView().alive).toBe(true);
@@ -469,7 +658,7 @@ describe('arena room', () => {
       alice.send(MSG.shoot, poseOf(alice, 32, 40, 0));
       const secondShotAt = Date.now();
       await until(() => shots.length === 2, 3000, 'second shot');
-      expect(shots[1]).toMatchObject({ hitPlayerId: bob.sessionId, part: 'head', damage: 100 });
+      expect(shots[1].rays[0]).toMatchObject({ hitPlayerId: bob.sessionId, part: 'head', damage: 100 });
       await until(() => bobView().alive === false, 3000, 'bob killed');
 
       // Respawn re-arms the shield; attacking ends it early.
@@ -483,7 +672,7 @@ describe('arena room', () => {
       await sleep(Math.max(0, secondShotAt + GUN_SERVER_MIN_INTERVAL_MS + 20 - Date.now()));
       alice.send(MSG.shoot, poseOf(alice, 32, 40, 0));
       await until(() => shots.length === 3, 3000, 'third shot');
-      expect(shots[2]).toMatchObject({ hitPlayerId: '', damage: 0 });
+      expect(shots[2].rays[0]).toMatchObject({ hitPlayerId: '', damage: 0 });
       await sleep(100);
       expect(bobView().hp).toBe(100);
       expect(bobView().shielded).toBe(true);
@@ -553,17 +742,17 @@ describe('arena room', () => {
       // Charge start is visible to everyone; releasing the swing (into thin air) clears it and is broadcast.
       // The charge may race ahead of the pose that switches to the sword: it must survive that pose.
       alice.send(MSG.charge, me(alice).spawnEpoch);
-      alice.send(MSG.pose, poseOf(alice, 32, 40, 0, WEAPON_SWORD));
+      alice.send(MSG.pose, poseOf(alice, 32, 40, 0, WEAPON_MELEE));
       await until(() => me(alice).charging === true, 2000, 'charging flag');
       await sleep(SWORD_CHARGE_MS + 100);
-      alice.send(MSG.swing, { ...poseOf(alice, 32, 40, 0, WEAPON_SWORD), attack: ATTACK_HEAVY });
+      alice.send(MSG.swing, { ...poseOf(alice, 32, 40, 0, WEAPON_MELEE), attack: ATTACK_HEAVY });
       await until(() => swings.length === 1, 2000, 'swung broadcast');
       expect(swings[0]).toEqual({ attackerId: alice.sessionId, attack: ATTACK_HEAVY, melee: MELEE_SWORD });
       await until(() => me(alice).charging === false, 2000, 'charging cleared');
 
       // A light miss is broadcast too.
       await sleep(SWORD_SERVER_MIN_INTERVAL_MS + 20);
-      alice.send(MSG.swing, { ...poseOf(alice, 32, 40, 0, WEAPON_SWORD), attack: ATTACK_LIGHT });
+      alice.send(MSG.swing, { ...poseOf(alice, 32, 40, 0, WEAPON_MELEE), attack: ATTACK_LIGHT });
       await until(() => swings.length === 2, 2000, 'second swung');
       expect(swings[1]).toEqual({ attackerId: alice.sessionId, attack: ATTACK_LIGHT, melee: MELEE_SWORD });
 
@@ -578,7 +767,7 @@ describe('arena room', () => {
       // Switching to the gun cancels a pending charge.
       alice.send(MSG.charge, me(alice).spawnEpoch);
       await until(() => me(alice).charging === true, 2000, 'charging again');
-      alice.send(MSG.pose, poseOf(alice, 32, 40, 0, WEAPON_GUN));
+      alice.send(MSG.pose, poseOf(alice, 32, 40, 0, WEAPON_PISTOL));
       await until(() => me(alice).charging === false, 2000, 'charge cancelled by weapon switch');
 
       // Reload: flag is up for the reload window, then drops by itself.
@@ -592,7 +781,7 @@ describe('arena room', () => {
     }
   }, 15000);
 
-  it('restricts weapons to the room rule (sword-only rejects shots; gun-only rejects swings)', async () => {
+  it('restricts weapons to the room rule (sword-only rejects shots)', async () => {
     const swordRoom: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, {
       nickname: 'Alice',
       durationMin: 3,
@@ -605,13 +794,12 @@ describe('arena room', () => {
     swordRoom.onMessage(MSG.hit, (m: HitMsg) => hits.push(m));
     swordRoom.onMessage(MSG.kill, () => {});
     let bob: AnyRoom | null = null;
-    let gunRoom: AnyRoom | null = null;
     try {
       await ready(swordRoom);
       expect(swordRoom.state.weapons).toBe('sword');
       const listed = ((await (await fetch(`${httpUrl}/rooms`)).json()) as RoomListEntry[]).find((r) => r.roomId === swordRoom.roomId)!;
       expect(listed.metadata.weapons).toBe('sword');
-      expect(me(swordRoom).weapon).toBe(WEAPON_SWORD); // spawned holding the sword
+      expect(me(swordRoom).weapon).toBe(WEAPON_MELEE); // spawned holding the sword
 
       bob = await new Client(wsUrl).joinById(swordRoom.roomId, { nickname: 'Bob' });
       bob.onMessage(MSG.shot, () => {});
@@ -619,9 +807,9 @@ describe('arena room', () => {
       bob.onMessage(MSG.kill, () => {});
       await ready(bob);
       const bobView = (): any => swordRoom.state.players.get(bob!.sessionId);
-      bob.send(MSG.pose, poseOf(bob, 32, 30, 0, WEAPON_GUN)); // claiming the gun is ignored
+      bob.send(MSG.pose, poseOf(bob, 32, 30, 0, WEAPON_PISTOL)); // claiming the gun is ignored
       await until(() => Math.abs(bobView().x - 32) < 0.01, 3000, 'bob pose synced');
-      expect(bobView().weapon).toBe(WEAPON_SWORD);
+      expect(bobView().weapon).toBe(WEAPON_MELEE);
 
       // A gun shot is dropped outright: no broadcast, no damage.
       swordRoom.send(MSG.shoot, poseOf(swordRoom, 32, 40, 0));
@@ -630,37 +818,14 @@ describe('arena room', () => {
       expect(bobView().hp).toBe(100);
 
       // The sword still works.
-      swordRoom.send(MSG.pose, poseOf(swordRoom, 32, 32, 0, WEAPON_SWORD));
+      swordRoom.send(MSG.pose, poseOf(swordRoom, 32, 32, 0, WEAPON_MELEE));
       await until(() => Math.abs(me(swordRoom).z - 32) < 0.01, 3000, 'alice repositioned');
-      swordRoom.send(MSG.swing, { ...poseOf(swordRoom, 32, 32, 0, WEAPON_SWORD), attack: ATTACK_LIGHT });
+      swordRoom.send(MSG.swing, { ...poseOf(swordRoom, 32, 32, 0, WEAPON_MELEE), attack: ATTACK_LIGHT });
       await until(() => hits.length === 1, 3000, 'sword hit');
       expect(hits[0].victimId).toBe(bob.sessionId);
 
-      // Gun-only room: swings and charges are dropped, shots go through.
-      gunRoom = await new Client(wsUrl).create(ROOM_NAME, {
-        nickname: 'Carol',
-        durationMin: 3,
-        weapons: 'gun',
-        testOverrides: { spawnProtectMs: 0 },
-      });
-      const gunShots: ShotMsg[] = [];
-      const gunHits: HitMsg[] = [];
-      gunRoom.onMessage(MSG.shot, (m: ShotMsg) => gunShots.push(m));
-      gunRoom.onMessage(MSG.hit, (m: HitMsg) => gunHits.push(m));
-      gunRoom.onMessage(MSG.kill, () => {});
-      await ready(gunRoom);
-      expect(gunRoom.state.weapons).toBe('gun');
-      gunRoom.send(MSG.charge, me(gunRoom).spawnEpoch);
-      gunRoom.send(MSG.chargeCancel, me(gunRoom).spawnEpoch);
-      gunRoom.send(MSG.swing, { ...poseOf(gunRoom, 32, 40, 0, WEAPON_SWORD), attack: ATTACK_HEAVY });
-      gunRoom.send(MSG.shoot, poseOf(gunRoom, 32, 40, 0));
-      await until(() => gunShots.length === 1, 3000, 'gun shot');
-      await sleep(100);
-      expect(gunHits).toHaveLength(0);
-      expect(me(gunRoom).weapon).toBe(WEAPON_GUN);
     } finally {
       await bob?.leave();
-      await gunRoom?.leave();
       await swordRoom.leave();
     }
   });
@@ -714,13 +879,13 @@ describe('arena room', () => {
       expect(hits).toHaveLength(0);
 
       // Pick the katana directly, then hit a dummy with it three times: it dies and is back within a second.
-      alice.send(MSG.selectMelee, { epoch: me(alice).spawnEpoch, melee: MELEE_KATANA });
+      alice.send(MSG.selectWeapon, { epoch: me(alice).spawnEpoch, slot: WEAPON_MELEE, kind: MELEE_KATANA });
       await until(() => me(alice).melee === MELEE_KATANA, 3000, 'katana selected');
       const [dummyId, dummy] = dummies()[0];
       const stand = { x: dummy.x, y: dummy.y, z: dummy.z + 2 };
       const swingAt = (): void =>
         alice.send(MSG.swing, { x: stand.x, y: stand.y, z: stand.z, yaw: 0, pitch: 0, epoch: me(alice).spawnEpoch, attack: ATTACK_LIGHT });
-      alice.send(MSG.pose, { ...stand, yaw: 0, pitch: 0, epoch: me(alice).spawnEpoch, weapon: WEAPON_SWORD });
+      alice.send(MSG.pose, { ...stand, yaw: 0, pitch: 0, epoch: me(alice).spawnEpoch, weapon: WEAPON_MELEE });
       await until(() => Math.abs(me(alice).z - stand.z) < 0.01, 3000, 'alice next to dummy');
       const light = MELEE_STATS[MELEE_KATANA].attacks[ATTACK_LIGHT];
       for (let i = 0; i < 3; i++) {
@@ -737,7 +902,7 @@ describe('arena room', () => {
       await until(() => alice.state.players.get(dummyId).alive === true, 3000, 'dummy respawned');
       expect(Date.now() - t0).toBeLessThan(1500);
 
-      // A normal match ignores selectMelee: the sword stays until you find a drop.
+      // A normal match ignores selectWeapon: the sword stays, and the (spawn-rolled) primary cannot be swapped at will.
       match = await new Client(wsUrl).create(ROOM_NAME, { nickname: 'Carol', durationMin: 3 });
       match.onMessage(MSG.shot, () => {});
       match.onMessage(MSG.hit, () => {});
@@ -746,9 +911,14 @@ describe('arena room', () => {
       match.onMessage(MSG.pickup, () => {});
       await ready(match);
       expect(match.state.mode).toBe('match');
-      match.send(MSG.selectMelee, { epoch: me(match).spawnEpoch, melee: MELEE_KATANA });
+      const rolled = me(match).gun; // deathmatch spawn roll
+      expect(SPAWN_PRIMARY_KINDS).toContain(rolled);
+      const wanted = rolled === GUN_SNIPER ? GUN_SHOTGUN : GUN_SNIPER;
+      match.send(MSG.selectWeapon, { epoch: me(match).spawnEpoch, slot: WEAPON_MELEE, kind: MELEE_KATANA });
+      match.send(MSG.selectWeapon, { epoch: me(match).spawnEpoch, slot: WEAPON_PRIMARY, kind: wanted });
       await sleep(200);
       expect(me(match).melee).toBe(MELEE_SWORD);
+      expect(me(match).gun).toBe(rolled);
     } finally {
       await match?.leave();
       await alice.leave();
@@ -777,7 +947,7 @@ describe('arena room', () => {
     const flag = (room: AnyRoom, team: number): any => room.state.flags.get(String(team));
     /** Stand right on a flag / spot (feet at its height, so canPickUp's dy check passes). */
     const standAt = (room: AnyRoom, at: { x: number; y: number; z: number }): void => {
-      room.send(MSG.pose, { x: at.x, y: at.y, z: at.z, yaw: 0, pitch: 0, epoch: me(room).spawnEpoch, weapon: WEAPON_SWORD });
+      room.send(MSG.pose, { x: at.x, y: at.y, z: at.z, yaw: 0, pitch: 0, epoch: me(room).spawnEpoch, weapon: WEAPON_MELEE });
     };
 
     it('teams, take → carry (no shooting) → score in the base zone, capture limit ends the match', async () => {

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
-import { MELEE_SWORD, WEAPON_SWORD } from '@mineshoot/shared';
-import type { MeleeKind, SwingAnim, Weapon } from '@mineshoot/shared';
+import { GUN_NONE, GUN_PISTOL, GUN_TASER, MELEE_SWORD, WEAPON_GRENADE, WEAPON_MELEE, WEAPON_PISTOL, WEAPON_PRIMARY, WEAPON_TASER } from '@mineshoot/shared';
+import type { GunKind, MeleeKind, SwingAnim, Weapon } from '@mineshoot/shared';
+import { buildGrenadeProp, buildGunProp } from './gunProps';
 import { buildMeleeProp, disposeProp } from './meleeProps';
 import type { MeleeProp } from './meleeProps';
 
@@ -45,13 +46,22 @@ const box = (w: number, h: number, d: number, color: number): THREE.Mesh =>
 /** First-person weapon attached to the camera (bottom-right), with recoil / swing. */
 export class ViewModel {
   readonly group = new THREE.Group();
-  private readonly gun = new THREE.Group();
+  /** Gun slots: the pistol (slot 2) and the primary (slot 1, prop swapped by setGun). */
+  private readonly pistol = new THREE.Group();
+  private readonly primary = new THREE.Group();
+  private readonly taserH = new THREE.Group();
+  private readonly nade = new THREE.Group();
+  private pistolProp: MeleeProp;
+  private primaryProp: MeleeProp;
+  private taserProp: MeleeProp;
+  private nadeProp: MeleeProp;
+  private gunKind: GunKind = GUN_NONE;
+  private slot: Weapon = WEAPON_PISTOL;
   /** Melee slot: rotated/bobbed as a whole; holds the current melee prop. */
   private readonly sword = new THREE.Group();
   private prop: MeleeProp;
   private melee: MeleeKind = MELEE_SWORD;
   private readonly restQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(REST_PITCH, REST_YAW, REST_ROLL));
-  private readonly flash: THREE.Mesh;
   private recoil = 0;
   private swingT = -1;
   private swingAnim: SwingAnim = 'overhead';
@@ -67,19 +77,19 @@ export class ViewModel {
   private bob = 0;
 
   constructor(camera: THREE.Camera) {
-    // Gun: body + barrel + grip
-    const body = box(0.06, 0.08, 0.26, 0x8a919c);
-    const barrel = box(0.03, 0.03, 0.2, 0x4b5059);
-    barrel.position.set(0, 0.02, -0.22);
-    const grip = box(0.05, 0.11, 0.06, 0x8a5a2b);
-    grip.position.set(0, -0.08, 0.08);
-    grip.rotation.x = 0.3;
-    this.flash = new THREE.Mesh(
-      new THREE.SphereGeometry(0.06, 6, 6),
-      new THREE.MeshBasicMaterial({ color: 0xffd766, transparent: true, opacity: 0 }),
-    );
-    this.flash.position.set(0, 0.02, -0.34);
-    this.gun.add(body, barrel, grip, this.flash);
+    // Gun props (grip at origin, barrel down -Z, humanoid scale): shrink into the hand.
+    this.pistolProp = buildGunProp(GUN_PISTOL);
+    this.pistol.add(this.mountGun(this.pistolProp));
+    this.primaryProp = buildGunProp(GUN_NONE);
+    this.primary.add(this.mountGun(this.primaryProp));
+    this.taserProp = buildGunProp(GUN_TASER);
+    this.taserH.add(this.mountGun(this.taserProp));
+    this.nadeProp = buildGrenadeProp();
+    const nadeHolder = new THREE.Group();
+    nadeHolder.scale.setScalar(0.5);
+    nadeHolder.position.set(-0.05, -0.05, 0.05);
+    nadeHolder.add(this.nadeProp.group);
+    this.nade.add(nadeHolder);
 
     // Melee prop (modelled along -Z at humanoid scale): stand it up (+Y) and shrink it for the hand.
     this.prop = buildMeleeProp(MELEE_SWORD);
@@ -89,11 +99,19 @@ export class ViewModel {
     // Local light so Lambert materials on the view model read well.
     const light = new THREE.PointLight(0xffffff, 1.5, 3);
     light.position.set(-0.3, 0.6, 0.4);
-    this.group.add(this.gun, this.sword, light);
+    this.group.add(this.pistol, this.primary, this.taserH, this.nade, this.sword, light);
     this.group.position.set(0.34, -0.22, -0.55);
     this.group.scale.setScalar(0.55);
     camera.add(this.group);
-    this.setWeapon(0);
+    this.setWeapon(WEAPON_PISTOL);
+  }
+
+  private mountGun(prop: MeleeProp): THREE.Group {
+    const holder = new THREE.Group();
+    holder.scale.setScalar(0.5);
+    holder.position.set(0, -0.02, 0.05);
+    holder.add(prop.group);
+    return holder;
   }
 
   private mount(prop: MeleeProp): THREE.Group {
@@ -108,8 +126,30 @@ export class ViewModel {
   }
 
   setWeapon(w: Weapon): void {
-    this.gun.visible = w !== WEAPON_SWORD;
-    this.sword.visible = w === WEAPON_SWORD;
+    this.slot = w;
+    this.pistol.visible = w === WEAPON_PISTOL;
+    this.primary.visible = w === WEAPON_PRIMARY;
+    this.taserH.visible = w === WEAPON_TASER;
+    this.nade.visible = w === WEAPON_GRENADE;
+    this.sword.visible = w === WEAPON_MELEE;
+  }
+
+  /** Swap the primary gun prop (server-driven: pickup / respawn / spent taser). */
+  setGun(kind: GunKind): void {
+    if (kind === this.gunKind) return;
+    this.gunKind = kind;
+    disposeProp(this.primaryProp);
+    this.primary.clear();
+    this.primaryProp = buildGunProp(kind);
+    this.primary.add(this.mountGun(this.primaryProp));
+  }
+
+  /** The gun holder + prop the current slot shows (null for melee / grenades). */
+  private activeGun(): { holder: THREE.Group; prop: MeleeProp } | null {
+    if (this.slot === WEAPON_PISTOL) return { holder: this.pistol, prop: this.pistolProp };
+    if (this.slot === WEAPON_PRIMARY) return { holder: this.primary, prop: this.primaryProp };
+    if (this.slot === WEAPON_TASER) return { holder: this.taserH, prop: this.taserProp };
+    return null;
   }
 
   /** Swap the melee prop (sword ↔ a picked-up drop weapon). */
@@ -122,9 +162,18 @@ export class ViewModel {
     this.sword.add(this.mount(this.prop));
   }
 
-  fire(): void {
+  /** `intensity` scales the kick (heavy guns punch harder; 1 = the classic pistol kick). */
+  fire(intensity = 1): void {
+    this.recoil = intensity;
+    for (const m of this.activeGun()?.prop.glow ?? []) {
+      m.opacity = 1;
+      m.emissiveIntensity = 1;
+    }
+  }
+
+  /** Grenade throw: quick forward flick of the hand. */
+  throwAnim(): void {
     this.recoil = 1;
-    (this.flash.material as THREE.MeshBasicMaterial).opacity = 1;
   }
 
   /** Play a melee attack: `slash` alternates sides, `overhead` chops down. */
@@ -151,13 +200,23 @@ export class ViewModel {
   update(dt: number, moving: boolean): void {
     // Recoil kick and muzzle flash decay
     this.recoil = Math.max(0, this.recoil - dt * 8);
-    const flashMat = this.flash.material as THREE.MeshBasicMaterial;
-    flashMat.opacity = Math.max(0, flashMat.opacity - dt * 14);
+    for (const prop of [this.pistolProp, this.primaryProp, this.taserProp]) {
+      for (const m of prop.glow) {
+        m.opacity = Math.max(0, m.opacity - dt * 14);
+        m.emissiveIntensity = m.opacity;
+      }
+    }
     const dip = Math.sin(Math.min(1, this.reload) * Math.PI); // 0 → 1 → 0 across the reload
-    this.gun.position.z = this.recoil * 0.12;
-    this.gun.position.y = -dip * 0.22;
-    this.gun.rotation.x = this.recoil * 0.25 - dip * 0.6;
-    this.gun.rotation.z = dip * 0.5;
+    const gun = this.activeGun()?.holder;
+    if (gun) {
+      gun.position.z = this.recoil * 0.12;
+      gun.position.y = -dip * 0.22;
+      gun.rotation.x = this.recoil * 0.25 - dip * 0.6;
+      gun.rotation.z = dip * 0.5;
+    }
+    // Grenade in hand: the throw flick reuses the recoil envelope.
+    this.nade.position.z = -this.recoil * 0.25;
+    this.nade.rotation.x = this.recoil * 0.8;
 
     // Melee attack animation (~250 ms). Poses are built as quaternions: the holder gives tip = +Y,
     // edge = -Z, so Ry is a roll about the blade, Rx tips it forward, and an outer Ry sweeps it

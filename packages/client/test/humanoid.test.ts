@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { MELEE_KATANA, MELEE_SWORD, WEAPON_GUN, WEAPON_SWORD } from '@mineshoot/shared';
+import { MELEE_KATANA, MELEE_SWORD, WEAPON_PISTOL, WEAPON_MELEE } from '@mineshoot/shared';
 import type { MeleeKind } from '@mineshoot/shared';
-import { Humanoid } from '../src/render/humanoid';
+import { Humanoid, PLAYER_COLORS } from '../src/render/humanoid';
 
 /** World-space tip of the held weapon: the deepest -z child in the visible weapon holder. */
 function tipZ(h: Humanoid): number {
@@ -28,7 +28,7 @@ describe('Humanoid weapon orientation', () => {
   // The humanoid faces local -z (eyes are on the -z face of the head; yaw 0 → world -z).
   it('points the gun forward (toward -z) at idle', () => {
     const h = new Humanoid(0);
-    h.setWeapon(WEAPON_GUN);
+    h.setWeapon(WEAPON_PISTOL);
     h.setPose(0, 0, 0, 0, 0, 0);
     h.update(0);
     expect(tipZ(h)).toBeLessThan(-0.5);
@@ -36,10 +36,31 @@ describe('Humanoid weapon orientation', () => {
 
   it.each<MeleeKind>([MELEE_SWORD, MELEE_KATANA])('points melee kind %i forward/down, not behind the back', (kind) => {
     const h = new Humanoid(0);
-    h.setWeapon(WEAPON_SWORD);
+    h.setWeapon(WEAPON_MELEE);
     h.setMelee(kind);
     h.setPose(0, 0, 0, 0, 0, 0);
     h.update(0);
     expect(tipZ(h)).toBeLessThan(-0.3);
+  });
+});
+
+describe('Humanoid.setColor', () => {
+  const meshColors = (h: Humanoid): Set<number> => {
+    const colors = new Set<number>();
+    h.group.traverse((o) => {
+      if (o instanceof THREE.Mesh) colors.add((o.material as THREE.MeshLambertMaterial).color.getHex());
+    });
+    return colors;
+  };
+
+  it('repaints body and trim to the new colour', () => {
+    const h = new Humanoid(0);
+    h.setColor(2);
+    const colors = meshColors(h);
+    const dark = (i: number): number => new THREE.Color(PLAYER_COLORS[i]).multiplyScalar(0.55).getHex();
+    expect(colors).toContain(PLAYER_COLORS[2]);
+    expect(colors).toContain(dark(2));
+    expect(colors).not.toContain(PLAYER_COLORS[0]);
+    expect(colors).not.toContain(dark(0));
   });
 });

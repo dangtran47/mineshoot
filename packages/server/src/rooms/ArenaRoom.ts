@@ -36,13 +36,16 @@ import {
   chargeFraction,
   pickDropKind,
   pickDropSpot,
+  dropPool,
   stepPlayer,
   GUN_MAG_SIZE,
+  GUN_NONE,
+  GUN_PISTOL,
+  GRENADE_MAX,
+  GRENADE_SERVER_MIN_INTERVAL_MS,
+  GRENADE_START,
+  GRENADE_SUBSTEPS,
   KillTracker,
-  GUN_RANGE,
-  GUN_RELOAD_MS,
-  GUN_RELOAD_SERVER_MIN_MS,
-  GUN_SERVER_MIN_INTERVAL_MS,
   MAX_HP,
   MAX_PLAYERS,
   MSG,
@@ -50,22 +53,33 @@ import {
   RESPAWN_MS,
   SPAWN_PROTECT_MS,
   respawnMsFor,
-  WEAPON_GUN,
-  WEAPON_SWORD,
+  WEAPON_GRENADE,
+  WEAPON_MELEE,
+  WEAPON_PISTOL,
+  WEAPON_PRIMARY,
+  WEAPON_TASER,
   attackSpec,
   createRng,
   defaultWeapon,
+  explosionVictims,
+  eyePosition,
   generateWorldFor,
+  grenadeFuseDone,
+  gunSpec,
   hashSeed,
   meleeSelectable,
+  pelletDirections,
   pickSpawn,
-  resolveShot,
+  resolveRay,
+  spawnPrimary,
+  stepGrenade,
   swordDamage,
   swordVictims,
+  throwGrenade,
   weaponAllowed,
 } from '@mineshoot/shared';
-import type { AttackKind, Bot, BotSkill, BotView, FlagEventKind, FlagEventMsg, FlagState, HitMsg, KillMsg, MeleeKind, PickupMsg, PlayerPhysState, PlayerPose, Rect, RoomMode, ShotMsg, ShotTarget, SpawnPoint, SwungMsg, Team, Weapon, WeaponMode, World } from '@mineshoot/shared';
-import { DropSchema, FlagSchema, PlayerSchema, RoomState } from './schema';
+import type { AttackKind, Bot, BotSkill, BotView, ExplodeMsg, FlagEventKind, FlagEventMsg, FlagState, GrenadeState, GunKind, GunSpec, HitMsg, KillMsg, MeleeKind, PickupMsg, PlayerPhysState, PlayerPose, Rect, RoomMode, ShotMsg, ShotRay, ShotTarget, SpawnPoint, SwungMsg, Team, Weapon, WeaponMode, World } from '@mineshoot/shared';
+import { DropSchema, FlagSchema, GrenadeSchema, PlayerSchema, RoomState } from './schema';
 import {
   parseBotCount,
   parseBotSkill,
@@ -77,9 +91,10 @@ import {
   parsePose,
   parseReload,
   parseRoomMode,
-  parseSelectMelee,
+  parseSelectWeapon,
   parseShoot,
   parseSwing,
+  parseThrow,
   parseTeam,
   parseWeaponMode,
   sanitizeName,
@@ -93,28 +108,34 @@ interface PlayerMeta {
   respawnAt: number;
   /** Spawn protection: cannot be targeted or damaged before this time (0 = none). */
   protectedUntil: number;
-  lastShotAt: number;
+  /** Last shot per gun slot (rate limit per weapon, like the client's cooldowns). */
+  lastShotAt: Record<number, number>;
   lastSwingAt: number;
   /** Which melee attack was swung last: its recovery gates the next swing. */
   lastAttack: AttackKind;
   /** When the player started holding the melee charge (0 = not charging). */
   chargeStartAt: number;
-  /** Rounds left in the gun magazine. */
-  ammo: number;
-  /** When the running reload completes (0 = not reloading). */
-  reloadDoneAt: number;
+  /** Rounds left per gun slot (WEAPON_PISTOL / WEAPON_PRIMARY). */
+  ammo: Record<number, number>;
+  /** When the running reload of each gun slot completes (0 = not reloading). */
+  reloadDoneAt: Record<number, number>;
+  lastThrowAt: number;
 }
+
+const freshAmmo = (): Record<number, number> => ({ [WEAPON_PISTOL]: GUN_MAG_SIZE, [WEAPON_PRIMARY]: 0, [WEAPON_TASER]: 0 });
+const freshReloads = (): Record<number, number> => ({ [WEAPON_PISTOL]: 0, [WEAPON_PRIMARY]: 0, [WEAPON_TASER]: 0 });
 
 const freshMeta = (ready: boolean): PlayerMeta => ({
   ready,
   respawnAt: 0,
   protectedUntil: 0,
-  lastShotAt: 0,
+  lastShotAt: freshReloads(),
   lastSwingAt: 0,
   lastAttack: ATTACK_LIGHT,
   chargeStartAt: 0,
-  ammo: GUN_MAG_SIZE,
-  reloadDoneAt: 0,
+  ammo: freshAmmo(),
+  reloadDoneAt: freshReloads(),
+  lastThrowAt: 0,
 });
 
 /** Test-only knobs (honoured only when MINESHOOT_TEST=1). */
@@ -180,6 +201,9 @@ export class ArenaRoom extends Room<RoomState> {
   private dropSeq = 0;
   /** When each drop on the ground expires (server-only). */
   private readonly dropExpiry = new Map<string, number>();
+  /** Live grenade physics (server-only; positions mirrored into state.grenades). */
+  private readonly grenadeSim = new Map<string, GrenadeState>();
+  private grenadeSeq = 0;
   private readonly meta = new Map<string, PlayerMeta>();
   private readonly bots = new Map<string, BotRuntime>();
   private readonly killTracker = new KillTracker();
@@ -251,7 +275,8 @@ export class ArenaRoom extends Room<RoomState> {
     this.onMessage(MSG.chargeCancel, (client, raw: unknown) => this.handleChargeCancel(client, raw));
     this.onMessage(MSG.reload, (client, raw: unknown) => this.handleReload(client, raw));
     this.onMessage(MSG.ready, (client) => this.handleReady(client));
-    this.onMessage(MSG.selectMelee, (client, raw: unknown) => this.handleSelectMelee(client, raw));
+    this.onMessage(MSG.selectWeapon, (client, raw: unknown) => this.handleSelectWeapon(client, raw));
+    this.onMessage(MSG.throw, (client, raw: unknown) => this.handleThrow(client, raw));
     this.onMessage(MSG.selectTeam, (client, raw: unknown) => this.handleSelectTeam(client, raw));
     this.onMessage(MSG.dropFlag, (client, raw: unknown) => this.handleDropFlag(client, raw));
     this.onMessage(MSG.ping, (client, t: unknown) => {
@@ -334,7 +359,7 @@ export class ArenaRoom extends Room<RoomState> {
       for (const [sid, other] of this.state.players) {
         if (sid !== id && this.targetable(sid, other, now) && !this.sameTeam(p, other)) enemies.push({ id: sid, x: other.x, y: other.y, z: other.z });
       }
-      const view: BotView = { self: rt.phys, enemies, now };
+      const view: BotView = { self: rt.phys, enemies, now, gun: p.gun as GunKind };
       if (this.ctf) {
         const flags = this.flagStates();
         view.goal = botCtfGoal(p.team as Team, id, rt.phys, flags, this.bases);
@@ -347,7 +372,7 @@ export class ArenaRoom extends Room<RoomState> {
       rt.phys = phys;
       this.applyPose(p, phys);
       if (p.weapon !== d.weapon) p.weapon = d.weapon;
-      if (d.shoot) this.attackShoot(id, p, phys, now);
+      if (d.shoot) this.attackShoot(id, p, phys, now, d.weapon === WEAPON_PRIMARY ? WEAPON_PRIMARY : WEAPON_PISTOL);
       if (d.swing) this.attackSwing(id, p, phys, now, ATTACK_LIGHT);
     }
   }
@@ -423,7 +448,7 @@ export class ArenaRoom extends Room<RoomState> {
       p.weapon = m.weapon;
       // Putting the sword away drops a pending charge. (A charge may legitimately arrive
       // before the pose that switches to the sword, so only the gun cancels it.)
-      if (m.weapon !== WEAPON_SWORD) {
+      if (m.weapon !== WEAPON_MELEE) {
         this.meta.get(client.sessionId)!.chargeStartAt = 0;
         this.syncFlags(client.sessionId, p, Date.now());
       }
@@ -435,7 +460,7 @@ export class ArenaRoom extends Room<RoomState> {
     const meta = this.meta.get(id);
     if (!meta) return;
     const charging = p.alive && meta.chargeStartAt > 0;
-    const reloading = p.alive && meta.reloadDoneAt > 0 && now < meta.reloadDoneAt;
+    const reloading = p.alive && Object.values(meta.reloadDoneAt).some((t) => t > 0 && now < t);
     if (p.charging !== charging) p.charging = charging;
     if (p.reloading !== reloading) p.reloading = reloading;
   }
@@ -469,95 +494,198 @@ export class ArenaRoom extends Room<RoomState> {
     if (p.shielded) p.shielded = false;
   }
 
+  /** The gun kind in a gun slot: the pistol, the picked-up primary, or the taser (GUN_NONE = empty). */
+  private gunKindFor(p: PlayerSchema, slot: Weapon): GunKind {
+    if (slot === WEAPON_PISTOL) return GUN_PISTOL;
+    return (slot === WEAPON_TASER ? p.taser : p.gun) as GunKind;
+  }
+
   /**
-   * Take one round from the magazine. A shot that arrives mid-reload with rounds
-   * left means the client cancelled the reload (weapon switch), so it is honoured;
-   * with an empty magazine it is dropped. Bots reload automatically.
+   * Take one round from a gun slot's magazine. A shot that arrives mid-reload
+   * with rounds left means the client cancelled the reload (weapon switch), so
+   * it is honoured; with an empty magazine it is dropped. Bots reload automatically.
    */
-  private takeRound(id: string, meta: PlayerMeta, now: number): boolean {
-    if (meta.reloadDoneAt) {
-      if (now >= meta.reloadDoneAt) {
-        meta.ammo = GUN_MAG_SIZE;
-        meta.reloadDoneAt = 0;
-      } else if (meta.ammo > 0) {
-        meta.reloadDoneAt = 0;
+  private takeRound(id: string, meta: PlayerMeta, now: number, slot: Weapon, spec: GunSpec): boolean {
+    const done = meta.reloadDoneAt[slot];
+    if (done) {
+      if (now >= done) {
+        meta.ammo[slot] = spec.magSize;
+        meta.reloadDoneAt[slot] = 0;
+      } else if (meta.ammo[slot] > 0) {
+        meta.reloadDoneAt[slot] = 0;
       } else {
         return false;
       }
     }
-    if (meta.ammo <= 0) {
-      if (this.bots.has(id)) meta.reloadDoneAt = now + GUN_RELOAD_MS;
+    if (meta.ammo[slot] <= 0) {
+      if (this.bots.has(id) && spec.reloadMs > 0) meta.reloadDoneAt[slot] = now + spec.reloadMs;
       return false;
     }
-    meta.ammo--;
+    meta.ammo[slot]--;
     return true;
   }
 
   private handleReload(client: Client, raw: unknown): void {
-    if (!weaponAllowed(this.weaponMode, WEAPON_GUN)) return;
-    const epoch = parseReload(raw);
-    if (epoch === null) return;
-    const p = this.actor(client, epoch);
+    const m = parseReload(raw);
+    if (!m || !weaponAllowed(this.weaponMode, m.weapon)) return;
+    const p = this.actor(client, m.epoch);
     if (!p) return;
+    const kind = this.gunKindFor(p, m.weapon);
+    if (kind === GUN_NONE) return;
+    const spec = gunSpec(kind);
     const meta = this.meta.get(client.sessionId)!;
-    if (meta.reloadDoneAt || meta.ammo >= GUN_MAG_SIZE) return;
+    if (spec.reloadMs === 0 || meta.reloadDoneAt[m.weapon] || meta.ammo[m.weapon] >= spec.magSize) return;
     const now = Date.now();
-    meta.reloadDoneAt = now + GUN_RELOAD_SERVER_MIN_MS;
+    meta.reloadDoneAt[m.weapon] = now + spec.serverReloadMinMs;
     this.syncFlags(client.sessionId, p, now);
   }
 
   private handleShoot(client: Client, raw: unknown): void {
-    if (!weaponAllowed(this.weaponMode, WEAPON_GUN)) return;
     const m = parseShoot(raw, this.world);
+    if (!m || !weaponAllowed(this.weaponMode, m.weapon)) return;
+    const p = this.actor(client, m.epoch);
+    if (!p) return;
+    this.applyPose(p, m);
+    this.attackShoot(client.sessionId, p, m, Date.now(), m.weapon);
+  }
+
+  /**
+   * Server-authoritative gun shot for humans and bots alike, from `slot`
+   * (pistol or primary), rate-limited per shooter with the gun's own timing.
+   * Every pellet is its own hitscan ray; the shot is broadcast once with all
+   * its rays. A consumable gun (taser) leaves with its last charge.
+   */
+  private attackShoot(id: string, p: PlayerSchema, pose: PlayerPose, now: number, slot: Weapon): void {
+    const meta = this.meta.get(id)!;
+    // CTF: a flag carrier is melee-only.
+    if (this.ctf && carriedFlag(this.flagStates(), id)) return;
+    const kind = this.gunKindFor(p, slot);
+    if (kind === GUN_NONE) return;
+    const spec = gunSpec(kind);
+    if (now - meta.lastShotAt[slot] < spec.serverMinIntervalMs) return;
+    const fired = this.takeRound(id, meta, now, slot, spec);
+    this.syncFlags(id, p, now);
+    if (!fired) return;
+    meta.lastShotAt[slot] = now;
+    if (p.weapon !== slot) p.weapon = slot;
+    this.dropProtection(p, meta);
+
+    const from = eyePosition(pose);
+    const targets = this.targetsExcluding(id, now);
+    const rays: ShotRay[] = [];
+    const hits: { id: string; damage: number; head: boolean }[] = [];
+    for (const dir of pelletDirections(pose.yaw, pose.pitch, spec, this.rng)) {
+      const r = resolveRay(this.world, from, dir, targets, spec.range, spec.damage);
+      rays.push({ to: r.to, hitPlayerId: r.hitPlayerId ?? '', part: r.part ?? '', damage: r.damage });
+      if (r.hitPlayerId) hits.push({ id: r.hitPlayerId, damage: r.damage, head: r.part === 'head' });
+    }
+    const shot: ShotMsg = { shooterId: id, gun: kind, from, rays };
+    this.broadcast(MSG.shot, shot);
+    for (const h of hits) this.damage(id, h.id, h.damage, slot, h.head, MELEE_SWORD, kind);
+    // Consumable (taser): the last charge takes the weapon with it.
+    if (spec.consumable && meta.ammo[slot] <= 0) this.clearSlot(p, meta, slot);
+  }
+
+  /** Empty the primary or taser slot (taser spent, death) and fall back to the default slot if it was out. */
+  private clearSlot(p: PlayerSchema, meta: PlayerMeta, slot: Weapon): void {
+    if (slot === WEAPON_TASER) p.taser = GUN_NONE;
+    else p.gun = GUN_NONE;
+    meta.ammo[slot] = 0;
+    meta.reloadDoneAt[slot] = 0;
+    if (p.weapon === slot) p.weapon = defaultWeapon(this.weaponMode);
+  }
+
+  /** Put `kind` in the primary or taser slot with a full magazine. */
+  private armGun(p: PlayerSchema, meta: PlayerMeta, slot: Weapon, kind: GunKind): void {
+    if (slot === WEAPON_TASER) p.taser = kind;
+    else p.gun = kind;
+    meta.ammo[slot] = gunSpec(kind).magSize;
+    meta.reloadDoneAt[slot] = 0;
+    // A fresh gun is ready to fire (the previous one's recovery does not carry over).
+    meta.lastShotAt[slot] = 0;
+  }
+
+  // --- grenades ---
+
+  private handleThrow(client: Client, raw: unknown): void {
+    if (!weaponAllowed(this.weaponMode, WEAPON_GRENADE)) return;
+    const m = parseThrow(raw, this.world);
     if (!m) return;
     const p = this.actor(client, m.epoch);
     if (!p) return;
     this.applyPose(p, m);
-    this.attackShoot(client.sessionId, p, m, Date.now());
+    this.throwFrom(client.sessionId, p, m, Date.now(), m.charge);
   }
 
-  /** Server-authoritative gun shot for humans and bots alike (rate-limited per shooter). */
-  private attackShoot(id: string, p: PlayerSchema, pose: PlayerPose, now: number): void {
+  /** Server-authoritative grenade throw: stock, carrier lock and rate limit checked here; `charge` (0..1) sets the throw speed. */
+  private throwFrom(id: string, p: PlayerSchema, pose: PlayerPose, now: number, charge: number): void {
     const meta = this.meta.get(id)!;
-    // CTF: a flag carrier is melee-only.
     if (this.ctf && carriedFlag(this.flagStates(), id)) return;
-    if (now - meta.lastShotAt < GUN_SERVER_MIN_INTERVAL_MS) return;
-    const fired = this.takeRound(id, meta, now);
-    this.syncFlags(id, p, now);
-    if (!fired) return;
-    meta.lastShotAt = now;
-    if (p.weapon !== WEAPON_GUN) p.weapon = WEAPON_GUN;
+    if (p.grenades <= 0 || now - meta.lastThrowAt < GRENADE_SERVER_MIN_INTERVAL_MS) return;
+    meta.lastThrowAt = now;
+    p.grenades--;
+    if (p.weapon !== WEAPON_GRENADE) p.weapon = WEAPON_GRENADE;
     this.dropProtection(p, meta);
+    const g = throwGrenade(pose, now, charge);
+    const gid = `g${++this.grenadeSeq}`;
+    const sch = new GrenadeSchema();
+    sch.ownerId = id;
+    sch.x = g.x;
+    sch.y = g.y;
+    sch.z = g.z;
+    this.state.grenades.set(gid, sch);
+    this.grenadeSim.set(gid, g);
+  }
 
-    const result = resolveShot(this.world, pose, this.targetsExcluding(id, now), GUN_RANGE);
-    const shot: ShotMsg = {
-      shooterId: id,
-      from: result.from,
-      to: result.to,
-      hitPlayerId: result.hitPlayerId ?? '',
-      part: result.part ?? '',
-      damage: result.damage,
-    };
-    this.broadcast(MSG.shot, shot);
-    if (result.hitPlayerId) this.damage(id, result.hitPlayerId, result.damage, WEAPON_GUN, result.part === 'head');
+  /** Advance every grenade; burst the ones whose fuse ran out. */
+  private tickGrenades(now: number): void {
+    if (this.grenadeSim.size === 0) return;
+    const dt = SERVER_TICK_MS / 1000 / GRENADE_SUBSTEPS;
+    for (const [gid, g0] of [...this.grenadeSim]) {
+      let g = g0;
+      for (let i = 0; i < GRENADE_SUBSTEPS; i++) g = stepGrenade(this.world, g, dt);
+      this.grenadeSim.set(gid, g);
+      const sch = this.state.grenades.get(gid);
+      if (sch) {
+        sch.x = g.x;
+        sch.y = g.y;
+        sch.z = g.z;
+      }
+      if (grenadeFuseDone(g, now)) this.explode(gid, g, now);
+    }
+  }
+
+  private explode(gid: string, g: GrenadeState, now: number): void {
+    const owner = this.state.grenades.get(gid)?.ownerId ?? '';
+    this.grenadeSim.delete(gid);
+    this.state.grenades.delete(gid);
+    const at = { x: g.x, y: g.y, z: g.z };
+    // Enemies (no friendly fire in CTF) plus the thrower: your own grenade hurts you.
+    const targets = this.targetsExcluding(owner, now);
+    const self = this.state.players.get(owner);
+    if (self && this.targetable(owner, self, now)) targets.push({ id: owner, pose: { x: self.x, y: self.y, z: self.z } });
+    const victims = explosionVictims(this.world, at, targets);
+    const msg: ExplodeMsg = { ownerId: owner, ...at, victims };
+    this.broadcast(MSG.explode, msg);
+    for (const v of victims) this.damage(owner, v.id, v.damage, WEAPON_GRENADE, false);
   }
 
   /** Player started holding the melee charge: remember when, so a later heavy swing can be verified. */
   private handleCharge(client: Client, raw: unknown): void {
-    if (!weaponAllowed(this.weaponMode, WEAPON_SWORD)) return;
+    if (!weaponAllowed(this.weaponMode, WEAPON_MELEE)) return;
     const epoch = parseCharge(raw);
     if (epoch === null) return;
     const p = this.actor(client, epoch);
     if (!p) return;
     const now = Date.now();
     this.meta.get(client.sessionId)!.chargeStartAt = now;
-    if (p.weapon !== WEAPON_SWORD) p.weapon = WEAPON_SWORD;
+    if (p.weapon !== WEAPON_MELEE) p.weapon = WEAPON_MELEE;
     this.syncFlags(client.sessionId, p, now);
   }
 
   /** Player let go before the heavy was ready: no swing, just stop showing the wind-up. */
   private handleChargeCancel(client: Client, raw: unknown): void {
-    if (!weaponAllowed(this.weaponMode, WEAPON_SWORD)) return;
+    if (!weaponAllowed(this.weaponMode, WEAPON_MELEE)) return;
     const epoch = parseChargeCancel(raw);
     if (epoch === null) return;
     const p = this.actor(client, epoch);
@@ -566,21 +694,28 @@ export class ArenaRoom extends Room<RoomState> {
     this.syncFlags(client.sessionId, p, Date.now());
   }
 
-  /** Training range: swap the melee slot on request (a match makes you find a drop instead). */
-  private handleSelectMelee(client: Client, raw: unknown): void {
-    if (!meleeSelectable(this.mode, this.weaponMode)) return;
-    const m = parseSelectMelee(raw);
+  /** Training range: arm any melee / primary kind on request (a match makes you find a drop instead). */
+  private handleSelectWeapon(client: Client, raw: unknown): void {
+    const m = parseSelectWeapon(raw);
     if (!m) return;
+    if (m.slot === WEAPON_MELEE && !meleeSelectable(this.mode, this.weaponMode)) return;
+    if (m.slot !== WEAPON_MELEE && !(this.mode === 'training' && weaponAllowed(this.weaponMode, m.slot))) return;
     const p = this.actor(client, m.epoch);
-    if (!p || p.melee === m.melee) return;
-    p.melee = m.melee;
-    // A new weapon has its own charge timing: forget any wind-up in progress.
-    this.meta.get(client.sessionId)!.chargeStartAt = 0;
+    if (!p) return;
+    const meta = this.meta.get(client.sessionId)!;
+    if (m.slot === WEAPON_MELEE) {
+      if (p.melee === m.kind) return;
+      p.melee = m.kind;
+      // A new weapon has its own charge timing: forget any wind-up in progress.
+      meta.chargeStartAt = 0;
+    } else {
+      this.armGun(p, meta, m.slot, m.kind as GunKind);
+    }
     this.syncFlags(client.sessionId, p, Date.now());
   }
 
   private handleSwing(client: Client, raw: unknown): void {
-    if (!weaponAllowed(this.weaponMode, WEAPON_SWORD)) return;
+    if (!weaponAllowed(this.weaponMode, WEAPON_MELEE)) return;
     const m = parseSwing(raw, this.world);
     if (!m) return;
     const p = this.actor(client, m.epoch);
@@ -607,7 +742,7 @@ export class ArenaRoom extends Room<RoomState> {
     if (now - meta.lastSwingAt < attackSpec(kind, meta.lastAttack).serverMinIntervalMs) return;
     meta.lastSwingAt = now;
     meta.lastAttack = attack;
-    if (p.weapon !== WEAPON_SWORD) p.weapon = WEAPON_SWORD;
+    if (p.weapon !== WEAPON_MELEE) p.weapon = WEAPON_MELEE;
     this.dropProtection(p, meta);
     const swung: SwungMsg = { attackerId: id, attack, melee: kind };
     this.broadcast(MSG.swung, swung);
@@ -616,7 +751,7 @@ export class ArenaRoom extends Room<RoomState> {
       const dmg = swordDamage(victim.part, attack, kind, charge);
       const hit: HitMsg = { attackerId: id, victimId: victim.id, part: victim.part, damage: dmg, attack, melee: kind };
       this.broadcast(MSG.hit, hit);
-      this.damage(id, victim.id, dmg, WEAPON_SWORD, victim.part === 'head', kind);
+      this.damage(id, victim.id, dmg, WEAPON_MELEE, victim.part === 'head', kind);
     }
   }
 
@@ -626,9 +761,9 @@ export class ArenaRoom extends Room<RoomState> {
     this.nextDropAt = now + this.dropIntervalMin + this.rng() * (this.dropIntervalMax - this.dropIntervalMin);
   }
 
-  /** Drops exist only where the melee slot is usable. */
+  /** Something drops in every mode (guns/grenades, knives, or both). */
   private get dropsEnabled(): boolean {
-    return weaponAllowed(this.weaponMode, WEAPON_SWORD);
+    return dropPool(this.weaponMode).length > 0;
   }
 
   private spawnDrop(now: number): void {
@@ -637,7 +772,9 @@ export class ArenaRoom extends Room<RoomState> {
     const spot = pickDropSpot(this.world, this.rng, avoid, this.spawnPoints, this.dropZone);
     if (!spot) return;
     const d = new DropSchema();
-    d.kind = pickDropKind(this.rng);
+    const k = pickDropKind(this.rng, this.weaponMode);
+    d.slot = k.slot;
+    d.kind = k.kind;
     d.x = spot.x;
     d.y = spot.y;
     d.z = spot.z;
@@ -663,34 +800,48 @@ export class ArenaRoom extends Room<RoomState> {
     for (const [pid, p] of this.state.players) {
       if (!p.alive) continue;
       for (const [did, d] of this.state.drops) {
-        if (!canPickUp(p, d)) continue;
+        if (!canPickUp(p, d) || !this.givePickup(pid, p, d)) continue;
         this.removeDrop(did);
-        p.melee = d.kind;
-        const msg: PickupMsg = { playerId: pid, melee: d.kind as MeleeKind };
+        const msg: PickupMsg = { playerId: pid, slot: d.slot as Weapon, kind: d.kind };
         this.broadcast(MSG.pickup, msg);
         break;
       }
     }
   }
 
+  /** Give a drop to `p`; false if they cannot take it (grenades already full). */
+  private givePickup(pid: string, p: PlayerSchema, d: DropSchema): boolean {
+    const meta = this.meta.get(pid)!;
+    if (d.slot === WEAPON_GRENADE) {
+      if (p.grenades >= GRENADE_MAX) return false;
+      p.grenades = Math.min(GRENADE_MAX, p.grenades + d.kind);
+    } else if (d.slot === WEAPON_PRIMARY || d.slot === WEAPON_TASER) {
+      this.armGun(p, meta, d.slot as Weapon, d.kind as GunKind);
+    } else {
+      p.melee = d.kind;
+    }
+    return true;
+  }
+
   // --- combat / lifecycle ---
 
   /** Subtract HP from a living victim; a drop to 0 is a kill credited to the attacker. */
-  private damage(attackerId: string, victimId: string, amount: number, weapon: Weapon, headshot: boolean, melee: MeleeKind = MELEE_SWORD): void {
+  private damage(attackerId: string, victimId: string, amount: number, weapon: Weapon, headshot: boolean, melee: MeleeKind = MELEE_SWORD, gun: GunKind = GUN_NONE): void {
     const victim = this.state.players.get(victimId);
     if (!victim || !this.targetable(victimId, victim, Date.now())) return;
     victim.hp = Math.max(0, victim.hp - amount);
-    if (victim.hp === 0) this.kill(attackerId, victimId, weapon, headshot, melee);
+    if (victim.hp === 0) this.kill(attackerId, victimId, weapon, headshot, melee, gun);
   }
 
-  private kill(killerId: string, victimId: string, weapon: Weapon, headshot: boolean, melee: MeleeKind = MELEE_SWORD): void {
+  private kill(killerId: string, victimId: string, weapon: Weapon, headshot: boolean, melee: MeleeKind = MELEE_SWORD, gun: GunKind = GUN_NONE): void {
     const victim = this.state.players.get(victimId);
     if (!victim || !victim.alive) return;
     const killer = this.state.players.get(killerId);
     const now = Date.now();
     victim.alive = false;
     victim.deaths++;
-    if (killer) killer.kills++;
+    // Blowing yourself up is a death, not a kill.
+    if (killer && killerId !== victimId) killer.kills++;
     const meta = this.meta.get(victimId);
     if (meta) meta.respawnAt = now + this.respawnMs;
     this.dropCarriedFlag(victimId, victim, now);
@@ -703,6 +854,7 @@ export class ArenaRoom extends Room<RoomState> {
       victimName: victim.name,
       weapon,
       melee,
+      gun,
       headshot,
     };
     this.broadcast(MSG.kill, msg);
@@ -736,15 +888,24 @@ export class ArenaRoom extends Room<RoomState> {
     p.alive = true;
     p.hp = MAX_HP;
     p.weapon = defaultWeapon(this.weaponMode);
-    // A picked-up drop is lost on death: everyone comes back with the plain sword.
+    // Picked-up drops are lost on death: everyone comes back with the plain sword, an empty primary slot and fresh grenades.
     p.melee = MELEE_SWORD;
+    p.gun = GUN_NONE;
+    p.taser = GUN_NONE;
+    p.grenades = GRENADE_START;
     p.shielded = this.spawnProtectMs > 0;
     const meta = this.meta.get(id);
     if (meta) {
       meta.chargeStartAt = 0;
       meta.protectedUntil = this.spawnProtectMs > 0 ? Date.now() + this.spawnProtectMs : 0;
-      meta.ammo = GUN_MAG_SIZE;
-      meta.reloadDoneAt = 0;
+      meta.ammo = freshAmmo();
+      meta.reloadDoneAt = freshReloads();
+      // Deathmatch with guns: every (re)spawn rolls a random primary (held right away); other modes start with the slot empty.
+      const primary = spawnPrimary(this.mode, this.weaponMode, this.rng);
+      if (primary !== GUN_NONE) {
+        this.armGun(p, meta, WEAPON_PRIMARY, primary);
+        p.weapon = WEAPON_PRIMARY;
+      }
     }
     p.spawnEpoch = (p.spawnEpoch + 1) & 0xffff;
     const bot = this.bots.get(id);
@@ -769,6 +930,7 @@ export class ArenaRoom extends Room<RoomState> {
       this.syncFlags(id, p, now);
     }
     this.tickDrops(now);
+    this.tickGrenades(now);
     this.tickFlags(now);
   }
 

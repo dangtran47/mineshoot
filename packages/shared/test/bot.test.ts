@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { createBot, botSkillProfile } from '../src/bot';
+import type { BotView } from '../src/bot';
 import { DEFAULT_BOT_SKILL, isBotSkill } from '../src/protocol';
 import type { BotSkill } from '../src/protocol';
 import { createRng } from '../src/rng';
 import { Block } from '../src/types';
 import { createWorld, setBlock } from '../src/world';
 import { createPhysState, stepPlayer } from '../src/playerPhysics';
-import { WEAPON_GUN, WEAPON_SWORD } from '../src/protocol';
+import { WEAPON_PISTOL, WEAPON_MELEE, WEAPON_PRIMARY } from '../src/protocol';
+import { GUN_NONE, GUN_RIFLE, GUN_TASER } from '../src/guns';
 import { PHYSICS_DT, SERVER_TICK_MS } from '../src/constants';
 import { generateWorld, PLATEAU_MAX, PLATEAU_MIN } from '../src/worldgen';
 
@@ -67,7 +69,7 @@ describe('bot', () => {
     const self = createPhysState(32, 1, 40, 0);
     let d = bot.compute(w, { self, enemies: [{ id: 'e', x: 32, y: 1, z: 38.5 }], now: 0 }, 0.05);
     d = bot.compute(w, { self, enemies: [{ id: 'e', x: 32, y: 1, z: 38.5 }], now: 1000 }, 0.05);
-    expect(d.weapon).toBe(WEAPON_SWORD);
+    expect(d.weapon).toBe(WEAPON_MELEE);
     expect(d.swing).toBe(true);
   });
 
@@ -87,18 +89,6 @@ describe('bot', () => {
     expect(run()).toEqual(run());
   });
 
-  it('gun-only room: keeps the gun and shoots even up close', () => {
-    const w = flat();
-    const bot = createBot(createRng(3), waypoints, { weapons: 'gun' });
-    const self = createPhysState(32, 1, 40, 0);
-    const enemies = [{ id: 'e', x: 32, y: 1, z: 38.5 }];
-    bot.compute(w, { self, enemies, now: 0 }, 0.05);
-    const d = bot.compute(w, { self, enemies, now: 1000 }, 0.05);
-    expect(d.weapon).toBe(WEAPON_GUN);
-    expect(d.swing).toBe(false);
-    expect(d.shoot).toBe(true);
-  });
-
   it('sword-only room: never draws the gun, closes in and swings once in range', () => {
     const w = flat();
     const bot = createBot(createRng(4), waypoints, { weapons: 'sword' });
@@ -108,13 +98,34 @@ describe('bot', () => {
     for (let i = 0; i < 100; i++) {
       const now = i * 50;
       const d = bot.compute(w, { self, enemies, now }, 0.05);
-      expect(d.weapon).toBe(WEAPON_SWORD);
+      expect(d.weapon).toBe(WEAPON_MELEE);
       expect(d.shoot).toBe(false);
       self = stepPlayer(w, { ...self, yaw: d.yaw, pitch: d.pitch }, d.input, 0.05);
       if (d.swing && swungAt < 0) swungAt = now;
     }
     expect(swungAt).toBeGreaterThan(0);
     expect(Math.hypot(self.x - enemies[0].x, self.z - enemies[0].z)).toBeLessThan(3);
+  });
+});
+
+describe('bot guns', () => {
+  /** Enemy `dist` blocks down -Z of a bot standing at (32, 1, 40) facing it, clear LOS. */
+  const enemyInSight = (dist: number) => ({ self: createPhysState(32, 1, 40, 0), enemies: [{ id: 'e', x: 32, y: 1, z: 40 - dist }], now: 10_000 });
+  it('brings out the primary gun when it holds one, else the pistol', () => {
+    const w = flat();
+    const bot = createBot(createRng(3), waypoints, { weapons: 'all', skill: 'hard' });
+    const view = enemyInSight(30);
+    expect(bot.compute(w, { ...view, gun: GUN_NONE }, 0.05).weapon).toBe(WEAPON_PISTOL);
+    expect(bot.compute(w, { ...view, gun: GUN_RIFLE }, 0.05).weapon).toBe(WEAPON_PRIMARY);
+  });
+  it('a taser bot closes to point blank before firing', () => {
+    const w = flat();
+    const bot = createBot(createRng(3), waypoints, { weapons: 'all', skill: 'hard' });
+    const view: BotView = { ...enemyInSight(12), gun: GUN_TASER };
+    let d = bot.compute(w, view, 0.05);
+    for (let i = 0; i < 40; i++) d = bot.compute(w, { ...view, now: 10_000 + i * 50 }, 0.05);
+    expect(d.shoot).toBe(false); // out of taser range: no shot
+    expect(d.input.forward).toBeGreaterThan(0); // closing in
   });
 });
 
@@ -177,20 +188,10 @@ describe('bot (capture the flag)', () => {
     for (let i = 0; i < 100; i++) {
       const d = bot.compute(w, { self, enemies, now: i * 50, goal, carrying: true }, 0.05);
       expect(d.shoot).toBe(false);
-      expect(d.weapon).toBe(WEAPON_SWORD);
+      expect(d.weapon).toBe(WEAPON_MELEE);
       self = stepPlayer(w, { ...self, yaw: d.yaw, pitch: d.pitch }, d.input, 0.05);
     }
     expect(self.z).toBeLessThan(15); // pushed on past the enemy toward the goal
-  });
-
-  it('a carrier in a gun-only room cannot attack at all', () => {
-    const w = flat();
-    const bot = createBot(createRng(6), waypoints, { weapons: 'gun' });
-    const self = createPhysState(32, 1, 40, 0);
-    const d = bot.compute(w, { self, enemies: [{ id: 'e', x: 32, y: 1, z: 38.5 }], now: 1000, goal: { x: 32, y: 1, z: 5 }, carrying: true }, 0.05);
-    expect(d.shoot).toBe(false);
-    expect(d.swing).toBe(false);
-    expect(d.weapon).toBe(WEAPON_GUN);
   });
 
   it('a carrier still swings at an enemy within sword reach', () => {
@@ -200,7 +201,7 @@ describe('bot (capture the flag)', () => {
     const view = { self, enemies: [{ id: 'e', x: 32, y: 1, z: 38.5 }], goal: { x: 32, y: 1, z: 5 }, carrying: true };
     bot.compute(w, { ...view, now: 0 }, 0.05);
     const d = bot.compute(w, { ...view, now: 1000 }, 0.05);
-    expect(d.weapon).toBe(WEAPON_SWORD);
+    expect(d.weapon).toBe(WEAPON_MELEE);
     expect(d.swing).toBe(true);
   });
 });

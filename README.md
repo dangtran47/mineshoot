@@ -34,7 +34,7 @@ around, and shoot each other for 3–15 minutes. Then argue about the K/D table.
 - Voxel arena (64×24×64 blocks) generated from a seed — hills, a raised
   central plateau, border walls. Every room gets a fresh world.
 - Blocky humanoids in eight colours with nametags, walk/attack animations,
-  first-person view models for the gun and every melee weapon.
+  first-person view models for every gun, the grenade and every melee weapon.
 - HUD with health, ammo, timer, kill feed, crosshair, damage vignette,
   floating damage numbers, voxel blood spray, and a Tab scoreboard.
 - **Zero shipped assets**: the block texture atlas is painted onto a canvas at
@@ -46,7 +46,7 @@ around, and shoot each other for 3–15 minutes. Then argue about the K/D table.
 2. **Create room** — pick a name, duration (3/5/10/15 min), the **room
    type** (Deathmatch, Training range or Capture the Flag), how many **AI
    bots** (0–15) and how sharp they are (**Easy / Normal / Hard**), and the
-   **allowed weapons** (Gun + Sword, Gun only, Sword only); a CTF room also
+   **allowed weapons** (Guns + Sword, Sword only); a CTF room also
    picks the captures needed to win (3/5/10). Or
    **Join** an existing room from the public list — CTF rooms offer **Red /
    Blue / Auto** buttons so you can pick a side.
@@ -59,10 +59,10 @@ around, and shoot each other for 3–15 minutes. Then argue about the K/D table.
 | --- | --- |
 | Mouse | Aim (click to lock the pointer, `Esc` to release) |
 | `W A S D` / `Space` | Move / jump |
-| `LMB` (tap or hold) | Shoot (gun) · **light** melee slash — keeps swinging while held, alternating left / right |
-| `RMB` hold, release | **Heavy** melee blow — each weapon's own signature move (overhead, execute, iaido, reap, head-hunt); full damage once fully charged, proportional if you let go earlier |
-| `R` | Reload (automatic when the magazine is empty) |
-| `1` / `2` / mouse wheel | Switch gun / melee |
+| `LMB` (tap or hold) | Shoot (pistol: one per click; rifle/SMG keep firing while held) · hold to wind up a grenade throw, release to throw · **light** melee slash — keeps swinging while held, alternating left / right |
+| `RMB` hold, release | **Heavy** melee blow — each weapon's own signature move (overhead, execute, iaido, reap, head-hunt); full damage once fully charged, proportional if you let go earlier · with the sniper: hold to look through the **scope** |
+| `R` | Reload the held gun (automatic when the magazine is empty) |
+| `1`–`5` / mouse wheel | Switch primary gun / pistol / melee / grenade / taser (empty slots are skipped) |
 | `G` | Capture the Flag: put the flag you carry down (hand it to a teammate) |
 | `Tab` (hold) | Scoreboard |
 
@@ -75,8 +75,47 @@ Everyone has **100 HP** and respawns **3 s** after dying with **2 s of spawn
 protection** (you cannot be targeted or damaged; attacking ends it early).
 Damage depends on where you hit:
 
-- **Gun** — instant hitscan, 10-round magazine, unlimited reloads.
-  Head 100 / torso 30 / legs 15.
+Everyone carries **five weapon slots**: `1` a **primary gun**, `2` the
+**pistol**, `3` the melee weapon, `4` **grenades** (2 at spawn, at most 4),
+`5` the **taser** (empty until you pick one up). In a **deathmatch** every
+(re)spawn rolls a random primary; in every other mode the primary slot starts
+empty and is filled from drops.
+
+- **Pistol** — instant hitscan, one shot per click, 10-round magazine,
+  unlimited reloads. Head 100 / torso 30 / legs 15.
+- **Primary guns** — all hitscan, each with its own magazine, cooldown and
+  reload; picked up from drops (they replace the primary you hold and are lost
+  on death). In a **deathmatch** every (re)spawn also rolls a **random
+  primary** (rifle / SMG / shotgun / sniper — never the taser) and you come
+  back holding it; team modes such as CTF keep the pistol-only spawn, and the
+  training range lets you pick your own.
+
+  | Gun | Mag | Cooldown | Reload | Range | Dmg head/torso/legs | Twist |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | Rifle | 25 | 150 ms | 2.0 s | 60 | 70 / 25 / 12 | full-auto, slight spread (1.5°); spray climbs ~1.3°/shot then S-drifts right, then left |
+  | SMG | 35 | 80 ms | 1.8 s | 40 | 40 / 15 / 8 | full-auto, wide spread (3°); soft ~0.7°/shot climb with a gentle zigzag |
+  | Shotgun | 6 | 900 ms | 2.5 s | 18 | 35 / 20 / 10 **per pellet** | 8 pellets in a 6° cone — one-shots up close, useless far; 3° kick per shot |
+  | Sniper | 4 | 1.2 s | 2.8 s | 60 | 100 / 100 / 60 | `RMB` opens the round scope (×3); no crosshair from the hip; body shots kill; 4° kick per shot |
+
+  **Recoil** — every shot kicks the camera along a **fixed per-gun pattern**
+  (the pistol nudges 1° up; the taser doesn't kick), so the spray is
+  learnable: pull the mouse against the pattern to keep a burst on target.
+  The part you didn't compensate settles back to your original aim shortly
+  after you stop firing (25°/s, starting after max(300 ms, 2 × cooldown)).
+  Recoil moves your real aim — the next bullet goes where the kick put you.
+
+- **Taser** (slot `5`, from drops) — 2 charges, no reload, range 5, kills in
+  one hit anywhere; **the weapon vanishes after its second shot**. It has its
+  own slot, so it never costs you your primary gun.
+
+- **Grenades** — **hold `LMB` to wind up and release to throw**: a tap lobs
+  short (speed 10), a full **0.9 s** hold throws hard (speed 24), and you can
+  hold as long as you like — switching weapons while holding puts the grenade
+  back unthrown. They fly ballistically, bounce off blocks and burst after a
+  **2.5 s** fuse: 100 damage at the centre falling linearly to 20 at the
+  **4-block** edge; walls block the blast, and your own grenade hurts you too
+  (no blocks are destroyed). Spawn with 2, carry at most 4; `Grenades ×2`
+  drops refill.
 - **Sword** — short-range melee. `LMB` is a quick light slash (head 45 / body
   30, hits the nearest target in a 56° cone); hold it to keep slashing every
   0.5 s, left and right in turn. Hold `RMB` to charge (you walk 30 % slower)
@@ -89,11 +128,15 @@ Damage depends on where you hit:
 
 ### Weapon drops
 
-In any room where melee is allowed, **weapon drops** land on the central
-plateau every 25–45 s (at most 3 on the ground, gone after 60 s if nobody takes
-them; a CTF room drops on its central plateau every 12–22 s, up to 5). Walk over the glowing column to pick one up: it replaces your sword until
-you die. Bots pick them up too. Every drop beats the sword somewhere and pays
-for it somewhere else:
+**Weapon drops** land on the central plateau every 25–45 s (at most 3 on the
+ground, gone after 60 s if nobody takes them; a CTF room drops on its central
+plateau every 12–22 s, up to 5). What drops follows the room's weapon rule:
+**Guns + Sword** rooms draw from the full pool — the four **primaries**, the
+**taser**, **grenade packs** (+2, skipped while you are full) and the four
+blades below; **Sword only** rooms drop blades alone. Walk over the glowing column to pick one up: a gun
+fills slot `1` (replacing the primary you hold), a blade replaces your sword —
+both until you die. Bots pick them up too. Every blade beats the sword
+somewhere and pays for it somewhere else:
 
 | Weapon | Reach | Light / heavy cone | Light dmg (head/body) | Heavy (`RMB`) | Heavy dmg | Cooldown | Charge | Twist |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -112,7 +155,7 @@ and "shutdown" when you end someone's streak.
 A room can be created with 0–15 bots. They run entirely on the server using
 the same shared physics and combat rules as humans: wander between spawn
 points, hunt the nearest enemy in line of sight, keep mid-range while strafing,
-aim with a reaction delay and distance-scaled error, shoot the gun and switch
+aim with a reaction delay and distance-scaled error, shoot whatever gun they hold (closing to point-blank with a shotgun or taser) and switch
 to melee up close. They find their way with a grid pathfinder (up ramps and
 stairs one block at a time, down drops of up to 4 blocks, never through
 corners), so they climb the plateau via its ramps instead of hopping at the
@@ -140,14 +183,16 @@ weapon in peace. Same arena and rules as a match, except:
   like drops), turn to face you, never attack, and everyone respawns after
   **1 s** instead of 3 s so the range refills at once. Pick 0–15 of them; the
   lobby fills in 3 when you leave the count at zero.
-- Keys **`3`–`7`** put any melee weapon straight into slot 2 — Sword, Battle
-  Axe, Katana, Scythe, Pickaxe — no drop needed (drops still fall too). Outside
-  a training range those keys do nothing; drops remain the only way to a
-  better blade.
-- The gun, magazine, spawn protection, timer, kill feed and scoreboard work
-  as usual, so a training range with friends is a fine warm-up.
+- Keys **`6`–`0`** put any melee weapon straight into slot 3 — Sword, Battle
+  Axe, Katana, Scythe, Pickaxe — and keys **`Z X C V`** put any primary gun
+  straight into slot 1 (Rifle, SMG, Shotgun, Sniper) with **`B`** arming the
+  taser in slot 5 — no drop needed (drops still fall too). Outside a training
+  range those keys do nothing; drops remain the only way to a better weapon
+  (except the deathmatch spawn roll).
+- The guns, magazines, grenades, spawn protection, timer, kill feed and
+  scoreboard work as usual, so a training range with friends is a fine warm-up.
 
-The offline sandbox (`?offline`) also honours keys `3`–`7`.
+The offline sandbox (`?offline`) also honours keys `6`–`0` and `Z X C V B`.
 
 ### Capture the Flag
 
@@ -169,7 +214,7 @@ always walkable.
   zone** (within 4 blocks of your flag stand) **while your own flag is home** to
   score. Everyone can see a carried flag: a light column follows the carrier.
 - **Carrying.** You walk at **75 %** speed, are **melee-only** (the gun will not
-  fire; in a gun-only room a carrier cannot attack at all) and can hand the
+  fire) and can hand the
   flag off with **`G`** (you cannot pick it straight back up for 1.5 s).
 - **Dropped flags.** A killed (or leaving) carrier drops the flag where they
   stood. Teammates pick it up and carry on; the owning team picks it up too
@@ -193,9 +238,11 @@ always walkable.
   away, everyone but the carrier goes to get it back wherever it is (the
   carrier waits at home).
 
-Weapon modes (`Gun + Sword` / `Gun only` / `Sword only`) apply as usual, and
-weapon drops fall on the central plateau more often than in the arena (see
-above).
+Weapon modes (`Guns + Sword` / `Sword only`) apply as usual, and weapon
+drops (guns, grenade packs and/or blades per the weapon mode) fall on the
+central plateau more often than in the arena (see above). CTF spawns are
+always pistol-only — the deathmatch random-primary roll does not apply to
+team modes.
 
 ### Tuning
 
@@ -228,7 +275,7 @@ second browser / a friend on your LAN) and join it from the list.
 Handy extras:
 
 - `http://localhost:5173/?offline` — offline sandbox (walk around, try every
-  melee weapon with keys 3–7, no server).
+  melee weapon with keys 6–0 and every gun with Z X C V B, no server).
 - `make start LAG=50` — simulate 50 ms round-trip latency.
 - `make server` / `make client` — run only one side.
 

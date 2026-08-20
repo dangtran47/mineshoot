@@ -10,15 +10,16 @@ import {
   parsePose,
   parseReload,
   parseRoomMode,
-  parseSelectMelee,
+  parseSelectWeapon,
   parseShoot,
   parseSwing,
+  parseThrow,
   parseTeam,
   parseWeaponMode,
   sanitizeName,
   sanitizeRoomName,
 } from '../src/rooms/validate';
-import { ATTACK_HEAVY, ATTACK_LIGHT, CTF_DEFAULT_CAPTURE_LIMIT, MAX_BOTS, MELEE_KATANA, MELEE_SWORD, TEAM_BLUE, TEAM_NONE, TEAM_RED } from '@mineshoot/shared';
+import { ATTACK_HEAVY, ATTACK_LIGHT, CTF_DEFAULT_CAPTURE_LIMIT, GUN_PISTOL, GUN_SNIPER, MAX_BOTS, MELEE_KATANA, MELEE_SWORD, TEAM_BLUE, TEAM_NONE, TEAM_RED, WEAPON_GRENADE, WEAPON_MELEE, WEAPON_PISTOL, WEAPON_PRIMARY } from '@mineshoot/shared';
 
 describe('sanitizeName', () => {
   it('trims, strips junk, limits length, falls back', () => {
@@ -69,10 +70,26 @@ describe('parsePose / parseShoot', () => {
     expect(parseShoot({ ...good, x: 200 }, { sx: 96, sz: 48 })!.x).toBe(95.5);
     expect(parseSwing({ ...good, x: 200, attack: ATTACK_LIGHT }, { sx: 96, sz: 48 })!.x).toBe(95.5);
   });
-  it('parseShoot ignores weapon', () => {
-    const s = parseShoot(good)!;
-    expect(s.epoch).toBe(1);
-    expect((s as { weapon?: unknown }).weapon).toBeUndefined();
+  it('parseShoot keeps a gun slot and defaults to the pistol', () => {
+    expect(parseShoot({ ...good, weapon: WEAPON_PRIMARY })!.weapon).toBe(WEAPON_PRIMARY);
+    expect(parseShoot(good)!.weapon).toBe(WEAPON_PISTOL);
+    expect(parseShoot({ ...good, weapon: WEAPON_MELEE })!.weapon).toBe(WEAPON_PISTOL);
+    expect(parseShoot({ ...good, weapon: WEAPON_GRENADE })!.weapon).toBe(WEAPON_PISTOL);
+  });
+  it('parseThrow is a pose-like message with a clamped hold charge', () => {
+    expect(parseThrow(good)).toMatchObject({ x: good.x, epoch: 1, charge: 0 });
+    expect(parseThrow({ ...good, charge: 0.6 })!.charge).toBeCloseTo(0.6);
+    expect(parseThrow({ ...good, charge: 9 })!.charge).toBe(1);
+    expect(parseThrow({ ...good, charge: -2 })!.charge).toBe(0);
+    expect(parseThrow({ ...good, charge: 'x' })!.charge).toBe(0);
+    expect(parseThrow({ ...good, x: 'a' })).toBeNull();
+  });
+  it('parseReload accepts {epoch, weapon} for gun slots and a bare epoch for the pistol', () => {
+    expect(parseReload({ epoch: 3, weapon: WEAPON_PRIMARY })).toEqual({ epoch: 3, weapon: WEAPON_PRIMARY });
+    expect(parseReload(3)).toEqual({ epoch: 3, weapon: WEAPON_PISTOL });
+    expect(parseReload({ epoch: 3, weapon: WEAPON_MELEE })).toBeNull();
+    expect(parseReload({ epoch: 1.5, weapon: WEAPON_PISTOL })).toBeNull();
+    expect(parseReload('2')).toBeNull();
   });
   it('parseSwing reads attack as a known AttackKind (garbage → light)', () => {
     expect(parseSwing(good)!.attack).toBe(ATTACK_LIGHT);
@@ -88,8 +105,6 @@ describe('parsePose / parseShoot', () => {
     expect(parseCharge(1.5)).toBeNull();
     expect(parseCharge('1')).toBeNull();
     expect(parseCharge(undefined)).toBeNull();
-    expect(parseReload(2)).toBe(2);
-    expect(parseReload('2')).toBeNull();
     expect(parseChargeCancel(4)).toBe(4);
     expect(parseChargeCancel(null)).toBeNull();
   });
@@ -115,7 +130,7 @@ describe('parseBotCount', () => {
   });
 
   it('parseWeaponMode accepts only known modes', () => {
-    expect(parseWeaponMode('gun')).toBe('gun');
+    expect(parseWeaponMode('gun')).toBe('all'); // legacy value: falls back to the default
     expect(parseWeaponMode('sword')).toBe('sword');
     expect(parseWeaponMode('all')).toBe('all');
     expect(parseWeaponMode('laser')).toBe('all');
@@ -133,16 +148,19 @@ describe('parseBotCount', () => {
   });
 });
 
-describe('parseSelectMelee', () => {
-  it('needs an integer epoch and a known melee kind', () => {
-    expect(parseSelectMelee({ epoch: 3, melee: MELEE_KATANA })).toEqual({ epoch: 3, melee: MELEE_KATANA });
-    expect(parseSelectMelee({ epoch: 0, melee: MELEE_SWORD })).toEqual({ epoch: 0, melee: MELEE_SWORD });
-    expect(parseSelectMelee({ epoch: 1.5, melee: MELEE_KATANA })).toBeNull();
-    expect(parseSelectMelee({ epoch: 1, melee: 99 })).toBeNull();
-    expect(parseSelectMelee({ epoch: 1, melee: '2' })).toBeNull();
-    expect(parseSelectMelee({ epoch: 1 })).toBeNull();
-    expect(parseSelectMelee(null)).toBeNull();
-    expect(parseSelectMelee(2)).toBeNull();
+describe('parseSelectWeapon', () => {
+  it('takes melee kinds into the melee slot and primary kinds into the primary slot', () => {
+    expect(parseSelectWeapon({ epoch: 3, slot: WEAPON_MELEE, kind: MELEE_KATANA })).toEqual({ epoch: 3, slot: WEAPON_MELEE, kind: MELEE_KATANA });
+    expect(parseSelectWeapon({ epoch: 0, slot: WEAPON_MELEE, kind: MELEE_SWORD })).toEqual({ epoch: 0, slot: WEAPON_MELEE, kind: MELEE_SWORD });
+    expect(parseSelectWeapon({ epoch: 1, slot: WEAPON_PRIMARY, kind: GUN_SNIPER })).toEqual({ epoch: 1, slot: WEAPON_PRIMARY, kind: GUN_SNIPER });
+    expect(parseSelectWeapon({ epoch: 1, slot: WEAPON_PRIMARY, kind: GUN_PISTOL })).toBeNull();
+    expect(parseSelectWeapon({ epoch: 1, slot: WEAPON_GRENADE, kind: 2 })).toBeNull();
+    expect(parseSelectWeapon({ epoch: 1.5, slot: WEAPON_MELEE, kind: MELEE_KATANA })).toBeNull();
+    expect(parseSelectWeapon({ epoch: 1, slot: WEAPON_MELEE, kind: 99 })).toBeNull();
+    expect(parseSelectWeapon({ epoch: 1, slot: WEAPON_MELEE, kind: '2' })).toBeNull();
+    expect(parseSelectWeapon({ epoch: 1 })).toBeNull();
+    expect(parseSelectWeapon(null)).toBeNull();
+    expect(parseSelectWeapon(2)).toBeNull();
   });
 });
 

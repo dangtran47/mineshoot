@@ -7,14 +7,14 @@ import { formatTime } from '../hud/hud';
 const NICK_KEY = 'mineshoot.nick';
 const POLL_MS = 2000;
 
-const WEAPON_MODE_LABEL: Record<WeaponMode, string> = { all: 'Gun + Sword', gun: 'Gun only', sword: 'Sword only' };
+const WEAPON_MODE_LABEL: Record<WeaponMode, string> = { all: 'Guns + Sword', sword: 'Sword only' };
 const ROOM_MODE_LABEL: Record<RoomMode, string> = { match: 'Deathmatch', training: 'Training range', ctf: 'Capture the Flag' };
 const BOT_SKILL_LABEL: Record<BotSkill, string> = { easy: 'Easy bots', normal: 'Normal bots', hard: 'Hard bots' };
 /** Bots a training range gets when the creator left the bot count at zero (a range needs dummies). */
 const TRAINING_DEFAULT_BOTS = 3;
 /** Short badge for the room list ('' for the default rule). */
 export function weaponModeBadge(mode: WeaponMode | undefined): string {
-  return mode === 'gun' ? '\u{1F52B} only' : mode === 'sword' ? '\u{1F5E1}\uFE0F only' : '';
+  return mode === 'sword' ? '\u{1F5E1}\uFE0F only' : '';
 }
 /** Short badge for the room list ('' when there are no bots or they are the default level). */
 export function botSkillBadge(bots: number | undefined, skill: BotSkill | undefined): string {

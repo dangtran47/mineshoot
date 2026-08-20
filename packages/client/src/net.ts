@@ -17,8 +17,14 @@ export interface NetPlayer {
   deaths: number;
   spawnEpoch: number;
   weapon: number;
-  /** Melee weapon in slot 2 (MeleeKind). */
+  /** Melee weapon in slot 3 (MeleeKind). */
   melee: number;
+  /** Primary gun in slot 1 (GunKind; GUN_NONE = empty). */
+  gun: number;
+  /** Taser slot (key 5): GUN_TASER while held, GUN_NONE when empty / spent. */
+  taser: number;
+  /** Grenades in slot 4. */
+  grenades: number;
   color: number;
   isBot: boolean;
   shielded: boolean;
@@ -39,7 +45,16 @@ export interface NetFlag {
   carrierId: string;
 }
 export interface NetDrop {
+  /** Slot the drop fills (WEAPON_PRIMARY / WEAPON_MELEE / WEAPON_GRENADE); `kind` per slot. */
+  slot: number;
   kind: number;
+  x: number;
+  y: number;
+  z: number;
+}
+/** A live grenade (server-simulated). */
+export interface NetGrenade {
+  ownerId: string;
   x: number;
   y: number;
   z: number;
@@ -60,6 +75,7 @@ export interface NetRoomState {
   timeLeftMs: number;
   players: NetMap<NetPlayer>;
   drops: NetMap<NetDrop>;
+  grenades: NetMap<NetGrenade>;
   /** CTF: flags keyed by team ('1' red, '2' blue); empty otherwise. */
   flags: NetMap<NetFlag>;
   redScore: number;

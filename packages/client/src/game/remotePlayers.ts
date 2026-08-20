@@ -1,11 +1,12 @@
 import * as THREE from 'three';
-import { ATTACK_HEAVY, INTERP_DELAY_MS, attackSpec } from '@mineshoot/shared';
-import type { AttackKind, MeleeKind, Vec3, Weapon } from '@mineshoot/shared';
+import { ATTACK_HEAVY, INTERP_DELAY_MS, TEAM_NONE, attackSpec } from '@mineshoot/shared';
+import type { AttackKind, GunKind, MeleeKind, Vec3, Weapon, World } from '@mineshoot/shared';
 import { displayName } from '../net';
 import type { NetPlayer } from '../net';
 import { Humanoid } from '../render/humanoid';
 import { createNametag } from '../render/nametag';
 import { SnapshotBuffer } from './interpolation';
+import { nametagVisible } from './nametagVisibility';
 
 interface Remote {
   humanoid: Humanoid;
@@ -14,9 +15,21 @@ interface Remote {
   lastEpoch: number;
   weapon: Weapon;
   melee: MeleeKind;
+  gun: GunKind;
   visible: boolean;
   charging: boolean;
   reloading: boolean;
+  color: number;
+  team: number;
+}
+
+/** The local player's view for gating nametags: eye ray + own team. */
+export interface NametagAim {
+  world: World;
+  eye: Vec3;
+  /** Unit look direction. */
+  dir: Vec3;
+  team: number;
 }
 
 /** Renders every other player as an interpolated blocky humanoid. */
@@ -36,6 +49,7 @@ export class RemotePlayers {
     humanoid.setPose(p.x, p.y, p.z, p.yaw, p.pitch, 0);
     humanoid.setWeapon(p.weapon as Weapon);
     humanoid.setMelee(p.melee as MeleeKind);
+    humanoid.setGun(p.gun as GunKind);
     humanoid.setCharging(p.charging, performance.now());
     humanoid.setReloading(p.reloading);
     this.remotes.set(id, {
@@ -45,9 +59,12 @@ export class RemotePlayers {
       lastEpoch: p.spawnEpoch,
       weapon: p.weapon as Weapon,
       melee: p.melee as MeleeKind,
+      gun: p.gun as GunKind,
       visible: p.alive,
       charging: p.charging,
       reloading: p.reloading,
+      color: p.color,
+      team: p.team,
     });
     humanoid.group.visible = p.alive;
   }
@@ -91,6 +108,12 @@ export class RemotePlayers {
       r.reloading = p.reloading;
       r.humanoid.setReloading(p.reloading);
     }
+    if (p.color !== r.color) {
+      // Team switches recolour a player mid-match; repaint or everyone keeps the stale colour.
+      r.color = p.color;
+      r.humanoid.setColor(p.color);
+    }
+    r.team = p.team;
   }
 
   /** A remote player attacked with `melee`: play the attack's animation. */
@@ -110,7 +133,7 @@ export class RemotePlayers {
     return { x: p.x, y: p.y, z: p.z };
   }
 
-  update(now: number): void {
+  update(now: number, aim?: NametagAim): void {
     const dt = this.lastFrame ? (now - this.lastFrame) / 1000 : 0;
     this.lastFrame = now;
     const renderT = now - INTERP_DELAY_MS;
@@ -118,6 +141,12 @@ export class RemotePlayers {
       const s = r.buffer.sample(renderT);
       if (s) r.humanoid.setPose(s.x, s.y, s.z, s.yaw, s.pitch, dt);
       r.humanoid.update(now);
+      if (aim) {
+        // Teammates stay labelled; anyone else only while the crosshair rests on
+        // them with clear line of sight (tags must not reveal hidden players).
+        const teammate = aim.team !== TEAM_NONE && r.team === aim.team;
+        r.tag.sprite.visible = teammate || nametagVisible(aim.world, aim.eye, aim.dir, r.humanoid.group.position);
+      }
     }
   }
 

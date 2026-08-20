@@ -1,5 +1,5 @@
-import { ATTACK_HEAVY, GUN_MAG_SIZE, MAX_HP, MELEE_KINDS, MELEE_SWORD, TEAM_BLUE, TEAM_RED, WEAPON_GUN, meleeSelectable, meleeStats, splitTeams, teamName } from '@mineshoot/shared';
-import type { FlagStatus, MeleeKind, RankRow, RoomMode, Team, Weapon, WeaponMode } from '@mineshoot/shared';
+import { ATTACK_HEAVY, GRENADE_START, GUN_MAG_SIZE, GUN_NONE, MAX_HP, MELEE_KINDS, MELEE_SWORD, PRIMARY_KINDS, TEAM_BLUE, TEAM_RED, WEAPONS, WEAPON_GRENADE, WEAPON_MELEE, WEAPON_PISTOL, WEAPON_PRIMARY, WEAPON_TASER, gunSpec, isGunSlot, meleeSelectable, meleeStats, splitTeams, teamName, weaponAllowed } from '@mineshoot/shared';
+import type { FlagStatus, GunKind, MeleeKind, RankRow, RoomMode, Team, Weapon, WeaponMode } from '@mineshoot/shared';
 import { KillFeedModel, killFeedLine } from './killFeed';
 import type { FeedKind, KillLineInput } from './killFeed';
 import { awardBadges, iconSvg, weaponIcon } from './icons';
@@ -85,6 +85,9 @@ export class Hud {
   private readonly toastEl = el('div', 'toast hidden');
   private toastTimer = 0;
   private readonly ammo = el('div', 'ammo');
+  private readonly grenadesEl = el('div', 'grenades');
+  private readonly slotsEl = el('div', 'slots');
+  private readonly slotCells = new Map<Weapon, HTMLSpanElement>();
   private readonly shield = el('div', 'shield hidden', '🛡 Spawn protection');
   private readonly ping = el('div', 'ping');
   private readonly feedEl = el('div', 'feed');
@@ -97,6 +100,9 @@ export class Hud {
   private readonly carryEl = el('div', 'carry hidden');
   private readonly scoreboard = el('div', 'scoreboard hidden');
   private readonly hitmarker = el('div', 'hitmarker');
+  private readonly crosshair = el('div', 'crosshair');
+  /** Sniper scope: circular view with a black surround and its own reticle, shown while zoomed. */
+  private readonly scope = el('div', 'scope hidden');
   private readonly charge = el('div', 'charge hidden');
   private readonly chargeFill = el('div', 'fill');
   private readonly flash = el('div', 'dmg-flash');
@@ -114,7 +120,12 @@ export class Hud {
     const top = el('div', 'top');
     top.append(this.timer, this.roomName, this.ctfBar);
     const weapon = el('div', 'weapon');
-    weapon.append(this.weaponName, this.weaponLabel, this.ammo, this.weaponHint);
+    for (const [i, w] of WEAPONS.entries()) {
+      const cell = el('span', 'slot', String(i + 1));
+      this.slotCells.set(w, cell);
+      this.slotsEl.append(cell);
+    }
+    weapon.append(this.slotsEl, this.weaponName, this.weaponLabel, this.ammo, this.grenadesEl, this.weaponHint);
     const bar = el('div', 'bar');
     bar.append(this.healthFill);
     this.health.append(bar, this.healthText, this.dmgNumbers);
@@ -141,7 +152,8 @@ export class Hud {
 
     this.root.append(
       this.flash,
-      el('div', 'crosshair'),
+      this.crosshair,
+      this.scope,
       this.hitmarker,
       this.charge,
       top,
@@ -159,23 +171,23 @@ export class Hud {
       this.overlay,
     );
     parent.appendChild(this.root);
-    this.setWeapon(WEAPON_GUN);
+    this.setWeapon(WEAPON_PISTOL);
     this.setWeaponRules('all');
     this.setHealth(MAX_HP);
     this.setAmmo(GUN_MAG_SIZE, GUN_MAG_SIZE, false);
+    this.setGrenades(GRENADE_START);
   }
 
-  /** Controls hint under the weapon name, tailored to what the room allows (and to the training range's free melee choice). */
+  /** Controls hint under the weapon name, tailored to what the room allows (and to the training range's free weapon choice). */
   setWeaponRules(mode: WeaponMode, roomMode: RoomMode = 'match'): void {
-    const pick = meleeSelectable(roomMode, mode)
-      ? `3–7 pick melee: ${MELEE_KINDS.map((k) => meleeStats(k).name).join(' / ')}`
-      : 'grab weapon drops mid-arena';
+    const picks: string[] = [];
+    if (roomMode === 'training' && weaponAllowed(mode, WEAPON_PRIMARY)) picks.push(`Z X C V pick ${PRIMARY_KINDS.map((k) => gunSpec(k).name).join(' / ')} · B Taser`);
+    if (meleeSelectable(roomMode, mode)) picks.push(`6–0 pick melee: ${MELEE_KINDS.map((k) => meleeStats(k).name).join(' / ')}`);
+    const pick = picks.length > 0 ? picks.join(' · ') : 'grab weapon drops mid-arena';
     this.weaponHint.textContent =
-      mode === 'gun'
-        ? 'Gun only · R reload'
-        : mode === 'sword'
-          ? `Melee only · LMB slash (hold to repeat) · hold RMB to charge · ${pick}`
-          : `1 Gun · 2 Melee · wheel to switch · R reload · melee: LMB slash (hold to repeat), hold RMB to charge · ${pick}`;
+      mode === 'sword'
+        ? `Melee only · LMB slash (hold to repeat) · hold RMB to charge · ${pick}`
+        : `1 Primary · 2 Pistol · 3 Melee · 4 Grenade · 5 Taser · wheel · R reload · RMB zoom (sniper) · melee: LMB slash, hold RMB to charge · ${pick}`;
   }
 
   setRoomName(name: string): void {
@@ -233,6 +245,16 @@ export class Hud {
     this.health.classList.toggle('low', clamped <= 30);
   }
 
+  /**
+   * Scope state: while `zooming` the round scope overlay replaces the crosshair;
+   * a zoom-capable gun (sniper) hides the crosshair even unzoomed — it only aims
+   * through the scope.
+   */
+  setScope(zooming: boolean, capable: boolean): void {
+    this.scope.classList.toggle('hidden', !zooming);
+    this.crosshair.classList.toggle('hidden', zooming || capable);
+  }
+
   /** Sword charge meter under the crosshair: 0..1 while holding, null hides it. */
   setCharge(fraction: number | null): void {
     this.charge.classList.toggle('hidden', fraction === null);
@@ -241,16 +263,32 @@ export class Hud {
     this.charge.classList.toggle('ready', fraction >= 1);
   }
 
-  /** Current slot (gun / melee) and the melee weapon in the melee slot; drop weapons get their name shown. */
-  setWeapon(w: Weapon, melee: MeleeKind = MELEE_SWORD): void {
-    this.weaponName.innerHTML = weaponIcon(w, melee);
-    const label = w === WEAPON_GUN ? 'Gun' : meleeStats(melee).name;
+  /** Current slot and what sits in it (melee kind / primary gun kind); drop weapons get their name shown. */
+  setWeapon(w: Weapon, melee: MeleeKind = MELEE_SWORD, gun: GunKind = GUN_NONE): void {
+    this.weaponName.innerHTML = weaponIcon(w, melee, gun);
+    const label = w === WEAPON_MELEE ? meleeStats(melee).name : w === WEAPON_GRENADE ? 'Grenade' : w === WEAPON_TASER ? 'Taser' : w === WEAPON_PRIMARY ? gunSpec(gun).name : 'Pistol';
     this.weaponName.title = label;
-    // Melee: name the charged (RMB) blow (drop weapons also show their own name).
-    const rmb = w === WEAPON_GUN ? '' : `RMB ${meleeStats(melee).attacks[ATTACK_HEAVY].name}`;
-    this.weaponLabel.textContent = w !== WEAPON_GUN && melee !== MELEE_SWORD ? `${label} · ${rmb}` : rmb;
-    this.weaponLabel.classList.toggle('special', w !== WEAPON_GUN && melee !== MELEE_SWORD);
-    this.ammo.classList.toggle('hidden', w !== WEAPON_GUN);
+    // Melee: name the charged (RMB) blow; primaries and grenades show their own name.
+    const rmb = w === WEAPON_MELEE ? `RMB ${meleeStats(melee).attacks[ATTACK_HEAVY].name}` : '';
+    const special = (w === WEAPON_MELEE && melee !== MELEE_SWORD) || w === WEAPON_PRIMARY || w === WEAPON_TASER;
+    this.weaponLabel.textContent = w === WEAPON_MELEE ? (melee !== MELEE_SWORD ? `${label} · ${rmb}` : rmb) : special || w === WEAPON_GRENADE ? label : '';
+    this.weaponLabel.classList.toggle('special', special);
+    this.ammo.classList.toggle('hidden', !isGunSlot(w));
+    for (const [slot, cell] of this.slotCells) cell.classList.toggle('active', slot === w);
+  }
+
+  /** Grenade counter next to the ammo box. */
+  setGrenades(n: number): void {
+    this.grenadesEl.textContent = `💣 ×${n}`;
+    this.grenadesEl.classList.toggle('empty', n <= 0);
+  }
+
+  /** Which slots are usable right now (greyed otherwise). */
+  setSlots(usable: Record<number, boolean>, current: Weapon): void {
+    for (const [slot, cell] of this.slotCells) {
+      cell.classList.toggle('empty', usable[slot] !== true);
+      cell.classList.toggle('active', slot === current);
+    }
   }
 
   /** Short bottom-centre notice ("Picked up Battle Axe"). */
@@ -300,12 +338,12 @@ export class Hud {
     this.announceTimer = performance.now() + ANNOUNCE_MS;
   }
 
-  showDeath(killerName: string, weapon: Weapon, headshot = false, badges: AwardBadge[] = [], melee: MeleeKind = MELEE_SWORD): void {
+  showDeath(killerName: string, weapon: Weapon, headshot = false, badges: AwardBadge[] = [], melee: MeleeKind = MELEE_SWORD, gun: GunKind = GUN_NONE): void {
     const by = el('div', 'by');
     by.append(
       'Killed by ',
       el('b', undefined, killerName),
-      svgSpan('icons', weaponIcon(weapon, melee) + (headshot ? iconSvg('headshot', 'red') : '')),
+      svgSpan('icons', weaponIcon(weapon, melee, gun) + (headshot ? iconSvg('headshot', 'red') : '')),
     );
     const tags = el('div', 'tags');
     tags.append(...badges.map((b) => badgeEl(b)));

@@ -1,5 +1,5 @@
 import { MapSchema, Schema, type } from '@colyseus/schema';
-import { CTF_DEFAULT_CAPTURE_LIMIT, MAX_HP, MELEE_SWORD, TEAM_NONE } from '@mineshoot/shared';
+import { CTF_DEFAULT_CAPTURE_LIMIT, GRENADE_START, GUN_NONE, MAX_HP, MELEE_SWORD, TEAM_NONE, WEAPON_MELEE } from '@mineshoot/shared';
 
 export class PlayerSchema extends Schema {
   @type('string') name = '';
@@ -17,6 +17,12 @@ export class PlayerSchema extends Schema {
   @type('uint8') weapon = 0;
   /** Melee weapon in slot 2 (MeleeKind): the sword, or a picked-up drop. Reset on every spawn. */
   @type('uint8') melee = MELEE_SWORD;
+  /** Primary gun in slot 1 (GunKind): GUN_NONE until a drop / training pick. Reset on every spawn. */
+  @type('uint8') gun = GUN_NONE;
+  /** Taser slot (key 5): GUN_TASER while held, GUN_NONE when empty / spent. Reset on every spawn. */
+  @type('uint8') taser = GUN_NONE;
+  /** Grenades in slot 4. */
+  @type('uint8') grenades = GRENADE_START;
   @type('uint8') color = 0;
   @type('boolean') isBot = false;
   /** Spawn protection: cannot be targeted or damaged (ends after SPAWN_PROTECT_MS or on the first attack). */
@@ -31,9 +37,19 @@ export class PlayerSchema extends Schema {
   @type('uint16') captures = 0;
 }
 
-/** A melee weapon lying on the ground, waiting to be picked up. */
+/** A weapon (or grenade pack) lying on the ground, waiting to be picked up. */
 export class DropSchema extends Schema {
+  /** Slot the drop fills: WEAPON_PRIMARY (kind = GunKind), WEAPON_MELEE (MeleeKind) or WEAPON_GRENADE (kind = count). */
+  @type('uint8') slot = WEAPON_MELEE;
   @type('uint8') kind = MELEE_SWORD;
+  @type('float32') x = 0;
+  @type('float32') y = 0;
+  @type('float32') z = 0;
+}
+
+/** A live grenade (server-simulated; clients just draw it). */
+export class GrenadeSchema extends Schema {
+  @type('string') ownerId = '';
   @type('float32') x = 0;
   @type('float32') y = 0;
   @type('float32') z = 0;
@@ -64,6 +80,8 @@ export class RoomState extends Schema {
   @type('uint32') timeLeftMs = 0;
   @type({ map: PlayerSchema }) players = new MapSchema<PlayerSchema>();
   @type({ map: DropSchema }) drops = new MapSchema<DropSchema>();
+  /** Live grenades keyed by id (server-simulated). */
+  @type({ map: GrenadeSchema }) grenades = new MapSchema<GrenadeSchema>();
   /** CTF: flags keyed by team ('1' red, '2' blue); empty in other modes. */
   @type({ map: FlagSchema }) flags = new MapSchema<FlagSchema>();
   @type('uint8') redScore = 0;

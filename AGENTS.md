@@ -16,7 +16,7 @@ colleagues. npm workspaces monorepo, TypeScript everywhere, three packages:
 
 | Package | Role | Runtime deps |
 | --- | --- | --- |
-| `packages/shared` | Pure game core: constants, worldgen (arena + CTF map), physics, raycasts, gun/melee/drops/spawn/CTF/ranking rules, bot AI, wire protocol types | **none** (keep it that way) |
+| `packages/shared` | Pure game core: constants, worldgen (arena + CTF map), physics, raycasts, gun/grenade/melee/drops/spawn/CTF/ranking rules, bot AI, wire protocol types | **none** (keep it that way) |
 | `packages/server` | Colyseus 0.16 `arena` room; `GET /rooms`, `GET /health` | `colyseus`, `@colyseus/schema`, `@colyseus/ws-transport` |
 | `packages/client` | Vite + three.js: lobby, renderer, FPS controls, HUD, results | `three`, `colyseus.js` |
 
@@ -37,6 +37,8 @@ npx vitest run test/melee.test.ts -w @mineshoot/shared   # one file
 npm run build               # tsc --noEmit everywhere + vite production build
 npm run smoke               # headless 2-player e2e; needs `make start` with
                             # MINESHOOT_TEST=1 on the server + Google Chrome
+                            # (SMOKE_DURATION_MS=30000 on loaded machines: the
+                            # default 12 s match budget can expire mid-script)
 
 make deploy-be              # fly deploy (from repo root, --ha=false)
 make deploy-fe VITE_SERVER_URL=wss://<app>.fly.dev
@@ -80,11 +82,17 @@ garbage rather than throwing.
 `ArenaRoom.actor()` drops messages from a stale epoch (dead, or not yet
 clicked-to-play). Keep sending it; keep checking it.
 
-**Weapon mode is enforced server-side.** `weaponAllowed(mode, weapon)` gates
-shoot/swing/charge/chargeCancel/reload and drops (`dropsEnabled`). Bots receive the mode
-too. Do not rely on the client hiding a button. Likewise the room mode
-(`'match'|'training'|'ctf'`): `meleeSelectable(mode, weapons)` gates `selectMelee`
-on the server; a match never lets you pick a melee weapon without a drop.
+**Weapon mode is enforced server-side.** There are five weapon slots
+(`WEAPONS`: primary gun, pistol, melee, grenade, taser — note slot values 0/1
+are pistol/melee for wire compatibility, so key order ≠ value order).
+`weaponAllowed(mode, slot)` gates shoot/swing/charge/chargeCancel/reload/throw
+and the drop pool (`dropPool(mode)`: guns + grenade packs where guns are
+allowed, blades where melee is). Bots receive the mode too. Do not rely on
+the client hiding a button. Likewise the room mode (`'match'|'training'|'ctf'`):
+`meleeSelectable(mode, weapons)` gates `selectWeapon` on the server; a match
+never lets you pick a weapon at will — but a deathmatch (re)spawn with guns
+allowed rolls a random primary (`spawnPrimary`, taser excluded); team modes
+always spawn pistol-only.
 
 **Capture the flag is server-authoritative too.** Flags (`RoomState.flags`),
 scores, teams and every carrier rule live in `ArenaRoom.tickFlags` + pure
@@ -122,6 +130,14 @@ room create options (short match, fast respawn/drops). The client passes
 ```
 packages/shared/src/
   constants.ts     every tunable number (world, movement, weapons, HP, timers)
+  guns.ts          GunKind (pistol/rifle/smg/shotgun/sniper/taser), GUN_STATS,
+                   pelletDirections() spread rays, spawnPrimary() deathmatch roll
+  recoil.ts        per-gun spray patterns (RECOIL_PATTERNS), recoilKick(),
+                   recoilResetMs(), recovery rate — applied client-side
+                   (the taser lives in its own slot, WEAPON_TASER)
+  grenade.ts       grenade constants, throwGrenade()/stepGrenade() bounce sim
+                   (throw speed scales with the LMB hold), blastDamage()/
+                   explosionVictims()
   protocol.ts      MSG names, message payload types, CreateOptions/RoomMetadata,
                    WeaponMode helpers
   types.ts         Vec3, World, PlayerPose, PlayerPhysState, MoveInput, Block…
@@ -129,10 +145,10 @@ packages/shared/src/
                    → { world, spawnPoints, dropZone, bases }; plateau bounds
   world.ts / noise.ts / rng.ts   voxel storage, 2D noise, seeded RNG
   aabb.ts collision.ts playerPhysics.ts   swept-AABB movement (stepPlayer)
-  raycast.ts hitbox.ts gun.ts   voxel DDA, body-part boxes, resolveShot()
+  raycast.ts hitbox.ts gun.ts   voxel DDA, body-part boxes, resolveShot()/resolveRay()
   sword.ts melee.ts drops.ts    swordVictims()/swordDamage(), MELEE_STATS (light/
                                 heavy AttackSpec per kind), attackSpec(),
-                                pickDropKind()/pickDropSpot()/canPickUp()
+                                dropPool(mode)/pickDropKind()/pickDropSpot()/canPickUp()
   spawn.ts ranking.ts kills.ts  pickSpawn(), rankPlayers()/rankCtf()/splitTeams(), KillTracker/awards
   ctf.ts           FlagState, flagTouch(), canScore(), canReturn(), teamSpawns(), pickTeam(),
                    botRebalance(), matchWinner(), botCtfGoal()
@@ -156,10 +172,11 @@ packages/client/src/
                    network loop), results.ts
   game/            localPlayer.ts (60 Hz shared physics), remotePlayers.ts +
                    interpolation.ts (100 ms snapshot interp), weapons.ts
-                   (client-side weapon state machine: cooldowns, charge, mag)
+                   (client-side weapon state machine: cooldowns, charge, mag),
+                   recoil.ts (RecoilController: camera kick + settle-back)
   render/          scene, atlas, mesher/worldMesh (per-chunk face culling meshes),
-                   humanoid + humanoidAnim, viewmodel, meleeProps, dropsView,
-                   flagsView, tracers, bloodFx, nametag
+                   humanoid + humanoidAnim, viewmodel, meleeProps, gunProps,
+                   dropsView, grenadesView, flagsView, tracers, bloodFx, nametag
   hud/             hud.ts (health/ammo/timer/scoreboard/overlays), killFeed,
                    damageFx, icons (inline SVG), style.css
   input/           keyboard.ts, pointerLock.ts

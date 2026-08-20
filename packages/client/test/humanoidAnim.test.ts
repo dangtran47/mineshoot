@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SWORD_CHARGE_MS, WEAPON_GUN, WEAPON_SWORD } from '@mineshoot/shared';
+import { SWORD_CHARGE_MS, WEAPON_PISTOL, WEAPON_MELEE } from '@mineshoot/shared';
 import {
   CHARGE_PITCH,
   GUN_IDLE_PITCH,
@@ -15,27 +15,27 @@ import {
 describe('HumanoidAnim', () => {
   it('holds the gun and the sword at visibly different arm angles', () => {
     const a = new HumanoidAnim();
-    a.setWeapon(WEAPON_GUN);
+    a.setWeapon(WEAPON_PISTOL);
     expect(a.pose(0).armPitch).toBe(GUN_IDLE_PITCH);
-    a.setWeapon(WEAPON_SWORD);
+    a.setWeapon(WEAPON_MELEE);
     expect(a.pose(0).armPitch).toBe(SWORD_IDLE_PITCH);
     expect(Math.abs(GUN_IDLE_PITCH - SWORD_IDLE_PITCH)).toBeGreaterThan(0.5);
   });
 
   it('rests the sword in a guard stance: arm forward, blade tilted up off the arm', () => {
     const a = new HumanoidAnim();
-    a.setWeapon(WEAPON_SWORD);
+    a.setWeapon(WEAPON_MELEE);
     // Arm reaches forward (not hanging), blade bent up at the wrist so it stands in front of the body.
     expect(SWORD_IDLE_PITCH).toBeGreaterThan(Math.PI / 4);
     expect(SWORD_IDLE_TILT).toBeGreaterThan(0.6);
     expect(a.pose(0).bladeTilt).toBe(SWORD_IDLE_TILT);
-    a.setWeapon(WEAPON_GUN);
+    a.setWeapon(WEAPON_PISTOL);
     expect(a.pose(0).bladeTilt).toBe(0);
   });
 
   it('straightens the wrist for the wind-up and the swings so chops follow the arm', () => {
     const a = new HumanoidAnim();
-    a.setWeapon(WEAPON_SWORD);
+    a.setWeapon(WEAPON_MELEE);
     a.setCharging(true, 1000);
     expect(a.pose(1000).bladeTilt).toBeCloseTo(SWORD_IDLE_TILT, 5);
     expect(a.pose(1000 + SWORD_CHARGE_MS).bladeTilt).toBe(0);
@@ -47,7 +47,7 @@ describe('HumanoidAnim', () => {
 
   it('winds the sword arm back and glows while charging, reaching full at SWORD_CHARGE_MS', () => {
     const a = new HumanoidAnim();
-    a.setWeapon(WEAPON_SWORD);
+    a.setWeapon(WEAPON_MELEE);
     a.setCharging(true, 1000);
     const start = a.pose(1000);
     const mid = a.pose(1000 + SWORD_CHARGE_MS / 2);
@@ -68,7 +68,7 @@ describe('HumanoidAnim', () => {
 
   it('overhead: sweeps the arm forward over SWING_MS then returns to idle', () => {
     const a = new HumanoidAnim();
-    a.setWeapon(WEAPON_SWORD);
+    a.setWeapon(WEAPON_MELEE);
     a.swing(2000, 'overhead', false);
     const p0 = a.pose(2000);
     const p1 = a.pose(2000 + SWING_MS / 2);
@@ -82,10 +82,10 @@ describe('HumanoidAnim', () => {
 
   it('overhead: gives a heavy swing a wider arc than a light one', () => {
     const light = new HumanoidAnim();
-    light.setWeapon(WEAPON_SWORD);
+    light.setWeapon(WEAPON_MELEE);
     light.swing(0, 'overhead', false);
     const heavy = new HumanoidAnim();
-    heavy.setWeapon(WEAPON_SWORD);
+    heavy.setWeapon(WEAPON_MELEE);
     heavy.swing(0, 'overhead', true);
     const arc = (a: HumanoidAnim): number => a.pose(0).armPitch - a.pose(SWING_MS - 1).armPitch;
     expect(arc(heavy)).toBeGreaterThan(arc(light));
@@ -95,7 +95,7 @@ describe('HumanoidAnim', () => {
 
   it('a swing takes precedence over a still-set charging flag', () => {
     const a = new HumanoidAnim();
-    a.setWeapon(WEAPON_SWORD);
+    a.setWeapon(WEAPON_MELEE);
     a.setCharging(true, 0);
     a.swing(SWORD_CHARGE_MS, 'overhead', true);
     const during = a.pose(SWORD_CHARGE_MS + SWING_MS - 1);
@@ -104,7 +104,7 @@ describe('HumanoidAnim', () => {
 
   it('slash: rolls the arm sideways, alternating direction on consecutive slashes, then rests', () => {
     const a = new HumanoidAnim();
-    a.setWeapon(WEAPON_SWORD);
+    a.setWeapon(WEAPON_MELEE);
     expect(a.pose(0).armRoll).toBe(0);
     a.swing(1000, 'slash', false);
     const first = a.pose(1000);
@@ -123,7 +123,7 @@ describe('HumanoidAnim', () => {
 
   it('kicks the gun and flashes the muzzle briefly after a shot', () => {
     const a = new HumanoidAnim();
-    a.setWeapon(WEAPON_GUN);
+    a.setWeapon(WEAPON_PISTOL);
     a.shot(3000);
     const p0 = a.pose(3000);
     expect(p0.gunKick).toBeGreaterThan(0);
@@ -137,7 +137,7 @@ describe('HumanoidAnim', () => {
 
   it('lowers the gun while reloading and bobs it', () => {
     const a = new HumanoidAnim();
-    a.setWeapon(WEAPON_GUN);
+    a.setWeapon(WEAPON_PISTOL);
     a.setReloading(true);
     const p0 = a.pose(0);
     const p1 = a.pose(120);

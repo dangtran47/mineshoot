@@ -1,22 +1,52 @@
-import { DROP_KINDS, DROP_MIN_SPACING } from './melee';
+import { GRENADE_DROP_AMOUNT } from './grenade';
+import { GUN_TASER, PRIMARY_KINDS, gunSpec } from './guns';
+import type { GunKind } from './guns';
+import { DROP_KINDS, DROP_MIN_SPACING, meleeStats } from './melee';
 import type { MeleeKind } from './melee';
+import { WEAPON_GRENADE, WEAPON_MELEE, WEAPON_PRIMARY, WEAPON_TASER, weaponAllowed } from './protocol';
+import type { WeaponMode } from './protocol';
 import type { SpawnPoint, World } from './types';
 import { columnTop } from './world';
 import { isStandable } from './worldgen';
 import type { Rect } from './worldgen';
 
-/** A melee weapon lying on the ground (feet position of a player standing on it). */
-export interface Drop {
+/** Slots a drop can fill. */
+export type DropSlot = typeof WEAPON_PRIMARY | typeof WEAPON_MELEE | typeof WEAPON_GRENADE | typeof WEAPON_TASER;
+/** What a drop gives: a GunKind (primary), a MeleeKind (melee) or a grenade count (grenade). */
+export interface DropKind {
+  slot: DropSlot;
+  kind: number;
+}
+/** A weapon lying on the ground (feet position of a player standing on it). */
+export interface Drop extends DropKind {
   id: string;
-  kind: MeleeKind;
   x: number;
   y: number;
   z: number;
 }
 
-/** A random drop kind (never the plain sword). */
-export function pickDropKind(rng: () => number): MeleeKind {
-  return DROP_KINDS[Math.floor(rng() * DROP_KINDS.length)];
+/** Everything that can drop in a room with this weapon rule (uniform pick). */
+export function dropPool(mode: WeaponMode): DropKind[] {
+  const pool: DropKind[] = [];
+  if (weaponAllowed(mode, WEAPON_PRIMARY)) {
+    for (const k of PRIMARY_KINDS) pool.push({ slot: WEAPON_PRIMARY, kind: k });
+    pool.push({ slot: WEAPON_TASER, kind: GUN_TASER });
+    pool.push({ slot: WEAPON_GRENADE, kind: GRENADE_DROP_AMOUNT });
+  }
+  if (weaponAllowed(mode, WEAPON_MELEE)) for (const k of DROP_KINDS) pool.push({ slot: WEAPON_MELEE, kind: k });
+  return pool;
+}
+
+/** A random drop for the mode (never the plain sword, never the pistol). */
+export function pickDropKind(rng: () => number, mode: WeaponMode = 'all'): DropKind {
+  const pool = dropPool(mode);
+  return pool[Math.floor(rng() * pool.length)];
+}
+
+export function dropName(d: DropKind): string {
+  if (d.slot === WEAPON_GRENADE) return `Grenades ×${d.kind}`;
+  if (d.slot === WEAPON_PRIMARY || d.slot === WEAPON_TASER) return gunSpec(d.kind as GunKind).name;
+  return meleeStats(d.kind as MeleeKind).name;
 }
 
 /**

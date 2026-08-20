@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { GUN_PISTOL, GUN_SNIPER, GUN_TASER, MELEE_SWORD, WEAPON_GRENADE, WEAPON_PISTOL, WEAPON_PRIMARY } from '@mineshoot/shared';
 import { BITMAPS, ICON_SIZE, awardBadges, iconSvg, weaponIcon } from '../src/hud/icons';
 import { killTags } from '@mineshoot/shared';
 
@@ -29,6 +30,10 @@ describe('icon bitmaps', () => {
     expect(weaponIcon(1, 3)).toContain('icon-scythe');
     expect(weaponIcon(1, 4)).toContain('icon-pickaxe');
     expect(weaponIcon(1, 99)).toContain('icon-sword');
+    expect(weaponIcon(WEAPON_PRIMARY, MELEE_SWORD, GUN_SNIPER)).toContain('icon-sniper');
+    expect(weaponIcon(WEAPON_PRIMARY, MELEE_SWORD, GUN_TASER)).toContain('icon-taser');
+    expect(weaponIcon(WEAPON_GRENADE)).toContain('icon-grenade');
+    expect(weaponIcon(WEAPON_PISTOL, MELEE_SWORD, GUN_PISTOL)).toContain('icon-gun');
   });
 });
 

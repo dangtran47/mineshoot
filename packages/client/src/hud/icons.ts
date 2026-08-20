@@ -2,8 +2,8 @@
  * Pixel-art HUD icons rendered as inline SVG (16×16 grid → <rect> runs). No shipped assets,
  * crisp at any size, and '#' pixels use currentColor so CSS can tint them.
  */
-import { MELEE_AXE, MELEE_KATANA, MELEE_PICKAXE, MELEE_SCYTHE, MELEE_SWORD, WEAPON_GUN, multiKillLabel, streakLabel } from '@mineshoot/shared';
-import type { KillAwards, MeleeKind } from '@mineshoot/shared';
+import { GUN_NONE, GUN_PISTOL, GUN_RIFLE, GUN_SHOTGUN, GUN_SMG, GUN_SNIPER, GUN_TASER, MELEE_AXE, MELEE_KATANA, MELEE_PICKAXE, MELEE_SCYTHE, MELEE_SWORD, WEAPON_GRENADE, WEAPON_MELEE, WEAPON_TASER, multiKillLabel, streakLabel } from '@mineshoot/shared';
+import type { GunKind, KillAwards, MeleeKind } from '@mineshoot/shared';
 
 export const ICON_SIZE = 16;
 
@@ -16,7 +16,7 @@ const PALETTE: Record<string, string> = {
   y: '#ffd23f', // flame core
 };
 
-export type IconName = 'gun' | 'sword' | 'axe' | 'katana' | 'scythe' | 'pickaxe' | 'headshot' | 'skull' | 'flame' | 'revenge' | 'shutdown';
+export type IconName = 'gun' | 'rifle' | 'smg' | 'shotgun' | 'sniper' | 'taser' | 'grenade' | 'sword' | 'axe' | 'katana' | 'scythe' | 'pickaxe' | 'headshot' | 'skull' | 'flame' | 'revenge' | 'shutdown';
 
 // prettier-ignore
 export const BITMAPS: Record<IconName, string[]> = {
@@ -34,6 +34,114 @@ export const BITMAPS: Record<IconName, string[]> = {
     '.####...........',
     '..####..........',
     '..####..........',
+    '................',
+    '................',
+    '................',
+  ],
+  rifle: [
+    '................',
+    '................',
+    '................',
+    '................',
+    '................',
+    '#..#############',
+    '################',
+    'bbb#############',
+    '.bbb#.####......',
+    '..bb..####......',
+    '......####......',
+    '......####......',
+    '................',
+    '................',
+    '................',
+    '................',
+  ],
+  smg: [
+    '................',
+    '................',
+    '................',
+    '................',
+    '................',
+    '................',
+    '...#############',
+    '..##############',
+    '..####.####.....',
+    '..####..###.....',
+    '........###.....',
+    '........###.....',
+    '........###.....',
+    '................',
+    '................',
+    '................',
+  ],
+  shotgun: [
+    '................',
+    '................',
+    '................',
+    '................',
+    '....############',
+    'bbb#############',
+    'bb##############',
+    'bbb#############',
+    '.bb...bbbb......',
+    '......bbbb......',
+    '................',
+    '................',
+    '................',
+    '................',
+    '................',
+    '................',
+  ],
+  sniper: [
+    '................',
+    '................',
+    '................',
+    '.....kkkk.......',
+    '.....k##k.......',
+    '################',
+    'b###############',
+    'bbb#############',
+    '..bbb.####..#...',
+    '....b.####..#...',
+    '......####......',
+    '................',
+    '................',
+    '................',
+    '................',
+    '................',
+  ],
+  taser: [
+    '................',
+    '................',
+    '................',
+    '................',
+    '....yyyyyyyy.##.',
+    '....yyyyyyyy##..',
+    '....yyyy...##...',
+    '....yyyy..##....',
+    '....yyyy.####...',
+    '.....yyy...##...',
+    '.....yyy..##....',
+    '..........#.....',
+    '................',
+    '................',
+    '................',
+    '................',
+  ],
+  grenade: [
+    '................',
+    '................',
+    '......kkk.......',
+    '......kkk.##....',
+    '....#######.....',
+    '...#########....',
+    '..###########...',
+    '..###########...',
+    '..###########...',
+    '..###########...',
+    '..###########...',
+    '...#########....',
+    '....#######.....',
     '................',
     '................',
     '................',
@@ -256,9 +364,27 @@ export function meleeIconName(melee: number): IconName {
   return MELEE_ICONS[melee as MeleeKind] ?? 'sword';
 }
 
-/** Weapon icon: the gun, or whatever melee weapon (`melee` kind) is in the melee slot. */
-export function weaponIcon(weapon: number, melee: number = MELEE_SWORD, cls = ''): string {
-  return iconSvg(weapon === WEAPON_GUN ? 'gun' : meleeIconName(melee), cls);
+const GUN_ICONS: Record<GunKind, IconName> = {
+  [GUN_NONE]: 'gun',
+  [GUN_PISTOL]: 'gun',
+  [GUN_RIFLE]: 'rifle',
+  [GUN_SMG]: 'smg',
+  [GUN_SHOTGUN]: 'shotgun',
+  [GUN_SNIPER]: 'sniper',
+  [GUN_TASER]: 'taser',
+};
+
+/** Icon name for a gun kind. */
+export function gunIconName(gun: number): IconName {
+  return GUN_ICONS[gun as GunKind] ?? 'gun';
+}
+
+/** Weapon icon by slot: melee → its kind, grenade → the grenade, taser → the taser, gun slots → the gun kind held. */
+export function weaponIcon(weapon: number, melee: number = MELEE_SWORD, gun: number = GUN_NONE, cls = ''): string {
+  if (weapon === WEAPON_MELEE) return iconSvg(meleeIconName(melee), cls);
+  if (weapon === WEAPON_GRENADE) return iconSvg('grenade', cls);
+  if (weapon === WEAPON_TASER) return iconSvg('taser', cls);
+  return iconSvg(gunIconName(gun), cls);
 }
 
 /** One badge per award: the icon(s) plus a short caption ("×3", "5", "revenge"...). */

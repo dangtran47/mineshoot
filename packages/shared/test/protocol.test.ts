@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CTF_RESPAWN_MS, RESPAWN_MS, TRAINING_RESPAWN_MS } from '../src/constants';
-import { DEFAULT_ROOM_MODE, ROOM_MODES, TEAM_BLUE, TEAM_NONE, TEAM_RED, WEAPON_GUN, WEAPON_SWORD, isCtf, isRoomMode, isTeam, meleeSelectable, otherTeam, respawnMsFor, teamName, weaponAllowed } from '../src/protocol';
+import { DEFAULT_ROOM_MODE, GUN_SLOTS, ROOM_MODES, WEAPON_MODES, TEAM_BLUE, TEAM_NONE, TEAM_RED, WEAPONS, WEAPON_GRENADE, WEAPON_PISTOL, WEAPON_PRIMARY, WEAPON_MELEE, WEAPON_TASER, allowedWeapons, defaultWeapon, isCtf, isGunSlot, isWeapon, isRoomMode, isTeam, meleeSelectable, otherTeam, respawnMsFor, teamName, weaponAllowed } from '../src/protocol';
 
 describe('room mode', () => {
   it('knows its modes and the default', () => {
@@ -18,7 +18,6 @@ describe('room mode', () => {
   it('melee weapons can be picked directly only in training rooms where melee is allowed', () => {
     expect(meleeSelectable('training', 'all')).toBe(true);
     expect(meleeSelectable('training', 'sword')).toBe(true);
-    expect(meleeSelectable('training', 'gun')).toBe(false);
     expect(meleeSelectable('match', 'all')).toBe(false);
     expect(meleeSelectable('match', 'sword')).toBe(false);
     expect(meleeSelectable('ctf', 'all')).toBe(false);
@@ -43,8 +42,29 @@ describe('room mode', () => {
   });
 
   it('weapon rules are unchanged by the room mode', () => {
-    expect(weaponAllowed('all', WEAPON_GUN)).toBe(true);
-    expect(weaponAllowed('sword', WEAPON_GUN)).toBe(false);
-    expect(weaponAllowed('gun', WEAPON_SWORD)).toBe(false);
+    expect(weaponAllowed('all', WEAPON_PISTOL)).toBe(true);
+    expect(weaponAllowed('sword', WEAPON_PISTOL)).toBe(false);
+  });
+});
+
+describe('weapon slots', () => {
+  it('has five slots in key order; pistol, primary and taser fire bullets', () => {
+    expect(WEAPON_PISTOL).toBe(0);
+    expect(WEAPON_MELEE).toBe(1);
+    expect(WEAPONS).toEqual([WEAPON_PRIMARY, WEAPON_PISTOL, WEAPON_MELEE, WEAPON_GRENADE, WEAPON_TASER]);
+    expect(GUN_SLOTS).toEqual([WEAPON_PISTOL, WEAPON_PRIMARY, WEAPON_TASER]);
+    expect(isWeapon(4)).toBe(true);
+    expect(isWeapon(5)).toBe(false);
+    expect(isGunSlot(WEAPON_GRENADE)).toBe(false);
+    expect(isGunSlot(WEAPON_TASER)).toBe(true);
+  });
+  it('two weapon modes: all allows every slot, sword only melee', () => {
+    expect(WEAPON_MODES).toEqual(['all', 'sword']);
+    expect(allowedWeapons('all')).toEqual([WEAPON_PRIMARY, WEAPON_PISTOL, WEAPON_MELEE, WEAPON_GRENADE, WEAPON_TASER]);
+    expect(allowedWeapons('sword')).toEqual([WEAPON_MELEE]);
+    expect(weaponAllowed('all', WEAPON_GRENADE)).toBe(true);
+    expect(weaponAllowed('sword', WEAPON_PRIMARY)).toBe(false);
+    expect(defaultWeapon('all')).toBe(WEAPON_PISTOL);
+    expect(defaultWeapon('sword')).toBe(WEAPON_MELEE);
   });
 });

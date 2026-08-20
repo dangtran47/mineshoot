@@ -242,3 +242,17 @@ input, select {
 .hud .scoreboard .side .teamhead .score { font-size: 24px; }
 .hud .scoreboard .side td:nth-child(2) { color: var(--team); }
 .hud .scoreboard .side tr.me td:nth-child(2) { color: var(--accent); }
+
+/* Weapon slot strip (1–4) */
+.hud .weapon .slots { display: flex; gap: 6px; margin-bottom: 4px; justify-content: flex-end; }
+.hud .weapon .slot { padding: 1px 7px; border: 1px solid rgba(255, 255, 255, 0.35); border-radius: 4px; opacity: 0.55; font-size: 12px; }
+.hud .weapon .slot.active { opacity: 1; border-color: #ffd766; color: #ffd766; }
+.hud .weapon .slot.empty { opacity: 0.22; }
+.hud .weapon .grenades { margin-top: 3px; font-size: 13px; }
+.hud .weapon .grenades.empty { opacity: 0.4; }
+/* Sniper scope: circular view, black surround, thin reticle through the middle */
+.hud .scope { position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(circle at 50% 50%, transparent 0 33%, rgba(0, 0, 0, 0.55) 34.5%, rgba(0, 0, 0, 0.97) 38%); }
+.hud .scope::before, .hud .scope::after { content: ''; position: absolute; left: 50%; top: 50%; background: rgba(10, 10, 10, 0.9); }
+.hud .scope::before { width: 1px; height: 70vmin; transform: translate(-50%, -50%); }
+.hud .scope::after { height: 1px; width: 70vmin; transform: translate(-50%, -50%); }

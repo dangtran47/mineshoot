@@ -1,5 +1,5 @@
-import { MELEE_AXE, MELEE_KATANA, MELEE_PICKAXE, MELEE_SCYTHE, MELEE_SWORD, WEAPON_GUN, killTags } from '@mineshoot/shared';
-import type { KillAwards, MeleeKind, Weapon } from '@mineshoot/shared';
+import { GUN_NONE, GUN_PISTOL, GUN_RIFLE, GUN_SHOTGUN, GUN_SMG, GUN_SNIPER, GUN_TASER, MELEE_AXE, MELEE_KATANA, MELEE_PICKAXE, MELEE_SCYTHE, MELEE_SWORD, WEAPON_GRENADE, WEAPON_MELEE, WEAPON_TASER, killTags } from '@mineshoot/shared';
+import type { GunKind, KillAwards, MeleeKind, Weapon } from '@mineshoot/shared';
 
 /** How a feed line relates to the local player: their kill, their death, or neither. */
 export type FeedKind = 'neutral' | 'good' | 'bad';
@@ -20,6 +20,8 @@ export interface KillLineInput extends KillAwards {
   weapon: Weapon;
   /** Melee kind used (meaningful when weapon is the melee slot). */
   melee?: MeleeKind;
+  /** Gun kind used (meaningful when weapon is a gun slot). */
+  gun?: GunKind;
   headshot: boolean;
 }
 
@@ -49,6 +51,16 @@ export class KillFeedModel {
   }
 }
 
+const GUN_EMOJI: Record<GunKind, string> = {
+  [GUN_NONE]: '🔫',
+  [GUN_PISTOL]: '🔫',
+  [GUN_RIFLE]: '🔫',
+  [GUN_SMG]: '🔫',
+  [GUN_SHOTGUN]: '💥',
+  [GUN_SNIPER]: '🎯',
+  [GUN_TASER]: '⚡',
+};
+
 const MELEE_EMOJI: Record<MeleeKind, string> = {
   [MELEE_SWORD]: '🗡️',
   [MELEE_AXE]: '🪓',
@@ -59,6 +71,14 @@ const MELEE_EMOJI: Record<MeleeKind, string> = {
 
 /** "Alice 🔫🎯 Bob · DOUBLE KILL" — plain-text form of a feed line (accessible name / tooltip). */
 export function killFeedLine(k: KillLineInput): string {
-  const icon = (k.weapon === WEAPON_GUN ? '🔫' : (MELEE_EMOJI[k.melee ?? MELEE_SWORD] ?? '🗡️')) + (k.headshot ? '🎯' : '');
+  const base =
+    k.weapon === WEAPON_MELEE
+      ? (MELEE_EMOJI[k.melee ?? MELEE_SWORD] ?? '🗡️')
+      : k.weapon === WEAPON_GRENADE
+        ? '💣'
+        : k.weapon === WEAPON_TASER
+          ? '⚡'
+          : (GUN_EMOJI[k.gun ?? GUN_PISTOL] ?? '🔫');
+  const icon = base + (k.headshot ? '🎯' : '');
   return [`${k.killer} ${icon} ${k.victim}`, ...killTags(k)].join(' · ');
 }

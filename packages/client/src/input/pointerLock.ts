@@ -1,5 +1,5 @@
 const SENSITIVITY = 0.0022;
-const PITCH_LIMIT = Math.PI / 2 - 0.01;
+export const PITCH_LIMIT = Math.PI / 2 - 0.01;
 
 /**
  * Pointer-lock mouse look producing plain yaw/pitch numbers, plus mouse
@@ -13,15 +13,19 @@ export class PointerLook {
   onMouseDown: ((button: number) => void) | null = null;
   onMouseUp: ((button: number) => void) | null = null;
   onWheel: ((deltaY: number) => void) | null = null;
+  /** The yaw/pitch change a mouse move actually applied (post-clamp); recoil compensation tracking. */
+  onDelta: ((dYaw: number, dPitch: number) => void) | null = null;
 
   private readonly onMove = (e: MouseEvent): void => {
     if (!this.locked) return;
     // Ignore the occasional huge spike right after locking.
     if (Math.abs(e.movementX) > 300 || Math.abs(e.movementY) > 300) return;
+    const prevPitch = this.pitch;
     this.yaw -= e.movementX * SENSITIVITY;
     this.pitch -= e.movementY * SENSITIVITY;
     if (this.pitch > PITCH_LIMIT) this.pitch = PITCH_LIMIT;
     if (this.pitch < -PITCH_LIMIT) this.pitch = -PITCH_LIMIT;
+    this.onDelta?.(-e.movementX * SENSITIVITY, this.pitch - prevPitch);
   };
   private readonly onChange = (): void => {
     this.onLockChange?.(this.locked);

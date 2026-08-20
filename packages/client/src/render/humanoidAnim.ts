@@ -1,4 +1,4 @@
-import { MELEE_SWORD, WEAPON_SWORD, meleeStats } from '@mineshoot/shared';
+import { MELEE_SWORD, WEAPON_GRENADE, WEAPON_MELEE, meleeStats } from '@mineshoot/shared';
 import type { MeleeKind, SwingAnim, Weapon } from '@mineshoot/shared';
 
 /*
@@ -105,8 +105,9 @@ export class HumanoidAnim {
   }
 
   pose(now: number): ArmPose {
-    const idle = this.weapon === WEAPON_SWORD ? SWORD_IDLE_PITCH : GUN_IDLE_PITCH;
-    const tilt = this.weapon === WEAPON_SWORD ? SWORD_IDLE_TILT : 0;
+    // Grenade in hand: arm held low, no kick/reload. Guns aim level, melee hangs at its idle.
+    const idle = this.weapon === WEAPON_MELEE ? SWORD_IDLE_PITCH : this.weapon === WEAPON_GRENADE ? GUN_IDLE_PITCH * 0.4 : GUN_IDLE_PITCH;
+    const tilt = this.weapon === WEAPON_MELEE ? SWORD_IDLE_TILT : 0;
     const out: ArmPose = { armPitch: idle, armRoll: 0, bladeTilt: tilt, swordGlow: 0, gunKick: 0, muzzleFlash: false };
 
     // Swing wins over everything: it is the moment that matters to the victim.
@@ -125,7 +126,7 @@ export class HumanoidAnim {
       return out;
     }
 
-    if (this.chargeSince >= 0 && this.weapon === WEAPON_SWORD) {
+    if (this.chargeSince >= 0 && this.weapon === WEAPON_MELEE) {
       const t = clamp01((now - this.chargeSince) / this.chargeMs);
       out.armPitch = lerp(SWORD_IDLE_PITCH, CHARGE_PITCH, easeOut(t));
       out.bladeTilt = lerp(SWORD_IDLE_TILT, 0, easeOut(t));
@@ -133,7 +134,7 @@ export class HumanoidAnim {
       return out;
     }
 
-    if (this.weapon !== WEAPON_SWORD) {
+    if (this.weapon !== WEAPON_MELEE && this.weapon !== WEAPON_GRENADE) {
       if (this.shotAt >= 0 && now - this.shotAt < SHOT_KICK_MS) {
         const t = clamp01((now - this.shotAt) / SHOT_KICK_MS);
         out.gunKick = 1 - t;

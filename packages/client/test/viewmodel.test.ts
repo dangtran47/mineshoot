@@ -43,6 +43,32 @@ describe('ViewModel melee mount', () => {
   });
 });
 
+describe('ViewModel gun kick', () => {
+  /** The visible gun holder group (pistol by default; the light and hidden slots are filtered out). */
+  function visibleHolder(vm: ViewModel): THREE.Object3D {
+    const holder = vm.group.children.find((o) => o.visible && o.type === 'Group');
+    expect(holder).toBeDefined();
+    return holder!;
+  }
+
+  it('fire intensity scales the prop kick (heavy guns punch harder than light ones)', () => {
+    const light = new ViewModel(new THREE.PerspectiveCamera());
+    light.fire(0.7);
+    light.update(0.001, false);
+    const heavy = new ViewModel(new THREE.PerspectiveCamera());
+    heavy.fire(1.6);
+    heavy.update(0.001, false);
+    expect(visibleHolder(heavy).position.z).toBeGreaterThan(visibleHolder(light).position.z * 2);
+  });
+
+  it('fire without an intensity keeps the classic kick', () => {
+    const vm = new ViewModel(new THREE.PerspectiveCamera());
+    vm.fire();
+    vm.update(0.001, false);
+    expect(visibleHolder(vm).position.z).toBeCloseTo((1 - 0.001 * 8) * 0.12);
+  });
+});
+
 describe('ViewModel overhead chop', () => {
   it('chops forward from a full charge: the tip never swings back behind the camera', () => {
     const camera = new THREE.PerspectiveCamera();

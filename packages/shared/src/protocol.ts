@@ -4,26 +4,43 @@ import type { HitPart } from './hitbox';
 import type { SwordPart } from './sword';
 import type { KillAwards } from './kills';
 import type { AttackKind, MeleeKind } from './melee';
+import type { GunKind } from './guns';
 
-export const WEAPON_GUN = 0;
-export const WEAPON_SWORD = 1;
-export type Weapon = typeof WEAPON_GUN | typeof WEAPON_SWORD;
+/** Weapon slots (the number a pose/message carries). Keys 1..5 map to WEAPONS order. */
+export const WEAPON_PISTOL = 0;
+export const WEAPON_MELEE = 1;
+export const WEAPON_PRIMARY = 2;
+export const WEAPON_GRENADE = 3;
+/** The taser lives in its own slot (key 5): a picked-up two-charge one-shot-kill sidearm. */
+export const WEAPON_TASER = 4;
+export type Weapon = typeof WEAPON_PISTOL | typeof WEAPON_MELEE | typeof WEAPON_PRIMARY | typeof WEAPON_GRENADE | typeof WEAPON_TASER;
+/** Slots in key order: 1 primary (big gun), 2 pistol, 3 melee, 4 grenade, 5 taser. */
+export const WEAPONS: readonly Weapon[] = [WEAPON_PRIMARY, WEAPON_PISTOL, WEAPON_MELEE, WEAPON_GRENADE, WEAPON_TASER];
+/** Slots that fire bullets. */
+export const GUN_SLOTS: readonly Weapon[] = [WEAPON_PISTOL, WEAPON_PRIMARY, WEAPON_TASER];
+export function isWeapon(v: unknown): v is Weapon {
+  return v === WEAPON_PISTOL || v === WEAPON_MELEE || v === WEAPON_PRIMARY || v === WEAPON_GRENADE || v === WEAPON_TASER;
+}
+export function isGunSlot(w: Weapon): boolean {
+  return w === WEAPON_PISTOL || w === WEAPON_PRIMARY || w === WEAPON_TASER;
+}
 
 export type Phase = 'playing' | 'ended';
 
-/** Which weapons a room allows; chosen at creation. */
-export const WEAPON_MODES = ['all', 'gun', 'sword'] as const;
+/** Which weapons a room allows; chosen at creation. 'all' = every slot; 'sword' = melee only. */
+export const WEAPON_MODES = ['all', 'sword'] as const;
 export type WeaponMode = (typeof WEAPON_MODES)[number];
 export const DEFAULT_WEAPON_MODE: WeaponMode = 'all';
 export function weaponAllowed(mode: WeaponMode, w: Weapon): boolean {
-  return mode === 'all' || (mode === 'gun' ? w === WEAPON_GUN : w === WEAPON_SWORD);
+  return mode === 'all' || w === WEAPON_MELEE;
 }
-/** The weapon a player starts with (and is forced to) under `mode`. */
+/** The slot a player starts with (and is forced to) under `mode`: the pistol, or melee in a sword-only room. */
 export function defaultWeapon(mode: WeaponMode): Weapon {
-  return mode === 'sword' ? WEAPON_SWORD : WEAPON_GUN;
+  return mode === 'sword' ? WEAPON_MELEE : WEAPON_PISTOL;
 }
+/** Allowed slots in key order. */
 export function allowedWeapons(mode: WeaponMode): Weapon[] {
-  return mode === 'all' ? [WEAPON_GUN, WEAPON_SWORD] : [defaultWeapon(mode)];
+  return WEAPONS.filter((w) => weaponAllowed(mode, w));
 }
 
 /**
@@ -73,7 +90,7 @@ export function isBotSkill(v: unknown): v is BotSkill {
 
 /** True when players may switch their melee weapon at will (training rooms with melee allowed). */
 export function meleeSelectable(mode: RoomMode, weapons: WeaponMode): boolean {
-  return mode === 'training' && weaponAllowed(weapons, WEAPON_SWORD);
+  return mode === 'training' && weaponAllowed(weapons, WEAPON_MELEE);
 }
 
 export interface CreateOptions {
@@ -128,8 +145,26 @@ export interface ShootMsg {
   yaw: number;
   pitch: number;
   epoch: number;
+  /** Which gun slot fired: WEAPON_PISTOL or WEAPON_PRIMARY. */
+  weapon: Weapon;
 }
-export interface SwingMsg extends ShootMsg {
+/** Grenade throw: the thrower's pose (the grenade leaves the eye along yaw/pitch) and how long LMB was held (0..1 of GRENADE_THROW_CHARGE_MS → throw speed). */
+export interface ThrowMsg {
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  pitch: number;
+  epoch: number;
+  charge: number;
+}
+export interface SwingMsg {
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  pitch: number;
+  epoch: number;
   /** Which attack: light (LMB) or heavy (RMB held, released). A heavy claim is honoured only if a `charge` arrived ≥ MELEE_MIN_CHARGE_FRACTION × chargeMs earlier (damage scales with the hold, full at chargeMs), else it lands as light. */
   attack: AttackKind;
 }
@@ -137,14 +172,18 @@ export interface SwingMsg extends ShootMsg {
 export type ChargeMsg = number;
 /** Sent when RMB is released too early for any heavy (no swing); payload is the spawn epoch. */
 export type ChargeCancelMsg = number;
-/** Sent when the player starts reloading the gun; payload is the spawn epoch. */
-export type ReloadMsg = number;
+/** Sent when the player starts reloading a gun slot (WEAPON_PISTOL / WEAPON_PRIMARY). */
+export interface ReloadMsg {
+  epoch: number;
+  weapon: Weapon;
+}
 /** Sent once when the player clicks to play; the server spawns them only after this. */
 export type ReadyMsg = null;
-/** Training rooms only: put this melee weapon in slot 2 right away (no drop needed). */
-export interface SelectMeleeMsg {
+/** Training rooms only: arm `kind` in `slot` right away (melee kinds → WEAPON_MELEE, PRIMARY_KINDS → WEAPON_PRIMARY); no drop needed. */
+export interface SelectWeaponMsg {
   epoch: number;
-  melee: MeleeKind;
+  slot: Weapon;
+  kind: number;
 }
 
 /** CTF: switch (or pick, before playing) a team; payload is the team. */
@@ -163,15 +202,28 @@ export interface FlagEventMsg {
   blueScore: number;
 }
 
-export interface ShotMsg {
-  shooterId: string;
-  from: Vec3;
+/** One ray of a shot (a shotgun fires several). */
+export interface ShotRay {
   to: Vec3;
   hitPlayerId: string;
   /** Body part hit ('' on a miss). */
   part: HitPart | '';
   /** Damage dealt (0 on a miss). */
   damage: number;
+}
+export interface ShotMsg {
+  shooterId: string;
+  gun: GunKind;
+  from: Vec3;
+  rays: ShotRay[];
+}
+/** A grenade burst: where, whose, and who it hurt (damage per victim). */
+export interface ExplodeMsg {
+  ownerId: string;
+  x: number;
+  y: number;
+  z: number;
+  victims: { id: string; damage: number }[];
 }
 /** A melee swing was performed (hit or miss); drives the attacker's animation on other clients. */
 export interface SwungMsg {
@@ -189,10 +241,11 @@ export interface HitMsg {
   attack: AttackKind;
   melee: MeleeKind;
 }
-/** A player walked over a weapon drop and now holds it (the drop is gone from the state). */
+/** A player walked over a drop and now holds it (the drop is gone from the state); `kind` per `slot` (GunKind / MeleeKind / grenade count). */
 export interface PickupMsg {
   playerId: string;
-  melee: MeleeKind;
+  slot: Weapon;
+  kind: number;
 }
 export interface KillMsg extends KillAwards {
   killerId: string;
@@ -202,6 +255,8 @@ export interface KillMsg extends KillAwards {
   weapon: Weapon;
   /** Melee weapon used when `weapon` is the melee slot (MELEE_SWORD for gun kills). */
   melee: MeleeKind;
+  /** Gun kind for gun kills (GUN_NONE for melee / grenade kills). */
+  gun: GunKind;
   /** The killing blow landed on the head. */
   headshot: boolean;
 }
@@ -214,7 +269,8 @@ export const MSG = {
   chargeCancel: 'chargeCancel',
   reload: 'reload',
   ready: 'ready',
-  selectMelee: 'selectMelee',
+  selectWeapon: 'selectWeapon',
+  throw: 'throw',
   selectTeam: 'selectTeam',
   dropFlag: 'dropFlag',
   ping: 'ping',
@@ -224,6 +280,7 @@ export const MSG = {
   hit: 'hit',
   kill: 'kill',
   pickup: 'pickup',
+  explode: 'explode',
   flag: 'flag',
 } as const;
 

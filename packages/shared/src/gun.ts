@@ -1,5 +1,5 @@
-import { EYE_HEIGHT } from './constants';
-import { damageForPart, playerHitboxes } from './hitbox';
+import { EYE_HEIGHT, GUN_DAMAGE } from './constants';
+import { playerHitboxes } from './hitbox';
 import type { HitPart } from './hitbox';
 import { forwardVector } from './playerPhysics';
 import { raycastVoxels, segmentVsAABB } from './raycast';
@@ -24,14 +24,8 @@ export function eyePosition(pose: { x: number; y: number; z: number }): Vec3 {
   return { x: pose.x, y: pose.y + EYE_HEIGHT, z: pose.z };
 }
 
-/**
- * Hitscan: ray from the shooter's eye along yaw/pitch, up to `range`.
- * Voxels and player body-part boxes compete; the nearest wins. Returns the
- * tracer endpoint, the id of the hit player (if any), the part and damage.
- */
-export function resolveShot(world: World, shooter: PlayerPose, targets: ShotTarget[], range: number): ShotResult {
-  const from = eyePosition(shooter);
-  const dir = forwardVector(shooter.yaw, shooter.pitch);
+/** One hitscan ray from `from` along unit `dir`: nearest of voxels vs. body-part boxes; damage from `damage` by part. */
+export function resolveRay(world: World, from: Vec3, dir: Vec3, targets: ShotTarget[], range: number, damage: Record<HitPart, number> = GUN_DAMAGE): ShotResult {
   const voxel = raycastVoxels(world, from, dir, range);
   let bestT = voxel.hit ? voxel.t : range;
   const far: Vec3 = { x: from.x + dir.x * range, y: from.y + dir.y * range, z: from.z + dir.z * range };
@@ -50,5 +44,14 @@ export function resolveShot(world: World, shooter: PlayerPose, targets: ShotTarg
     }
   }
   const to: Vec3 = { x: from.x + dir.x * bestT, y: from.y + dir.y * bestT, z: from.z + dir.z * bestT };
-  return { from, to, hitPlayerId, part, damage: part ? damageForPart(part) : 0 };
+  return { from, to, hitPlayerId, part, damage: part ? damage[part] : 0 };
+}
+
+/**
+ * Hitscan: ray from the shooter's eye along yaw/pitch, up to `range`.
+ * Voxels and player body-part boxes compete; the nearest wins. Returns the
+ * tracer endpoint, the id of the hit player (if any), the part and damage.
+ */
+export function resolveShot(world: World, shooter: PlayerPose, targets: ShotTarget[], range: number): ShotResult {
+  return resolveRay(world, eyePosition(shooter), forwardVector(shooter.yaw, shooter.pitch), targets, range);
 }

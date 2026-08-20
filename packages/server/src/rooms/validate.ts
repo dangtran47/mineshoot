@@ -1,5 +1,5 @@
-import { ATTACK_LIGHT, CTF_CAPTURE_LIMIT_OPTIONS, CTF_DEFAULT_CAPTURE_LIMIT, DEFAULT_BOT_SKILL, DEFAULT_DURATION_MIN, DEFAULT_ROOM_MODE, DEFAULT_WEAPON_MODE, DURATION_OPTIONS_MIN, MAX_BOTS, MAX_NAME_LEN, TEAM_NONE, WEAPON_MODES, WORLD_SX, WORLD_SZ, isAttackKind, isBotSkill, isMeleeKind, isRoomMode, isTeam } from '@mineshoot/shared';
-import type { BotSkill, PoseMsg, RoomMode, SelectMeleeMsg, ShootMsg, SwingMsg, Team, Weapon, WeaponMode } from '@mineshoot/shared';
+import { ATTACK_LIGHT, CTF_CAPTURE_LIMIT_OPTIONS, CTF_DEFAULT_CAPTURE_LIMIT, DEFAULT_BOT_SKILL, DEFAULT_DURATION_MIN, DEFAULT_ROOM_MODE, DEFAULT_WEAPON_MODE, DURATION_OPTIONS_MIN, MAX_BOTS, MAX_NAME_LEN, TEAM_NONE, GUN_TASER, WEAPON_MELEE, WEAPON_MODES, WEAPON_PISTOL, WEAPON_PRIMARY, WEAPON_TASER, WORLD_SX, WORLD_SZ, isAttackKind, isBotSkill, isGunSlot, isMeleeKind, isPrimaryKind, isRoomMode, isTeam, isWeapon } from '@mineshoot/shared';
+import type { BotSkill, PoseMsg, ReloadMsg, RoomMode, SelectWeaponMsg, ShootMsg, SwingMsg, Team, ThrowMsg, Weapon, WeaponMode } from '@mineshoot/shared';
 
 export function sanitizeName(raw: unknown, fallback: string): string {
   if (typeof raw !== 'string') return fallback;
@@ -88,12 +88,23 @@ export function parsePose(msg: unknown, bounds: Bounds = ARENA_BOUNDS): PoseMsg 
   const p = parsePoseLike(msg, bounds);
   if (!p) return null;
   const w = (msg as Record<string, unknown>).weapon;
-  const weapon: Weapon = w === 1 ? 1 : 0;
+  const weapon: Weapon = isWeapon(w) ? w : WEAPON_PISTOL;
   return { ...p, weapon };
 }
 
 export function parseShoot(msg: unknown, bounds: Bounds = ARENA_BOUNDS): ShootMsg | null {
-  return parsePoseLike(msg, bounds);
+  const p = parsePoseLike(msg, bounds);
+  if (!p) return null;
+  const w = (msg as Record<string, unknown>).weapon;
+  return { ...p, weapon: isWeapon(w) && isGunSlot(w) ? w : WEAPON_PISTOL };
+}
+
+/** Throw: pose-like + the hold charge (0..1; garbage → a tap). */
+export function parseThrow(msg: unknown, bounds: Bounds = ARENA_BOUNDS): ThrowMsg | null {
+  const p = parsePoseLike(msg, bounds);
+  if (!p) return null;
+  const c = (msg as Record<string, unknown>).charge;
+  return { ...p, charge: finite(c) ? clamp(c, 0, 1) : 0 };
 }
 
 export function parseSwing(msg: unknown, bounds: Bounds = ARENA_BOUNDS): SwingMsg | null {
@@ -108,17 +119,26 @@ export function parseCharge(msg: unknown): number | null {
   return Number.isInteger(msg) ? (msg as number) : null;
 }
 
-/** Reload payload: the sender's spawn epoch. */
-export const parseReload = parseCharge;
+/** Reload payload: {epoch, weapon} for a gun slot (a bare epoch means the pistol). */
+export function parseReload(msg: unknown): ReloadMsg | null {
+  if (Number.isInteger(msg)) return { epoch: msg as number, weapon: WEAPON_PISTOL };
+  if (typeof msg !== 'object' || msg === null) return null;
+  const m = msg as Record<string, unknown>;
+  if (!Number.isInteger(m.epoch) || !isWeapon(m.weapon) || !isGunSlot(m.weapon)) return null;
+  return { epoch: m.epoch as number, weapon: m.weapon };
+}
 /** Charge-cancel payload: the sender's spawn epoch. */
 export const parseChargeCancel = parseCharge;
 /** Drop-flag payload: the sender's spawn epoch. */
 export const parseDropFlag = parseCharge;
 
-/** Training-range melee pick: integer epoch + a known melee kind. */
-export function parseSelectMelee(msg: unknown): SelectMeleeMsg | null {
+/** Training-range weapon pick: integer epoch + a melee kind for the melee slot or a primary kind for the primary slot. */
+export function parseSelectWeapon(msg: unknown): SelectWeaponMsg | null {
   if (typeof msg !== 'object' || msg === null) return null;
   const m = msg as Record<string, unknown>;
-  if (!Number.isInteger(m.epoch) || !isMeleeKind(m.melee)) return null;
-  return { epoch: m.epoch as number, melee: m.melee };
+  if (!Number.isInteger(m.epoch)) return null;
+  if (m.slot === WEAPON_MELEE && isMeleeKind(m.kind)) return { epoch: m.epoch as number, slot: WEAPON_MELEE, kind: m.kind };
+  if (m.slot === WEAPON_PRIMARY && isPrimaryKind(m.kind)) return { epoch: m.epoch as number, slot: WEAPON_PRIMARY, kind: m.kind };
+  if (m.slot === WEAPON_TASER && m.kind === GUN_TASER) return { epoch: m.epoch as number, slot: WEAPON_TASER, kind: GUN_TASER };
+  return null;
 }

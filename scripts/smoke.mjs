@@ -2,13 +2,16 @@
 // then a bot room (weapon drop), a training range, and a capture-the-flag room (take → carry → score).
 // Usage: node scripts/smoke.mjs [outDir]
 // Needs: MINESHOOT_TEST=1 server on :2567 and vite client on :5173 (override the client with SMOKE_URL).
+// SMOKE_DURATION_MS (default 12000) stretches the match budget for loaded machines (swiftshader
+// screenshots slow down and the match can end mid-script otherwise).
 import { createRequire } from 'node:module';
 import path from 'node:path';
 const require = createRequire(import.meta.url);
 const pw = require('playwright-core');
 
 const out = process.argv[2] ?? '/tmp';
-const URL = `${process.env.SMOKE_URL ?? 'http://localhost:5173'}/?testDurationMs=12000`;
+const durationMs = Number(process.env.SMOKE_DURATION_MS ?? 12000);
+const URL = `${process.env.SMOKE_URL ?? 'http://localhost:5173'}/?testDurationMs=${durationMs}`;
 const browser = await pw.chromium.launch({
   channel: 'chrome',
   headless: true,
@@ -64,9 +67,10 @@ const remoteCount = (p) => p.evaluate(() => { let n = 0; window.__mineshoot.room
 console.log('players seen by alice/bob:', await remoteCount(a), await remoteCount(b));
 await shot(b, 'bob-sees-alice.png');
 
-// Alice fires the gun: a level shot from 6 blocks lands on Bob's head → 100 damage → kill.
+// Alice fires the pistol (a deathmatch spawn holds a random primary, so switch first):
+// a level shot from 6 blocks lands on Bob's head → 100 damage → kill.
 console.log('health before:', await a.textContent('.health .hp'), await b.textContent('.health .hp'));
-await a.evaluate(() => { const g = window.__mineshoot; g.weapons.mouseDown(performance.now()); g.weapons.mouseUp(); });
+await a.evaluate(() => { const g = window.__mineshoot; g.weapons.select(0); g.weapons.mouseDown(performance.now()); g.weapons.mouseUp(); });
 await a.waitForFunction(() => document.querySelector('.stats').textContent.includes('K 1'), null, { timeout: 4000 });
 console.log('alice stats:', await a.textContent('.stats'), '| ammo:', await a.textContent('.weapon .ammo'));
 await b.waitForFunction(() => !document.querySelector('.center-msg').classList.contains('hidden'), null, { timeout: 4000 });
@@ -116,9 +120,9 @@ console.log('bob weapon hud icon:', await b.evaluate(() => document.querySelecto
 await shot(b, 'bob-revenge.png');
 
 
-// Match ends at 12s → results on both.
-await a.waitForSelector('.results', { timeout: 15000 });
-await b.waitForSelector('.results', { timeout: 15000 });
+// Match ends at the test duration → results on both.
+await a.waitForSelector('.results', { timeout: durationMs + 5000 });
+await b.waitForSelector('.results', { timeout: durationMs + 5000 });
 console.log('results alice:', (await a.textContent('.results table')).replace(/\s+/g, ' ').trim());
 await shot(a, 'results.png');
 await a.click('.results .back');
