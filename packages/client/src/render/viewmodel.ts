@@ -152,6 +152,12 @@ export class ViewModel {
     return null;
   }
 
+  /** World position of the held gun's barrel tip (tracer origin), or null for melee / grenades. */
+  muzzleWorld(out = new THREE.Vector3()): THREE.Vector3 | null {
+    const muzzle = this.activeGun()?.prop.muzzle;
+    return muzzle ? muzzle.getWorldPosition(out) : null;
+  }
+
   /** Swap the melee prop (sword ↔ a picked-up drop weapon). */
   setMelee(kind: MeleeKind): void {
     if (kind === this.melee) return;

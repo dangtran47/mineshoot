@@ -44,6 +44,26 @@ describe('Humanoid weapon orientation', () => {
   });
 });
 
+describe('Humanoid.muzzleWorld', () => {
+  it('returns the rendered gun tip: forward of the body, moving with the pose', () => {
+    const h = new Humanoid(0);
+    h.setWeapon(WEAPON_PISTOL);
+    h.setPose(10, 2, 5, 0, 0, 0);
+    h.update(0);
+    const m = h.muzzleWorld();
+    expect(m).not.toBeNull();
+    expect(m!.z).toBeLessThan(5 - 0.3); // yaw 0 → the humanoid faces world -z
+    expect(m!.y).toBeGreaterThan(2); // held up in the arm, not at the feet
+    expect(Math.hypot(m!.x - 10, m!.z - 5)).toBeLessThan(1.6); // still in the hand
+  });
+
+  it('is null while melee is held', () => {
+    const h = new Humanoid(0);
+    h.setWeapon(WEAPON_MELEE);
+    expect(h.muzzleWorld()).toBeNull();
+  });
+});
+
 describe('Humanoid.setColor', () => {
   const meshColors = (h: Humanoid): Set<number> => {
     const colors = new Set<number>();

@@ -47,10 +47,12 @@ export function buildGunProp(kind: GunKind): MeleeProp {
   const group = new THREE.Group();
   group.userData.gunProp = true;
   const glow: THREE.MeshLambertMaterial[] = [];
+  let muzzle: THREE.Mesh | undefined;
+  const flash = (z: number): THREE.Mesh => (muzzle = muzzleFlash(glow, z));
   switch (kind) {
     case GUN_PISTOL:
       // Chunky dark body, short barrel, wooden grip (today's gun).
-      group.add(at(box(0.12, 0.16, 0.45, DARK), 0, 0, -0.15), at(box(0.06, 0.06, 0.2, GUNMETAL), 0, 0.03, -0.45), at(box(0.08, 0.16, 0.08, WOOD), 0, -0.14, 0.02), muzzleFlash(glow, -0.6));
+      group.add(at(box(0.12, 0.16, 0.45, DARK), 0, 0, -0.15), at(box(0.06, 0.06, 0.2, GUNMETAL), 0, 0.03, -0.45), at(box(0.08, 0.16, 0.08, WOOD), 0, -0.14, 0.02), flash(-0.6));
       break;
     case GUN_RIFLE:
       // Long body + barrel, wooden stock behind the grip, magazine under the body.
@@ -60,7 +62,7 @@ export function buildGunProp(kind: GunKind): MeleeProp {
         at(box(0.1, 0.22, 0.25, WOOD), 0, -0.05, 0.15),
         at(box(0.08, 0.16, 0.08, WOOD), 0, -0.16, -0.05),
         at(box(0.06, 0.2, 0.08, DARK), 0, -0.18, -0.35),
-        muzzleFlash(glow, -1.15),
+        flash(-1.15),
       );
       break;
     case GUN_SMG:
@@ -71,7 +73,7 @@ export function buildGunProp(kind: GunKind): MeleeProp {
         at(box(0.08, 0.14, 0.08, DARK), 0, -0.13, 0),
         at(box(0.06, 0.26, 0.06, DARK), 0, -0.2, -0.3),
         at(box(0.04, 0.04, 0.3, STEEL), 0, 0.02, 0.15),
-        muzzleFlash(glow, -0.78),
+        flash(-0.78),
       );
       break;
     case GUN_SHOTGUN:
@@ -82,7 +84,7 @@ export function buildGunProp(kind: GunKind): MeleeProp {
         at(box(0.09, 0.09, 0.75, GUNMETAL), 0, -0.06, -0.62),
         at(box(0.1, 0.18, 0.2, WOOD), 0, -0.06, 0.15),
         at(box(0.1, 0.1, 0.25, WOOD), 0, -0.1, -0.55),
-        muzzleFlash(glow, -1.05),
+        flash(-1.05),
       );
       break;
     case GUN_SNIPER:
@@ -94,7 +96,7 @@ export function buildGunProp(kind: GunKind): MeleeProp {
         at(box(0.09, 0.2, 0.25, OLIVE), 0, -0.05, 0.15),
         at(box(0.06, 0.16, 0.06, DARK), 0, -0.14, -0.05),
         at(box(0.04, 0.16, 0.04, DARK), 0, -0.15, -0.9),
-        muzzleFlash(glow, -1.4),
+        flash(-1.4),
       );
       break;
     case GUN_TASER:
@@ -105,13 +107,13 @@ export function buildGunProp(kind: GunKind): MeleeProp {
         at(box(0.03, 0.03, 0.12, STEEL), -0.03, 0.03, -0.42),
         at(box(0.03, 0.03, 0.12, STEEL), 0.03, 0.03, -0.42),
         at(box(0.08, 0.16, 0.08, DARK), 0, -0.14, 0.02),
-        muzzleFlash(glow, -0.5),
+        flash(-0.5),
       );
       break;
     default:
       break; // GUN_NONE: nothing in the hand
   }
-  return { group, glow };
+  return { group, glow, muzzle };
 }
 
 /** A grenade: olive body, dark cap, small lever; ~0.3 tall, centred at the origin. */

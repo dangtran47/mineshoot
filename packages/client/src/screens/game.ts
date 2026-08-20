@@ -139,6 +139,9 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     epoch,
   });
   const muzzle = (): THREE.Vector3 => {
+    // The view model's actual barrel tip; the hand-tuned offset only covers slots with no gun out.
+    const tip = viewModel.muzzleWorld(new THREE.Vector3());
+    if (tip) return tip;
     const f = forwardVector(look.yaw, look.pitch);
     const right = new THREE.Vector3(Math.cos(look.yaw), 0, -Math.sin(look.yaw));
     return new THREE.Vector3(local.state.x, local.state.y + EYE_HEIGHT, local.state.z)
@@ -404,7 +407,8 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
   };
 
   const onShot = (m: ShotMsg): void => {
-    const from = m.shooterId === meId ? muzzle() : m.from;
+    // Start tracers at the rendered gun tip, not the shooter's eye; the server's `from` is the fallback.
+    const from = m.shooterId === meId ? muzzle() : remotes.muzzleWorld(m.shooterId) ?? m.from;
     let hitMe = 0;
     let hitOther = false;
     let head = false;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { GUN_KINDS, GUN_NONE, GUN_SHOTGUN, MELEE_AXE, WEAPON_GRENADE, WEAPON_MELEE, WEAPON_PRIMARY } from '@mineshoot/shared';
-import { buildDropProp, buildGrenadeProp, buildGunProp } from '../src/render/gunProps';
+import { PROP_LENGTH, buildDropProp, buildGrenadeProp, buildGunProp } from '../src/render/gunProps';
 import { disposeProp } from '../src/render/meleeProps';
 
 describe('gunProps', () => {
@@ -22,6 +22,16 @@ describe('gunProps', () => {
     }
     expect(seen.size).toBe(GUN_KINDS.length); // no two kinds look identical
     expect(buildGunProp(GUN_NONE).group.children).toHaveLength(0);
+  });
+  it('exposes the muzzle at the barrel tip of every real gun (tracers start there)', () => {
+    for (const k of GUN_KINDS) {
+      const p = buildGunProp(k);
+      expect(p.muzzle, `gun kind ${k}`).toBeDefined();
+      // The tip sits at (or just past) the end of the prop, on the barrel axis.
+      expect(p.muzzle!.position.z).toBeLessThanOrEqual(-(PROP_LENGTH[k] - 0.15));
+      disposeProp(p);
+    }
+    expect(buildGunProp(GUN_NONE).muzzle).toBeUndefined();
   });
   it('grenade prop is a small ball; buildDropProp routes by slot', () => {
     const g = buildGrenadeProp();

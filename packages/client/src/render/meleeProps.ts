@@ -19,6 +19,8 @@ import type { MeleeKind } from '@mineshoot/shared';
 export interface MeleeProp {
   group: THREE.Group;
   glow: THREE.MeshLambertMaterial[];
+  /** Barrel tip (guns only): tracers start at this object's world position. */
+  muzzle?: THREE.Object3D;
 }
 
 const WOOD = 0x3a2a1a;

@@ -125,6 +125,12 @@ export class RemotePlayers {
     this.remotes.get(id)?.humanoid.shot(now);
   }
 
+  /** Rendered barrel tip of `id`'s held gun (tracer origin), or null (unknown player / no gun out). */
+  muzzleWorld(id: string): Vec3 | null {
+    const m = this.remotes.get(id)?.humanoid.muzzleWorld();
+    return m ? { x: m.x, y: m.y, z: m.z } : null;
+  }
+
   /** Feet position as currently rendered (interpolated), or null if we don't know that player. */
   position(id: string): Vec3 | null {
     const r = this.remotes.get(id);

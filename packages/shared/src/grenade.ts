@@ -28,9 +28,9 @@ export const GRENADE_FRICTION = 0.7;
 export const GRENADE_FUSE_MS = 2500;
 export const GRENADE_THROW_COOLDOWN_MS = 600;
 export const GRENADE_SERVER_MIN_INTERVAL_MS = 550;
-export const GRENADE_BLAST_RADIUS = 4;
+export const GRENADE_BLAST_RADIUS = 5;
 export const GRENADE_DAMAGE_CENTER = 100;
-export const GRENADE_DAMAGE_EDGE = 20;
+export const GRENADE_DAMAGE_EDGE = 30;
 /** Physics sub-steps per 50 ms server tick. */
 export const GRENADE_SUBSTEPS = 4;
 

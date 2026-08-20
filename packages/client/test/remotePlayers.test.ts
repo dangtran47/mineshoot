@@ -76,6 +76,20 @@ describe('RemotePlayers colors', () => {
   });
 });
 
+describe('RemotePlayers.muzzleWorld', () => {
+  it('gives the rendered gun tip for a known shooter, null otherwise', () => {
+    const rp = new RemotePlayers();
+    rp.add('a', player()); // pistol out by default (weapon 0)
+    rp.update(0);
+    const m = rp.muzzleWorld('a');
+    expect(m).not.toBeNull();
+    expect(Math.hypot(m!.x - 14.5, m!.z - 4.5)).toBeLessThan(1.6); // at the player, not at the eye ray
+    expect(m!.y).toBeGreaterThan(1); // in the raised arm
+    expect(rp.muzzleWorld('nobody')).toBeNull();
+    rp.dispose();
+  });
+});
+
 describe('RemotePlayers nametag gating', () => {
   it('shows the tag only while the crosshair rests on that player', () => {
     const rp = new RemotePlayers();

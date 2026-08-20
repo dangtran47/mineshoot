@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { MELEE_KINDS } from '@mineshoot/shared';
+import { GUN_SNIPER, MELEE_KINDS, WEAPON_GRENADE, WEAPON_MELEE, WEAPON_PRIMARY } from '@mineshoot/shared';
 import { ViewModel } from '../src/render/viewmodel';
 
 /** World-space direction of one of the held prop's local axes. */
@@ -66,6 +66,39 @@ describe('ViewModel gun kick', () => {
     vm.fire();
     vm.update(0.001, false);
     expect(visibleHolder(vm).position.z).toBeCloseTo((1 - 0.001 * 8) * 0.12);
+  });
+});
+
+describe('ViewModel muzzle', () => {
+  it('muzzleWorld sits at the held gun, in front of and offset from the camera', () => {
+    const camera = new THREE.PerspectiveCamera();
+    camera.position.set(3, 5, 7);
+    const vm = new ViewModel(camera); // pistol out by default
+    camera.updateMatrixWorld(true);
+    const m = vm.muzzleWorld(new THREE.Vector3());
+    expect(m).not.toBeNull();
+    expect(m!.distanceTo(camera.position)).toBeLessThan(1.5); // in the hand, not at the hit point
+    expect(m!.z).toBeLessThan(camera.position.z); // in front (camera looks down -z)
+  });
+
+  it('follows the primary gun prop when that slot is out', () => {
+    const camera = new THREE.PerspectiveCamera();
+    const vm = new ViewModel(camera);
+    vm.setGun(GUN_SNIPER);
+    vm.setWeapon(WEAPON_PRIMARY);
+    camera.updateMatrixWorld(true);
+    const pistolTip = new ViewModel(new THREE.PerspectiveCamera()).muzzleWorld(new THREE.Vector3());
+    const sniperTip = vm.muzzleWorld(new THREE.Vector3());
+    expect(sniperTip).not.toBeNull();
+    expect(sniperTip!.z).toBeLessThan(pistolTip!.z); // longer barrel reaches further forward
+  });
+
+  it('is null with melee or a grenade in hand', () => {
+    const vm = new ViewModel(new THREE.PerspectiveCamera());
+    vm.setWeapon(WEAPON_MELEE);
+    expect(vm.muzzleWorld(new THREE.Vector3())).toBeNull();
+    vm.setWeapon(WEAPON_GRENADE);
+    expect(vm.muzzleWorld(new THREE.Vector3())).toBeNull();
   });
 });
 

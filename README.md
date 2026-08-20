@@ -94,7 +94,7 @@ empty and is filled from drops.
   | --- | --- | --- | --- | --- | --- | --- |
   | Rifle | 25 | 150 ms | 2.0 s | 60 | 70 / 25 / 12 | full-auto, slight spread (1.5°); spray climbs ~1.3°/shot then S-drifts right, then left |
   | SMG | 35 | 80 ms | 1.8 s | 40 | 40 / 15 / 8 | full-auto, wide spread (3°); soft ~0.7°/shot climb with a gentle zigzag |
-  | Shotgun | 6 | 900 ms | 2.5 s | 18 | 35 / 20 / 10 **per pellet** | 8 pellets in a 6° cone — one-shots up close, useless far; 3° kick per shot |
+  | Shotgun | 6 | 600 ms | 2.5 s | 18 | 35 / 20 / 10 **per pellet** | 8 pellets in a 6° cone — one-shots up close, useless far; 3° kick per shot |
   | Sniper | 4 | 1.2 s | 2.8 s | 60 | 100 / 100 / 60 | `RMB` opens the round scope (×3); no crosshair from the hip; body shots kill; 4° kick per shot |
 
   **Recoil** — every shot kicks the camera along a **fixed per-gun pattern**
@@ -112,8 +112,8 @@ empty and is filled from drops.
   short (speed 10), a full **0.9 s** hold throws hard (speed 24), and you can
   hold as long as you like — switching weapons while holding puts the grenade
   back unthrown. They fly ballistically, bounce off blocks and burst after a
-  **2.5 s** fuse: 100 damage at the centre falling linearly to 20 at the
-  **4-block** edge; walls block the blast, and your own grenade hurts you too
+  **2.5 s** fuse: 100 damage at the centre falling linearly to 30 at the
+  **5-block** edge; walls block the blast, and your own grenade hurts you too
   (no blocks are destroyed). Spawn with 2, carry at most 4; `Grenades ×2`
   drops refill.
 - **Sword** — short-range melee. `LMB` is a quick light slash (head 45 / body

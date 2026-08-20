@@ -54,7 +54,7 @@ export const GUN_STATS: Record<GunKind, GunSpec> = {
   [GUN_PISTOL]: { name: 'Pistol', magSize: GUN_MAG_SIZE, cooldownMs: GUN_COOLDOWN_MS, serverMinIntervalMs: GUN_SERVER_MIN_INTERVAL_MS, reloadMs: GUN_RELOAD_MS, serverReloadMinMs: GUN_RELOAD_SERVER_MIN_MS, range: GUN_RANGE, damage: { ...GUN_DAMAGE }, pellets: 1, spreadDeg: 0, auto: false, zoom: 1, consumable: false },
   [GUN_RIFLE]: spec({ name: 'Rifle', magSize: 25, cooldownMs: 150, reloadMs: 2000, range: 60, damage: { head: 70, torso: 25, legs: 12 }, pellets: 1, spreadDeg: 1.5, auto: true, zoom: 1, consumable: false }),
   [GUN_SMG]: spec({ name: 'SMG', magSize: 35, cooldownMs: 80, reloadMs: 1800, range: 40, damage: { head: 40, torso: 15, legs: 8 }, pellets: 1, spreadDeg: 3, auto: true, zoom: 1, consumable: false }),
-  [GUN_SHOTGUN]: spec({ name: 'Shotgun', magSize: 6, cooldownMs: 900, reloadMs: 2500, range: 18, damage: { head: 35, torso: 20, legs: 10 }, pellets: 8, spreadDeg: 6, auto: false, zoom: 1, consumable: false }),
+  [GUN_SHOTGUN]: spec({ name: 'Shotgun', magSize: 6, cooldownMs: 600, reloadMs: 2500, range: 18, damage: { head: 35, torso: 20, legs: 10 }, pellets: 8, spreadDeg: 6, auto: false, zoom: 1, consumable: false }),
   [GUN_SNIPER]: spec({ name: 'Sniper', magSize: 4, cooldownMs: 1200, reloadMs: 2800, range: 60, damage: { head: 100, torso: 100, legs: 60 }, pellets: 1, spreadDeg: 0, auto: false, zoom: 3, consumable: false }),
   // Two charges, then it's gone.
   [GUN_TASER]: spec({ name: 'Taser', magSize: 2, cooldownMs: 1000, reloadMs: 0, range: 5, damage: { head: 100, torso: 100, legs: 100 }, pellets: 1, spreadDeg: 0, auto: false, zoom: 1, consumable: true }),
