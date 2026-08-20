@@ -9,6 +9,13 @@ map, gotchas) is the source of truth. This file only adds Claude Code specifics.
 
 - **Start of a task:** skim `AGENTS.md`; open `docs/ARCHITECTURE.md` when the
   task touches networking, the room, physics/combat rules or bots.
+- **Delegate broad exploration:** when a question needs sweeping many files
+  ("where is X handled", "what would a change to Y touch"), send a read-only
+  subagent (Explore) and keep the main context for the change itself.
+- **Memory vs docs:** repo facts (code layout, rules, gotchas) go in
+  `AGENTS.md`/`docs/`, never only in auto-memory; use auto-memory for what
+  doesn't belong in the repo (this machine's quirks, user preferences,
+  in-flight multi-session work).
 - **Verification before claiming done:** run `npm test` and `npm run build`
   and paste the tail of the output. For UI/network changes also run
   `npm run smoke` (server started with `MINESHOOT_TEST=1 make server`, client

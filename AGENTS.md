@@ -187,6 +187,23 @@ scripts/smoke.mjs  playwright-core + headless Chrome (swiftshader) e2e
 docs/plans/        design plans behind bigger features (e.g. the CTF mode)
 ```
 
+## Finding your way (context discipline)
+
+- **Map first, search second.** Pick files from the quick map above; open only
+  what the task touches. Fall back to repo-wide search when the map doesn't
+  answer, and treat that as a sign the map needs a fix.
+- **Read narrowly.** Prefer the specific function/section over whole files or
+  whole packages; the tests next to a module are the fastest spec for it.
+- **Write down what cost you time.** If you had to *discover* something —
+  hidden coupling, a non-obvious "why", an environment quirk — record it in
+  the same change: gotchas → "Known gotchas", design "why" →
+  `docs/ARCHITECTURE.md` or the feature's plan, new/renamed/moved module →
+  the quick map. If the next agent would have to re-discover it, it belongs
+  in a doc.
+- **Keep this file loadable.** These docs are read at the start of every
+  session; keep entries one-to-three lines and prune ones that stop being
+  true instead of stacking corrections.
+
 ## How to work here
 
 - **Tests first** for anything in `shared` and for server rules: add/extend
