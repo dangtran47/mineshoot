@@ -39,7 +39,7 @@ import {
   teamName,
   weaponAllowed,
 } from '@mineshoot/shared';
-import type { AttackKind, DropSlot, ExplodeMsg, FlagEventMsg, GunKind, HitMsg, KillMsg, MeleeKind, PickupMsg, PoseMsg, RankRow, RoomMode, SelectWeaponMsg, ShootMsg, ShotMsg, SwingMsg, SwungMsg, Team, ThrowMsg, Weapon } from '@mineshoot/shared';
+import type { AttackKind, DropSlot, ExplodeMsg, FlagEventMsg, GunKind, HitMsg, KillMsg, MeleeKind, PickupMsg, PoseMsg, RankRow, RoomMode, SelectWeaponMsg, ShootMsg, ShotMsg, SwingMsg, SwungMsg, Team, ThrowMsg, Vec3, Weapon } from '@mineshoot/shared';
 import { displayName } from '../net';
 import type { GameRoom, NetFlag, NetPlayer } from '../net';
 import { FlagsView } from '../render/flagsView';
@@ -57,6 +57,8 @@ import { RecoilController } from '../game/recoil';
 import { RemotePlayers } from '../game/remotePlayers';
 import { Weapons } from '../game/weapons';
 import { Hud } from '../hud/hud';
+import { Minimap } from '../hud/minimap';
+import type { MapDot } from '../game/minimapModel';
 import { awardBadges } from '../hud/icons';
 
 /** Keys 6–0 pick a melee weapon directly where the room allows it (training range, offline sandbox). */
@@ -88,7 +90,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
   // The offline sandbox behaves like a training range (every melee weapon is a key away).
   const roomMode: RoomMode = room?.state.mode ?? 'training';
   const ctf = isCtf(roomMode);
-  const { world, spawnPoints } = generateWorldFor(roomMode, opts.seed);
+  const { world, spawnPoints, bases } = generateWorldFor(roomMode, opts.seed);
 
   const bundle = createScene(container);
   const { scene, camera, renderer } = bundle;
@@ -114,6 +116,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
   const look = new PointerLook(renderer.domElement);
   const recoil = new RecoilController(look);
   const hud = new Hud(container);
+  const minimap = new Minimap(hud.root, world, ctf ? bases : null);
 
   const meNet = (): NetPlayer | undefined => room?.state.players.get(meId);
   const initial = meNet();
@@ -585,6 +588,33 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     }
     tracers.update(now);
     blood.update(now);
+    // Minimap: my team is always drawn, enemies only where somebody on my side
+    // has line of sight, and the enemy flag leaves a last-seen pin behind.
+    const myTeam = meNet()?.team ?? TEAM_NONE;
+    const mates: MapDot[] = [];
+    const foes: { id: string; pos: Vec3; team: number }[] = [];
+    const observers: Vec3[] = [{ x: local.state.x, y: local.state.y, z: local.state.z }];
+    room?.state.players.forEach((p, id) => {
+      if (id === meId || !p.alive) return;
+      const at = remotes.position(id) ?? { x: p.x, y: p.y, z: p.z };
+      if (isTeam(myTeam) && p.team === myTeam) {
+        mates.push({ id, x: at.x, z: at.z, team: p.team });
+        observers.push({ x: at.x, y: at.y, z: at.z });
+      } else {
+        foes.push({ id, pos: { x: at.x, y: at.y, z: at.z }, team: p.team });
+      }
+    });
+    const mine = ctf && isTeam(myTeam) ? flagOf(myTeam) : undefined;
+    const theirs = ctf && isTeam(myTeam) ? flagOf(otherTeam(myTeam)) : undefined;
+    minimap.update(now, {
+      self: { x: local.state.x, y: local.state.y, z: local.state.z, yaw: look.yaw, alive: local.alive },
+      myTeam,
+      mates,
+      enemies: foes,
+      observers,
+      ownFlag: mine ? { status: mine.status, x: mine.x, y: mine.y, z: mine.z } : null,
+      enemyFlag: theirs ? { status: theirs.status, x: theirs.x, y: theirs.y, z: theirs.z } : null,
+    });
     hud.update(now);
     if (room) {
       hud.setTimer(Math.max(0, lastTimeLeft - (now - lastTimeLeftAt)));
@@ -613,6 +643,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     look.dispose();
     keys.dispose();
     hud.dispose();
+    minimap.dispose();
     viewModel.dispose();
     remotes.dispose();
     drops.dispose();

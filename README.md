@@ -37,6 +37,9 @@ around, and shoot each other for 3–15 minutes. Then argue about the K/D table.
   first-person view models for every gun, the grenade and every melee weapon.
 - HUD with health, ammo, timer, kill feed, crosshair, damage vignette,
   floating damage numbers, voxel blood spray, and a Tab scoreboard.
+- Minimap in the top-left corner: your team and your own flag are always on it,
+  while enemies only appear where you or a team-mate has line of sight, and a
+  stolen enemy flag leaves a dimmed last-seen marker behind.
 - **Zero shipped assets**: the block texture atlas is painted onto a canvas at
   boot, everything else is geometry. No images, no audio in the repo.
 

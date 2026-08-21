@@ -173,12 +173,14 @@ packages/client/src/
   game/            localPlayer.ts (60 Hz shared physics), remotePlayers.ts +
                    interpolation.ts (100 ms snapshot interp), weapons.ts
                    (client-side weapon state machine: cooldowns, charge, mag),
-                   recoil.ts (RecoilController: camera kick + settle-back)
+                   recoil.ts (RecoilController: camera kick + settle-back),
+                   minimapModel.ts (minimap line-of-sight/last-seen/coord rules)
   render/          scene, atlas, mesher/worldMesh (per-chunk face culling meshes),
                    humanoid + humanoidAnim, viewmodel, meleeProps, gunProps,
                    dropsView, grenadesView, flagsView, tracers, bloodFx, nametag
   hud/             hud.ts (health/ammo/timer/scoreboard/overlays), killFeed,
-                   damageFx, icons (inline SVG), style.css
+                   damageFx, minimap.ts (canvas map + fog of war), icons
+                   (inline SVG), style.css
   input/           keyboard.ts, pointerLock.ts
 
 packages/*/test/   vitest; server has a real Colyseus integration test that

@@ -113,6 +113,7 @@ input, select {
 .hud .charge .fill { height: 100%; width: 0; background: var(--text); }
 .hud .charge.ready .fill { background: var(--accent2); box-shadow: 0 0 6px var(--accent2); }
 .hud .charge.hidden { display: none; }
+.hud .minimap { position: absolute; left: 14px; top: 12px; border: 1px solid var(--border); border-radius: 6px; background: rgba(0,0,0,0.45); opacity: 0.92; image-rendering: pixelated; }
 .hud .top { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); text-align: center; }
 .hud .timer { font-size: 30px; font-weight: 700; text-shadow: 0 2px 4px #000; font-variant-numeric: tabular-nums; }
 .hud .timer.low { color: var(--danger); }
