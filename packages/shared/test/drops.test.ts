@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { DROP_KINDS, DROP_MIN_SPACING, MELEE_KATANA, MELEE_SWORD } from '../src/melee';
-import { dropName, dropPool, pickDropKind, pickDropSpot } from '../src/drops';
-import { GRENADE_DROP_AMOUNT } from '../src/grenade';
-import { GUN_SHOTGUN, GUN_TASER, PRIMARY_KINDS } from '../src/guns';
+import { autoPickUpAllowed, dropName, dropPool, pickDropKind, pickDropSpot } from '../src/drops';
+import { GRENADE_DROP_AMOUNT, GRENADE_MAX } from '../src/grenade';
+import { GUN_NONE, GUN_RIFLE, GUN_SHOTGUN, GUN_TASER, PRIMARY_KINDS } from '../src/guns';
 import { WEAPON_GRENADE, WEAPON_MELEE, WEAPON_PRIMARY, WEAPON_TASER } from '../src/protocol';
 import { createRng } from '../src/rng';
 import { PLATEAU_MAX, PLATEAU_MIN, generateWorld, isStandable } from '../src/worldgen';
@@ -30,6 +30,21 @@ describe('drops', () => {
     }
     expect(seen.size).toBe(dropPool('all').length);
     for (let i = 0; i < 50; i++) expect(pickDropKind(rng, 'sword').slot).toBe(WEAPON_MELEE);
+  });
+  it('autoPickUpAllowed fills only an empty slot (grenades: only below the cap)', () => {
+    const bare = { gun: GUN_NONE, taser: GUN_NONE, melee: MELEE_SWORD, grenades: 0 };
+    expect(autoPickUpAllowed(bare, { slot: WEAPON_PRIMARY, kind: GUN_RIFLE })).toBe(true);
+    expect(autoPickUpAllowed(bare, { slot: WEAPON_TASER, kind: GUN_TASER })).toBe(true);
+    expect(autoPickUpAllowed(bare, { slot: WEAPON_MELEE, kind: MELEE_KATANA })).toBe(true);
+    expect(autoPickUpAllowed(bare, { slot: WEAPON_GRENADE, kind: GRENADE_DROP_AMOUNT })).toBe(true);
+    // Occupied slots never auto-swap: G throws the held weapon away first.
+    expect(autoPickUpAllowed({ ...bare, gun: GUN_SHOTGUN }, { slot: WEAPON_PRIMARY, kind: GUN_RIFLE })).toBe(false);
+    expect(autoPickUpAllowed({ ...bare, taser: GUN_TASER }, { slot: WEAPON_TASER, kind: GUN_TASER })).toBe(false);
+    // The plain sword counts as an empty melee slot; a picked-up blade does not.
+    expect(autoPickUpAllowed({ ...bare, melee: MELEE_KATANA }, { slot: WEAPON_MELEE, kind: MELEE_KATANA })).toBe(false);
+    expect(autoPickUpAllowed({ ...bare, grenades: GRENADE_MAX }, { slot: WEAPON_GRENADE, kind: GRENADE_DROP_AMOUNT })).toBe(false);
+    // Other slots being full does not block an empty one.
+    expect(autoPickUpAllowed({ ...bare, taser: GUN_TASER, melee: MELEE_KATANA }, { slot: WEAPON_PRIMARY, kind: GUN_RIFLE })).toBe(true);
   });
   it('names drops for toasts', () => {
     expect(dropName({ slot: WEAPON_GRENADE, kind: 2 })).toBe('Grenades ×2');

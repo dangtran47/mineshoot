@@ -199,6 +199,12 @@ export interface SelectWeaponMsg {
   kind: number;
 }
 
+/** Throw the held weapon on the ground (G): the primary gun, the taser, or a picked-up blade (back to the sword). The thrown drop expires after DROP_THROWN_LIFETIME_MS. */
+export interface DropWeaponMsg {
+  epoch: number;
+  slot: Weapon;
+}
+
 /** CTF: switch (or pick, before playing) a team; payload is the team. */
 export type SelectTeamMsg = number;
 /** CTF: let go of the carried flag (hand-off); payload is the spawn epoch. */
@@ -292,6 +298,7 @@ export const MSG = {
   reload: 'reload',
   ready: 'ready',
   selectWeapon: 'selectWeapon',
+  dropWeapon: 'dropWeapon',
   throw: 'throw',
   selectTeam: 'selectTeam',
   dropFlag: 'dropFlag',

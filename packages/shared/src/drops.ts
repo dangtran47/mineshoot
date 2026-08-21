@@ -1,7 +1,7 @@
-import { GRENADE_DROP_AMOUNT } from './grenade';
-import { GUN_TASER, PRIMARY_KINDS, gunSpec } from './guns';
+import { GRENADE_DROP_AMOUNT, GRENADE_MAX } from './grenade';
+import { GUN_NONE, GUN_TASER, PRIMARY_KINDS, gunSpec } from './guns';
 import type { GunKind } from './guns';
-import { DROP_KINDS, DROP_MIN_SPACING, meleeStats } from './melee';
+import { DROP_KINDS, DROP_MIN_SPACING, MELEE_SWORD, meleeStats } from './melee';
 import type { MeleeKind } from './melee';
 import { WEAPON_GRENADE, WEAPON_MELEE, WEAPON_PRIMARY, WEAPON_TASER, weaponAllowed } from './protocol';
 import type { WeaponMode } from './protocol';
@@ -23,6 +23,27 @@ export interface Drop extends DropKind {
   x: number;
   y: number;
   z: number;
+}
+
+/** What a player already holds per slot, for the auto-pickup rule. */
+export interface DropHolder {
+  gun: number;
+  taser: number;
+  melee: number;
+  grenades: number;
+}
+
+/**
+ * Walking over a drop only fills an empty slot: an occupied one never
+ * auto-swaps — throw the held weapon away (MSG.dropWeapon, G) first. The
+ * plain spawn sword counts as an empty melee slot; grenade packs top up
+ * until the cap.
+ */
+export function autoPickUpAllowed(holder: DropHolder, drop: DropKind): boolean {
+  if (drop.slot === WEAPON_GRENADE) return holder.grenades < GRENADE_MAX;
+  if (drop.slot === WEAPON_PRIMARY) return holder.gun === GUN_NONE;
+  if (drop.slot === WEAPON_TASER) return holder.taser === GUN_NONE;
+  return holder.melee === MELEE_SWORD;
 }
 
 /** Everything that can drop in a room with this weapon rule (uniform pick). */

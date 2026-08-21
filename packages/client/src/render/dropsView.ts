@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { WEAPON_GRENADE, WEAPON_MELEE, WEAPON_PRIMARY } from '@mineshoot/shared';
+import { WEAPON_GRENADE, WEAPON_MELEE } from '@mineshoot/shared';
 import type { GunKind, Weapon } from '@mineshoot/shared';
 import { PROP_LENGTH, buildDropProp } from './gunProps';
 import { disposeProp } from './meleeProps';
@@ -31,15 +31,18 @@ const CENTER_Z = 0.7;
  */
 const ROLL = Math.PI / 2;
 
+/** The light column peeks just above the hovering weapon — a marker, not a skyline beacon. */
+const BEACON_HEIGHT = 1.5;
+
 /**
  * Weapon drops lying in the arena: the weapon prop hovering just above the
- * ground, slowly spinning and bobbing, under a tall translucent light column
- * so it can be spotted from across the map.
+ * ground, slowly spinning and bobbing, inside a short translucent light
+ * column that rises just past the weapon itself.
  */
 export class DropsView {
   readonly group = new THREE.Group();
   private readonly drops = new Map<string, DropView>();
-  private readonly beaconGeo = new THREE.BoxGeometry(0.35, 6, 0.35);
+  private readonly beaconGeo = new THREE.BoxGeometry(0.35, BEACON_HEIGHT, 0.35);
   private readonly beaconMat = new THREE.MeshBasicMaterial({ color: BEACON_COLOR, transparent: true, opacity: 0.3, depthWrite: false });
   private readonly nadeBeaconMat = new THREE.MeshBasicMaterial({ color: NADE_COLOR, transparent: true, opacity: 0.3, depthWrite: false });
   private readonly padGeo = new THREE.BoxGeometry(1.0, 0.06, 1.0);
@@ -68,7 +71,7 @@ export class DropsView {
     root.add(pivot);
     const nade = slot === WEAPON_GRENADE;
     const beacon = new THREE.Mesh(this.beaconGeo, nade ? this.nadeBeaconMat : this.beaconMat);
-    beacon.position.set(0, 3, 0);
+    beacon.position.set(0, BEACON_HEIGHT / 2, 0);
     const pad = new THREE.Mesh(this.padGeo, nade ? this.nadePadMat : this.padMat);
     pad.position.set(0, 0.04, 0);
     root.add(beacon, pad);

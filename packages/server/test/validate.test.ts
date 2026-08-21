@@ -6,6 +6,7 @@ import {
   parseCharge,
   parseChargeCancel,
   parseDropFlag,
+  parseDropWeapon,
   parseDurationMin,
   parsePose,
   parseReload,
@@ -20,7 +21,7 @@ import {
   sanitizeName,
   sanitizeRoomName,
 } from '../src/rooms/validate';
-import { ATTACK_HEAVY, ATTACK_LIGHT, CTF_DEFAULT_CAPTURE_LIMIT, GUN_PISTOL, GUN_SNIPER, MAX_BOTS, MELEE_KATANA, MELEE_SWORD, TD_DEFAULT_ROUND_LIMIT, TEAM_BLUE, TEAM_NONE, TEAM_RED, WEAPON_GRENADE, WEAPON_MELEE, WEAPON_PISTOL, WEAPON_PRIMARY } from '@mineshoot/shared';
+import { ATTACK_HEAVY, ATTACK_LIGHT, CTF_DEFAULT_CAPTURE_LIMIT, GUN_PISTOL, GUN_SNIPER, MAX_BOTS, MELEE_KATANA, MELEE_SWORD, TD_DEFAULT_ROUND_LIMIT, TEAM_BLUE, TEAM_NONE, TEAM_RED, WEAPON_GRENADE, WEAPON_MELEE, WEAPON_PISTOL, WEAPON_PRIMARY, WEAPON_TASER } from '@mineshoot/shared';
 
 describe('sanitizeName', () => {
   it('trims, strips junk, limits length, falls back', () => {
@@ -187,6 +188,17 @@ describe('ctf options', () => {
     expect(parseTeam(3)).toBe(TEAM_NONE);
     expect(parseTeam('1')).toBe(TEAM_NONE);
     expect(parseTeam(undefined)).toBe(TEAM_NONE);
+  });
+  it('parseDropWeapon wants an integer epoch and a droppable slot', () => {
+    expect(parseDropWeapon({ epoch: 3, slot: WEAPON_PRIMARY })).toEqual({ epoch: 3, slot: WEAPON_PRIMARY });
+    expect(parseDropWeapon({ epoch: 0, slot: WEAPON_TASER })).toEqual({ epoch: 0, slot: WEAPON_TASER });
+    expect(parseDropWeapon({ epoch: 1, slot: WEAPON_MELEE })).toEqual({ epoch: 1, slot: WEAPON_MELEE });
+    expect(parseDropWeapon({ epoch: 1, slot: WEAPON_PISTOL })).toBeNull();
+    expect(parseDropWeapon({ epoch: 1, slot: WEAPON_GRENADE })).toBeNull();
+    expect(parseDropWeapon({ epoch: 1.5, slot: WEAPON_PRIMARY })).toBeNull();
+    expect(parseDropWeapon({ slot: WEAPON_PRIMARY })).toBeNull();
+    expect(parseDropWeapon(2)).toBeNull();
+    expect(parseDropWeapon(null)).toBeNull();
   });
   it('parseDropFlag wants an integer epoch', () => {
     expect(parseDropFlag(2)).toBe(2);

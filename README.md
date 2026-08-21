@@ -67,7 +67,7 @@ around, and shoot each other for 3–15 minutes. Then argue about the K/D table.
 | `RMB` hold, release | **Heavy** melee blow — each weapon's own signature move (overhead, execute, iaido, reap, head-hunt); full damage once fully charged, proportional if you let go earlier · with the sniper: hold to look through the **scope** |
 | `R` | Reload the held gun (automatic when the magazine is empty) |
 | `1`–`5` / mouse wheel | Switch primary gun / pistol / melee / grenade / taser (empty slots are skipped) |
-| `G` | Capture the Flag: put the flag you carry down (hand it to a teammate) |
+| `G` | Throw the held weapon away (frees the slot so you can pick one up off the ground) · Capture the Flag: put the flag you carry down (hand it to a teammate) |
 | `Tab` (hold) | Scoreboard |
 
 Up to **16 players** per room (bots take player slots). Rooms are public and
@@ -88,8 +88,9 @@ empty and is filled from drops.
 - **Pistol** — instant hitscan, one shot per click, 10-round magazine,
   unlimited reloads. Head 100 / torso 30 / legs 15.
 - **Primary guns** — all hitscan, each with its own magazine, cooldown and
-  reload; picked up from drops (they replace the primary you hold and are lost
-  on death). In a **deathmatch** every (re)spawn also rolls a **random
+  reload; picked up from drops into an **empty** slot `1` and lost on death
+  (throw the one you hold away with `G` to take another). In a **deathmatch**
+  every (re)spawn also rolls a **random
   primary** (rifle / SMG / shotgun / sniper — never the taser) and you come
   back holding it; team modes such as CTF keep the pistol-only spawn, and the
   training range lets you pick your own.
@@ -139,9 +140,12 @@ ground, gone after 60 s if nobody takes them; a CTF room drops on its central
 plateau every 12–22 s, up to 5). What drops follows the room's weapon rule:
 **Guns + Sword** rooms draw from the full pool — the four **primaries**, the
 **taser**, **grenade packs** (+2, skipped while you are full) and the four
-blades below; **Sword only** rooms drop blades alone. Walk over the glowing column to pick one up: a gun
-fills slot `1` (replacing the primary you hold), a blade replaces your sword —
-both until you die. Bots pick them up too. Every blade beats the sword
+blades below; **Sword only** rooms drop blades alone. Walking over a drop only
+fills an **empty** slot: a gun arms an empty slot `1`, a blade replaces the
+plain sword — if the slot is taken, press **`G`** to throw the held weapon
+away first (it lies where you stand for **5 s**, then vanishes; you cannot
+take your own throw back for 1.5 s, everyone else can grab it right away).
+Everything picked up is lost on death. Bots pick drops up too. Every blade beats the sword
 somewhere and pays for it somewhere else:
 
 | Weapon | Reach | Light / heavy cone | Light dmg (head/body) | Heavy (`RMB`) | Heavy dmg | Cooldown | Charge | Twist |
@@ -270,7 +274,9 @@ the intersection, and each team spawns in its own zone at the north/south end.
   8 in front of each spawn zone, two of each primary gun (rifle / SMG /
   shotgun / sniper; blades ×2 in a sword-only room) — the **same spots and
   kinds every round**, so you learn where your favourite gun waits. Walk over
-  one to take it; they never expire, and the random timed drops don't run.
+  one with an empty slot `1` to take it (`G` throws the one you hold away);
+  the rows never expire — only thrown-away guns do (5 s) — and the random
+  timed drops don't run.
 - **Between rounds** there is a **5 s intermission** (survivors keep walking,
   nobody respawns), then everyone comes back at their own end with a fresh
   loadout and the weapon rows are laid out again. Kills and deaths carry

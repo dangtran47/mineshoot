@@ -92,14 +92,19 @@ the client hiding a button. Likewise the room mode (`'match'|'training'|'ctf'|'t
 `meleeSelectable(mode, weapons)` gates `selectWeapon` on the server; a match
 never lets you pick a weapon at will — but a deathmatch (re)spawn with guns
 allowed rolls a random primary (`spawnPrimary`, taser excluded); team modes
-(`isTeamMode`: ctf + td) always spawn pistol-only.
+(`isTeamMode`: ctf + td) always spawn pistol-only. Walking over a drop only
+fills an **empty** slot (`autoPickUpAllowed`; the plain sword counts as empty
+melee): to swap, `MSG.dropWeapon` (G) throws the held weapon down as a drop
+that expires after `DROP_THROWN_LIFETIME_MS` (5 s, even in td) with a
+`DROP_THROWN_GRACE_MS` (1.5 s) no-re-pickup grace for the thrower only.
 
 **Team elimination (td) is round-based and server-authoritative.** Rounds
 (`RoomState.roundPhase/round/roundsRed/roundsBlue/roundLimit`) live in
 `ArenaRoom.tickRound/startRound` + pure `roundWinner` in `shared/td.ts`; no
 respawn mid-round, no clocks (`tickTimer` is skipped). Fixed weapon rows come
-from `GeneratedWorld.weaponSpots` × `tdWeaponLoadout` and never expire — only
-the pickup half of `tickDrops` runs in td. Every td spawn is frozen for
+from `GeneratedWorld.weaponSpots` × `tdWeaponLoadout` and never expire — in td
+`tickDrops` skips only the random drop spawning (pickup and thrown-drop expiry
+still run). Every td spawn is frozen for
 `TD_FREEZE_MS` (3-2-1 countdown): the server drops attacks from frozen
 players and holds bots still; kill streaks reset each round
 (`KillTracker.resetStreaks`).
@@ -161,7 +166,8 @@ packages/shared/src/
   raycast.ts hitbox.ts gun.ts   voxel DDA, body-part boxes, resolveShot()/resolveRay()
   sword.ts melee.ts drops.ts    swordVictims()/swordDamage(), MELEE_STATS (light/
                                 heavy AttackSpec per kind), attackSpec(),
-                                dropPool(mode)/pickDropKind()/pickDropSpot()/canPickUp()
+                                dropPool(mode)/pickDropKind()/pickDropSpot()/canPickUp()/
+                                autoPickUpAllowed() (empty-slot pickup rule)
   spawn.ts ranking.ts kills.ts  pickSpawn(), rankPlayers()/rankCtf()/splitTeams(), KillTracker/awards
   ctf.ts           FlagState, flagTouch(), canScore(), canReturn(), teamSpawns(), pickTeam(),
                    botRebalance(), matchWinner(), botCtfGoal()

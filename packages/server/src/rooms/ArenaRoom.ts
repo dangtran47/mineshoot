@@ -37,9 +37,12 @@ import {
   DROP_INTERVAL_MAX_MS,
   DROP_INTERVAL_MIN_MS,
   DROP_LIFETIME_MS,
+  DROP_THROWN_GRACE_MS,
+  DROP_THROWN_LIFETIME_MS,
   DEFAULT_BOT_SKILL,
   DROP_MAX_ACTIVE,
   MELEE_SWORD,
+  autoPickUpAllowed,
   canPickUp,
   createBot,
   createPhysState,
@@ -91,7 +94,7 @@ import {
   throwGrenade,
   weaponAllowed,
 } from '@mineshoot/shared';
-import type { AttackKind, Bot, BotSkill, BotView, ExplodeMsg, FlagEventKind, FlagEventMsg, FlagState, GrenadeState, GunKind, GunSpec, HitMsg, KillMsg, MeleeKind, PickupMsg, PlayerPhysState, PlayerPose, Rect, RoomMode, RoundEventMsg, RoundSide, ShotMsg, ShotRay, ShotTarget, SpawnPoint, SwungMsg, Team, Vec3, Weapon, WeaponMode, World } from '@mineshoot/shared';
+import type { AttackKind, Bot, BotSkill, BotView, DropSlot, ExplodeMsg, FlagEventKind, FlagEventMsg, FlagState, GrenadeState, GunKind, GunSpec, HitMsg, KillMsg, MeleeKind, PickupMsg, PlayerPhysState, PlayerPose, Rect, RoomMode, RoundEventMsg, RoundSide, ShotMsg, ShotRay, ShotTarget, SpawnPoint, SwungMsg, Team, Vec3, Weapon, WeaponMode, World } from '@mineshoot/shared';
 import { DropSchema, FlagSchema, GrenadeSchema, PlayerSchema, RoomState } from './schema';
 import {
   parseBotCount,
@@ -101,6 +104,7 @@ import {
   parseCharge,
   parseChargeCancel,
   parseDropFlag,
+  parseDropWeapon,
   parseDurationMin,
   parsePose,
   parseReload,
@@ -235,6 +239,8 @@ export class ArenaRoom extends Room<RoomState> {
   private dropSeq = 0;
   /** When each drop on the ground expires (server-only). */
   private readonly dropExpiry = new Map<string, number>();
+  /** Who threw a drop away (MSG.dropWeapon) and until when they may not auto-pick it back up. */
+  private readonly dropThrower = new Map<string, { playerId: string; until: number }>();
   /** Live grenade physics (server-only; positions mirrored into state.grenades). */
   private readonly grenadeSim = new Map<string, GrenadeState>();
   private grenadeSeq = 0;
@@ -327,6 +333,7 @@ export class ArenaRoom extends Room<RoomState> {
     this.onMessage(MSG.throw, (client, raw: unknown) => this.handleThrow(client, raw));
     this.onMessage(MSG.selectTeam, (client, raw: unknown) => this.handleSelectTeam(client, raw));
     this.onMessage(MSG.dropFlag, (client, raw: unknown) => this.handleDropFlag(client, raw));
+    this.onMessage(MSG.dropWeapon, (client, raw: unknown) => this.handleDropWeapon(client, raw));
     this.onMessage(MSG.ping, (client, t: unknown) => {
       if (typeof t === 'number') client.send(MSG.pong, t);
     });
@@ -867,24 +874,26 @@ export class ArenaRoom extends Room<RoomState> {
   private removeDrop(id: string): void {
     this.state.drops.delete(id);
     this.dropExpiry.delete(id);
+    this.dropThrower.delete(id);
   }
 
-  /** Spawn due drops, expire stale ones, and hand a drop to the first living player standing on it. */
+  /** Spawn due drops, expire stale ones, and hand a drop to the first living player standing on it with room for it. */
   private tickDrops(now: number): void {
     if (!this.dropsEnabled) return;
-    // TD: the fixed weapon rows replace the random timed drops (and never expire) — only the pickup loop runs.
-    if (!this.td) {
-      if (now >= this.nextDropAt) {
-        if (this.state.drops.size < this.dropMaxActive) this.spawnDrop(now);
-        this.scheduleDrop(now);
-      }
-      for (const [id, expiresAt] of this.dropExpiry) if (now >= expiresAt) this.removeDrop(id);
+    // TD: the fixed weapon rows replace the random timed drops and never expire (they have no dropExpiry entry) — thrown-away weapons still do.
+    if (!this.td && now >= this.nextDropAt) {
+      if (this.state.drops.size < this.dropMaxActive) this.spawnDrop(now);
+      this.scheduleDrop(now);
     }
+    for (const [id, expiresAt] of this.dropExpiry) if (now >= expiresAt) this.removeDrop(id);
     if (this.state.drops.size === 0) return;
     for (const [pid, p] of this.state.players) {
       if (!p.alive) continue;
       for (const [did, d] of this.state.drops) {
-        if (!canPickUp(p, d) || !this.givePickup(pid, p, d)) continue;
+        if (!canPickUp(p, d) || !autoPickUpAllowed(p, { slot: d.slot as DropSlot, kind: d.kind })) continue;
+        const thrower = this.dropThrower.get(did);
+        if (thrower && thrower.playerId === pid && now < thrower.until) continue;
+        if (!this.givePickup(pid, p, d)) continue;
         this.removeDrop(did);
         const msg: PickupMsg = { playerId: pid, slot: d.slot as Weapon, kind: d.kind };
         this.broadcast(MSG.pickup, msg);
@@ -1084,6 +1093,7 @@ export class ArenaRoom extends Room<RoomState> {
   private layTdWeapons(): void {
     this.state.drops.clear();
     this.dropExpiry.clear();
+    this.dropThrower.clear();
     const loadout = tdWeaponLoadout(this.weaponMode);
     for (const [i, s] of this.weaponSpots.entries()) {
       const k = loadout[i % loadout.length];
@@ -1252,6 +1262,43 @@ export class ArenaRoom extends Room<RoomState> {
       p.y = s.y;
       p.z = s.z;
     }
+  }
+
+  /**
+   * Throw the held weapon on the ground (G): the slot empties (a blade reverts
+   * to the sword) and the weapon lies at the thrower's feet as a short-lived
+   * drop — anyone with room can take it, the thrower only after a grace, and
+   * it vanishes after DROP_THROWN_LIFETIME_MS (even in td).
+   */
+  private handleDropWeapon(client: Client, raw: unknown): void {
+    const m = parseDropWeapon(raw);
+    if (!m) return;
+    const p = this.actor(client, m.epoch);
+    if (!p) return;
+    const meta = this.meta.get(client.sessionId)!;
+    const now = Date.now();
+    if (this.frozen(meta, now)) return;
+    let kind: number;
+    if (m.slot === WEAPON_PRIMARY || m.slot === WEAPON_TASER) {
+      kind = m.slot === WEAPON_TASER ? p.taser : p.gun;
+      if (kind === GUN_NONE) return;
+      this.clearSlot(p, meta, m.slot);
+    } else {
+      kind = p.melee;
+      if (kind === MELEE_SWORD) return;
+      p.melee = MELEE_SWORD;
+      meta.chargeStartAt = 0;
+    }
+    const d = new DropSchema();
+    d.slot = m.slot;
+    d.kind = kind;
+    d.x = p.x;
+    d.y = p.y;
+    d.z = p.z;
+    const id = `d${++this.dropSeq}`;
+    this.state.drops.set(id, d);
+    this.dropExpiry.set(id, now + DROP_THROWN_LIFETIME_MS);
+    this.dropThrower.set(id, { playerId: client.sessionId, until: now + DROP_THROWN_GRACE_MS });
   }
 
   /** CTF: hand-off — put the carried flag down right here. */

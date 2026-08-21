@@ -589,7 +589,13 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
       if (canPickPrimary) PRIMARY_PICK_KEYS.forEach((code, i) => keys.wasPressed(code) && pickPrimary(PRIMARY_KINDS[i]));
       if (canPickPrimary && keys.wasPressed('KeyB')) pickPrimary(GUN_TASER);
       if (keys.wasPressed('KeyR') && local.alive) weapons.reload(now);
-      if (keys.wasPressed('KeyG') && local.alive && carrying !== null) room?.send(MSG.dropFlag, epoch);
+      if (keys.wasPressed('KeyG') && local.alive) {
+        // G: hand off the carried flag; otherwise throw the held weapon away (frees the slot so a ground weapon can be picked up).
+        if (carrying !== null) room?.send(MSG.dropFlag, epoch);
+        else if (weapons.current === WEAPON_PRIMARY || weapons.current === WEAPON_TASER || (weapons.current === WEAPON_MELEE && weapons.melee !== MELEE_SWORD)) {
+          room?.send(MSG.dropWeapon, { epoch, slot: weapons.current });
+        }
+      }
     }
     const speedScale = Math.min(weapons.charging ? weapons.chargeSpeedScale : 1, carrying !== null ? FLAG_CARRY_SPEED_SCALE : 1);
     const moving = local.update(dt, inputEnabled, speedScale);

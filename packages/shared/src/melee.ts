@@ -159,6 +159,10 @@ export const DROP_PICKUP_RADIUS = 1.2;
 export const DROP_PICKUP_DY = 1.5;
 /** New drops keep at least this far from existing ones. */
 export const DROP_MIN_SPACING = 4;
+/** A weapon thrown away on purpose (MSG.dropWeapon, G) vanishes this quickly. */
+export const DROP_THROWN_LIFETIME_MS = 5_000;
+/** The thrower cannot auto-pick their own thrown weapon back up for this long. */
+export const DROP_THROWN_GRACE_MS = 1_500;
 
 /** True if a player with feet at `feet` can pick up a drop lying at `drop`. */
 export function canPickUp(feet: { x: number; y: number; z: number }, drop: { x: number; y: number; z: number }): boolean {

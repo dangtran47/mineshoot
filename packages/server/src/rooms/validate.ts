@@ -1,5 +1,5 @@
 import { ATTACK_LIGHT, CTF_CAPTURE_LIMIT_OPTIONS, CTF_DEFAULT_CAPTURE_LIMIT, DEFAULT_BOT_SKILL, DEFAULT_DURATION_MIN, DEFAULT_ROOM_MODE, DEFAULT_WEAPON_MODE, DURATION_OPTIONS_MIN, MAX_BOTS, MAX_NAME_LEN, TD_DEFAULT_ROUND_LIMIT, TD_ROUND_LIMIT_OPTIONS, TEAM_NONE, GUN_TASER, WEAPON_MELEE, WEAPON_MODES, WEAPON_PISTOL, WEAPON_PRIMARY, WEAPON_TASER, WORLD_SX, WORLD_SZ, isAttackKind, isBotSkill, isGunSlot, isMeleeKind, isPrimaryKind, isRoomMode, isTeam, isWeapon } from '@mineshoot/shared';
-import type { BotSkill, PoseMsg, ReloadMsg, RoomMode, SelectWeaponMsg, ShootMsg, SwingMsg, Team, ThrowMsg, Weapon, WeaponMode } from '@mineshoot/shared';
+import type { BotSkill, DropWeaponMsg, PoseMsg, ReloadMsg, RoomMode, SelectWeaponMsg, ShootMsg, SwingMsg, Team, ThrowMsg, Weapon, WeaponMode } from '@mineshoot/shared';
 
 export function sanitizeName(raw: unknown, fallback: string): string {
   if (typeof raw !== 'string') return fallback;
@@ -136,6 +136,15 @@ export function parseReload(msg: unknown): ReloadMsg | null {
 export const parseChargeCancel = parseCharge;
 /** Drop-flag payload: the sender's spawn epoch. */
 export const parseDropFlag = parseCharge;
+
+/** Drop-weapon (G) payload: {epoch, slot} for a droppable slot (primary gun, taser or the melee blade). */
+export function parseDropWeapon(msg: unknown): DropWeaponMsg | null {
+  if (typeof msg !== 'object' || msg === null) return null;
+  const m = msg as Record<string, unknown>;
+  if (!Number.isInteger(m.epoch)) return null;
+  if (m.slot !== WEAPON_PRIMARY && m.slot !== WEAPON_TASER && m.slot !== WEAPON_MELEE) return null;
+  return { epoch: m.epoch as number, slot: m.slot };
+}
 
 /** Training-range weapon pick: integer epoch + a melee kind for the melee slot or a primary kind for the primary slot. */
 export function parseSelectWeapon(msg: unknown): SelectWeaponMsg | null {

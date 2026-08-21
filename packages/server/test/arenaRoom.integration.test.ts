@@ -18,7 +18,7 @@ import {
   WEAPON_MELEE,
 } from '@mineshoot/shared';
 import type { ExplodeMsg, FlagEventMsg, HitMsg, KillMsg, PickupMsg, RoundEventMsg, ShotMsg, SwungMsg } from '@mineshoot/shared';
-import { CTF_WORLD_SX, DROP_MAX_ACTIVE, GRENADE_DROP_AMOUNT, GRENADE_FUSE_MS, GRENADE_SERVER_MIN_INTERVAL_MS, GRENADE_START, GUN_NONE, GUN_PISTOL, GUN_SHOTGUN, GUN_SNIPER, GUN_TASER, MAX_PLAYERS, MELEE_KATANA, MELEE_STATS, MELEE_SWORD, PLATEAU_MAX, PLATEAU_MIN, SPAWN_PRIMARY_KINDS, TD_WORLD_SZ, TEAM_BLUE, TEAM_RED, WEAPON_GRENADE, WEAPON_PRIMARY, WEAPON_TASER, gunSpec } from '@mineshoot/shared';
+import { CTF_WORLD_SX, DROP_MAX_ACTIVE, DROP_THROWN_LIFETIME_MS, GRENADE_FUSE_MS, GRENADE_SERVER_MIN_INTERVAL_MS, GRENADE_START, GUN_NONE, GUN_PISTOL, GUN_SHOTGUN, GUN_SNIPER, GUN_TASER, MAX_PLAYERS, MELEE_KATANA, MELEE_STATS, MELEE_SWORD, PLATEAU_MAX, PLATEAU_MIN, SPAWN_PRIMARY_KINDS, TD_WORLD_SZ, TEAM_BLUE, TEAM_RED, WEAPON_GRENADE, WEAPON_PRIMARY, WEAPON_TASER, gunSpec } from '@mineshoot/shared';
 import { createApp } from '../src/app';
 import type { RoomListEntry } from '../src/app';
 
@@ -368,7 +368,7 @@ describe('arena room', () => {
       nickname: 'Alice',
       weapons: 'all',
       mode: 'ctf',
-      testOverrides: { dropIntervalMs: 60, dropLifetimeMs: 10_000, spawnProtectMs: 0 },
+      testOverrides: { dropIntervalMs: 60, dropLifetimeMs: 3_000, spawnProtectMs: 0 },
     });
     const pickups: PickupMsg[] = [];
     alice.onMessage(MSG.pickup, (m: PickupMsg) => pickups.push(m));
@@ -381,34 +381,78 @@ describe('arena room', () => {
       expect(me(alice).gun).toBe(GUN_NONE);
       await until(() => alice.state.drops.size >= 3, 4000, 'drops');
       for (const d of alice.state.drops.values()) expect([WEAPON_PRIMARY, WEAPON_GRENADE, WEAPON_MELEE, WEAPON_TASER]).toContain((d as any).slot);
-      // Hunt a primary drop: consume whatever is on the ground until one appears (uniform 10-item pool → fast).
-      let gunDrop: any = null;
-      const deadline = Date.now() + 12_000;
-      while (!gunDrop && Date.now() < deadline) {
-        const drops: [string, any][] = [...alice.state.drops.entries()];
-        const primary = drops.find(([, d]) => d.slot === WEAPON_PRIMARY);
-        if (primary) {
-          gunDrop = { ...primary[1] };
-          break;
+      // Hunt a primary drop: occupied slots never auto-swap now, so wait for one
+      // to spawn (the short lifetime keeps the ground churning past the cap) and
+      // step on it while it is fresh; retry if it expired under us.
+      const deadline = Date.now() + 15_000;
+      while (me(alice).gun === GUN_NONE && Date.now() < deadline) {
+        const primary = [...alice.state.drops.entries()].find(([, d]) => (d as any).slot === WEAPON_PRIMARY);
+        if (!primary) {
+          await sleep(50);
+          continue;
         }
-        if (drops.length > 0) {
-          const [id, d] = drops[0];
-          stepOn(d);
-          await until(() => !alice.state.drops.has(id), 3000, 'drop consumed');
-        } else {
-          await sleep(100);
-        }
+        const [id, d] = primary;
+        stepOn(d as any);
+        await until(() => !alice.state.drops.has(id), 4000, 'primary drop picked up or expired');
       }
-      expect(gunDrop).not.toBeNull();
-      const before = pickups.length;
-      stepOn(gunDrop);
-      await until(() => pickups.length > before && pickups.at(-1)!.slot === WEAPON_PRIMARY, 3000, 'primary pickup');
-      expect(pickups.at(-1)).toMatchObject({ playerId: alice.sessionId, slot: WEAPON_PRIMARY, kind: gunDrop.kind });
-      await until(() => me(alice).gun === gunDrop.kind, 3000, 'primary armed');
+      expect(me(alice).gun).not.toBe(GUN_NONE);
+      expect(pickups.find((p) => p.slot === WEAPON_PRIMARY)).toMatchObject({ playerId: alice.sessionId, slot: WEAPON_PRIMARY, kind: me(alice).gun });
     } finally {
       await alice.leave();
     }
   }, 20000);
+
+  it('G throws the held gun down; only an empty slot auto-picks up, the thrower waits out a grace, thrown guns expire', async () => {
+    const alice: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, {
+      name: 'gdrop',
+      durationMin: 3,
+      nickname: 'Alice',
+      weapons: 'all',
+      // No random drops: the only weapons on the ground are the thrown ones.
+      testOverrides: { spawnProtectMs: 0, dropIntervalMs: 600_000 },
+    });
+    alice.onMessage(MSG.pickup, () => {});
+    let bob: AnyRoom | null = null;
+    try {
+      await ready(alice);
+      const aliceKind = me(alice).gun as number;
+      expect(SPAWN_PRIMARY_KINDS).toContain(aliceKind);
+      bob = await new Client(wsUrl).joinById(alice.roomId, { nickname: 'Bob' });
+      bob.onMessage(MSG.pickup, () => {});
+      await until(() => me(bob!) !== undefined, 3000, 'bob in state');
+      await ready(bob);
+      const bobView = (): any => alice.state.players.get(bob!.sessionId);
+      const bobKind = me(bob).gun as number;
+      // Bob walks up to Alice and throws his gun at her feet.
+      const spot = { x: me(alice).x, y: me(alice).y, z: me(alice).z };
+      bob.send(MSG.pose, { ...spot, yaw: 0, pitch: 0, epoch: me(bob).spawnEpoch, weapon: WEAPON_PRIMARY });
+      await until(() => Math.abs(bobView().x - spot.x) < 0.01, 3000, 'bob at alice');
+      bob.send(MSG.dropWeapon, { epoch: me(bob).spawnEpoch, slot: WEAPON_PRIMARY });
+      await until(() => alice.state.drops.size === 1, 3000, 'thrown gun on the ground');
+      const thrown = [...alice.state.drops.values()][0] as any;
+      expect(thrown).toMatchObject({ slot: WEAPON_PRIMARY, kind: bobKind });
+      expect(bobView().gun).toBe(GUN_NONE);
+      // Alice's primary slot is full and Bob is inside his own grace: nobody picks it up.
+      await sleep(400);
+      expect(alice.state.drops.size).toBe(1);
+      expect(me(alice).gun).toBe(aliceKind);
+      // Alice throws hers too: her freed slot takes Bob's gun right away, and
+      // Bob's empty slot takes hers (his grace only guards his own throw).
+      alice.send(MSG.dropWeapon, { epoch: me(alice).spawnEpoch, slot: WEAPON_PRIMARY });
+      await until(() => me(alice).gun === bobKind, 3000, 'alice took the thrown gun');
+      await until(() => bobView().gun === aliceKind, 4000, 'bob re-armed after the grace');
+      expect(alice.state.drops.size).toBe(0);
+      // A thrown gun nobody wants vanishes after DROP_THROWN_LIFETIME_MS.
+      alice.send(MSG.dropWeapon, { epoch: me(alice).spawnEpoch, slot: WEAPON_PRIMARY });
+      await until(() => alice.state.drops.size === 1, 3000, 'second throw on the ground');
+      alice.send(MSG.pose, poseOf(alice, 5, 5, 0));
+      await until(() => alice.state.drops.size === 0, DROP_THROWN_LIFETIME_MS + 2000, 'thrown gun expired');
+      expect(me(alice).gun).toBe(GUN_NONE);
+    } finally {
+      await bob?.leave();
+      await alice.leave();
+    }
+  }, 25000);
 
   it('a deathmatch with guns spawns you with a random primary; bots get one too', async () => {
     const alice: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, {
@@ -1239,6 +1283,13 @@ describe('arena room', () => {
         const spot = [...alice.state.drops.values()].find((d: any) => d.z < TD_WORLD_SZ / 2);
         alice.send(MSG.pose, { x: spot.x, y: spot.y, z: spot.z, yaw: 0, pitch: 0, epoch: me(alice).spawnEpoch, weapon: WEAPON_PISTOL });
         await until(() => me(alice).gun !== GUN_NONE, 3000, 'alice armed off the ground');
+        expect(alice.state.drops.size).toBe(15);
+
+        // G works mid-round: the gun lands at her feet, the grace holds her off, then her empty slot takes it back.
+        alice.send(MSG.dropWeapon, { epoch: me(alice).spawnEpoch, slot: WEAPON_PRIMARY });
+        await until(() => me(alice).gun === GUN_NONE, 3000, 'gun thrown');
+        expect(alice.state.drops.size).toBe(16);
+        await until(() => me(alice).gun !== GUN_NONE, 4000, 'picked back up after the grace');
         expect(alice.state.drops.size).toBe(15);
 
         // Alice wipes blue (Bob) → red takes the round. Shots repeat past the server's rate limit.
