@@ -12,6 +12,7 @@ import {
   MELEE_KINDS,
   MELEE_SWORD,
   PRIMARY_KINDS,
+  TD_INTERMISSION_MS,
   TEAM_BLUE,
   TEAM_NONE,
   TEAM_RED,
@@ -28,7 +29,9 @@ import {
   generateWorldFor,
   gunSpec,
   isCtf,
+  isTd,
   isTeam,
+  isTeamMode,
   meleeSelectable,
   meleeStats,
   otherTeam,
@@ -39,7 +42,7 @@ import {
   teamName,
   weaponAllowed,
 } from '@mineshoot/shared';
-import type { AttackKind, DropSlot, ExplodeMsg, FlagEventMsg, GunKind, HitMsg, KillMsg, MeleeKind, PickupMsg, PoseMsg, RankRow, RoomMode, SelectWeaponMsg, ShootMsg, ShotMsg, SwingMsg, SwungMsg, Team, ThrowMsg, Vec3, Weapon } from '@mineshoot/shared';
+import type { AttackKind, DropSlot, ExplodeMsg, FlagEventMsg, GunKind, HitMsg, KillMsg, MeleeKind, PickupMsg, PoseMsg, RankRow, RoomMode, RoundEventMsg, SelectWeaponMsg, ShootMsg, ShotMsg, SwingMsg, SwungMsg, Team, ThrowMsg, Vec3, Weapon } from '@mineshoot/shared';
 import { displayName } from '../net';
 import type { GameRoom, NetFlag, NetPlayer } from '../net';
 import { FlagsView } from '../render/flagsView';
@@ -66,10 +69,12 @@ const MELEE_PICK_KEYS: readonly string[] = ['Digit6', 'Digit7', 'Digit8', 'Digit
 /** Z X C V pick a primary gun, B the taser, directly (training range, offline sandbox). */
 const PRIMARY_PICK_KEYS: readonly string[] = ['KeyZ', 'KeyX', 'KeyC', 'KeyV'];
 
-/** CTF outcome handed to the results screen. */
-export interface CtfSummary {
+/** Team-mode outcome handed to the results screen: captures (ctf) or round wins (td). */
+export interface TeamSummary {
+  mode: 'ctf' | 'td';
   redScore: number;
   blueScore: number;
+  /** Captures (ctf) / round wins (td) needed to take the match. */
   captureLimit: number;
 }
 
@@ -78,7 +83,7 @@ export interface GameScreenOptions {
   /** null = offline sandbox (no networking). */
   room: GameRoom | null;
   seed: number;
-  onEnded(ranking: RankRow[], meId: string, roomName: string, ctf?: CtfSummary): void;
+  onEnded(ranking: RankRow[], meId: string, roomName: string, team?: TeamSummary): void;
   onLeft(message: string): void;
 }
 
@@ -90,6 +95,8 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
   // The offline sandbox behaves like a training range (every melee weapon is a key away).
   const roomMode: RoomMode = room?.state.mode ?? 'training';
   const ctf = isCtf(roomMode);
+  const td = isTd(roomMode);
+  const teamMode = isTeamMode(roomMode);
   const { world, spawnPoints, bases } = generateWorldFor(roomMode, opts.seed);
 
   const bundle = createScene(container);
@@ -116,7 +123,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
   const look = new PointerLook(renderer.domElement);
   const recoil = new RecoilController(look);
   const hud = new Hud(container);
-  const minimap = new Minimap(hud.root, world, ctf ? bases : null);
+  const minimap = new Minimap(hud.root, world, teamMode ? bases : null);
 
   const meNet = (): NetPlayer | undefined => room?.state.players.get(meId);
   const initial = meNet();
@@ -129,8 +136,9 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
   let carrying: Team | null = null;
   const canPickMelee = meleeSelectable(roomMode, weaponMode);
   const canPickPrimary = roomMode === 'training' && weaponAllowed(weaponMode, WEAPON_PRIMARY);
-  hud.setRoomName(room ? (roomMode === 'training' ? `\u{1F3AF} ${room.state.name}` : ctf ? `\u{1F6A9} ${room.state.name}` : room.state.name) : 'Offline sandbox');
+  hud.setRoomName(room ? (roomMode === 'training' ? `\u{1F3AF} ${room.state.name}` : ctf ? `\u{1F6A9} ${room.state.name}` : td ? `⚔️ ${room.state.name}` : room.state.name) : 'Offline sandbox');
   hud.setWeaponRules(weaponMode, roomMode);
+  if (td) hud.setTimerVisible(false);
 
   // --- weapons ---
   const currentPose = (): Omit<ThrowMsg, 'charge'> => ({
@@ -283,10 +291,15 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
   const rankingRows = (): RankRow[] => {
     const rows: RankRow[] = [];
     room?.state.players.forEach((p, id) => rows.push({ id, name: p.name, kills: p.kills, deaths: p.deaths, isBot: p.isBot, team: p.team, captures: p.captures, alive: p.alive }));
-    return ctf ? rankCtf(rows) : rankPlayers(rows);
+    // rankCtf with all-zero captures (td) sorts by kills, which is what we want.
+    return teamMode ? rankCtf(rows) : rankPlayers(rows);
   };
-  const ctfSummary = (): CtfSummary | undefined =>
-    room && ctf ? { redScore: room.state.redScore, blueScore: room.state.blueScore, captureLimit: room.state.captureLimit } : undefined;
+  const teamSummary = (): TeamSummary | undefined => {
+    if (!room || !teamMode) return undefined;
+    return td
+      ? { mode: 'td', redScore: room.state.roundsRed, blueScore: room.state.roundsBlue, captureLimit: room.state.roundLimit }
+      : { mode: 'ctf', redScore: room.state.redScore, blueScore: room.state.blueScore, captureLimit: room.state.captureLimit };
+  };
   const flagOf = (team: Team): NetFlag | undefined => room?.state.flags?.get(String(team));
 
   const onPatch = (): void => {
@@ -340,7 +353,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
       hud.setStats(me.kills, me.deaths);
       hud.setHealth(me.hp);
       hud.setShield(me.alive && me.shielded);
-      if (ctf) {
+      if (teamMode) {
         // Team buttons on the overlay (also lets an unspawned player pick a side; the camera follows the new side).
         const counts: Record<Team, number> = { [TEAM_RED]: 0, [TEAM_BLUE]: 0 };
         state.players.forEach((p) => {
@@ -350,6 +363,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
         if (me.spawnEpoch === 0 && !local.alive) local.teleport(me.x, me.y, me.z, me.yaw);
       }
     }
+    if (td) hud.setTdScore(state.roundsRed, state.roundsBlue, state.roundLimit, state.round);
     if (ctf) {
       // Carrying a flag: melee only, slower (see the frame loop), banner + G hint.
       let mine: Team | null = null;
@@ -380,7 +394,23 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     if (state.phase === 'ended') {
       ended = true;
       finish();
-      opts.onEnded(rankingRows(), meId, state.name, ctfSummary());
+      opts.onEnded(rankingRows(), meId, state.name, teamSummary());
+    }
+  };
+
+  /** TD: a round started or ended → banner + feed line; the end time drives the intermission countdown. */
+  let roundEndedAt = 0;
+  const onRound = (m: RoundEventMsg): void => {
+    const score = `${m.roundsRed} – ${m.roundsBlue}`;
+    if (m.kind === 'end') {
+      roundEndedAt = performance.now();
+      const text = m.winner === TEAM_NONE ? `Round ${m.round}: a draw — nobody scores` : `${teamName(m.winner as Team)} takes round ${m.round}! ${score}`;
+      const myTeam = room?.state.players.get(meId)?.team;
+      hud.toast(`⚔️ ${text}`, 3000);
+      hud.pushFeedText(`⚔️ ${text}`, m.winner === TEAM_NONE || myTeam === undefined ? 'neutral' : m.winner === myTeam ? 'good' : 'bad');
+    } else {
+      roundEndedAt = 0;
+      hud.toast(`⚔️ Round ${m.round} — fight!`, 2500);
     }
   };
 
@@ -511,6 +541,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     room.onMessage(MSG.hit, onHit);
     room.onMessage(MSG.kill, onKill);
     room.onMessage(MSG.flag, onFlag);
+    room.onMessage(MSG.round, onRound);
     room.onMessage(MSG.pong, onPong);
     room.onStateChange(onPatch);
     room.onLeave(onLeaveRoom);
@@ -619,9 +650,17 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     });
     hud.update(now);
     if (room) {
-      hud.setTimer(Math.max(0, lastTimeLeft - (now - lastTimeLeftAt)));
-      if (!local.alive && diedAt > 0) hud.setRespawnCountdown(respawnMsFor(roomMode) - (now - diedAt));
-      hud.setScoreboard(keys.isDown('Tab'), rankingRows(), meId, ctfSummary());
+      if (!td) hud.setTimer(Math.max(0, lastTimeLeft - (now - lastTimeLeftAt)));
+      if (!local.alive && diedAt > 0) {
+        // TD: the dead spectate until the next round (no respawn clock to count down).
+        if (td) {
+          const left = roundEndedAt > 0 ? TD_INTERMISSION_MS - (now - roundEndedAt) : null;
+          hud.setDeathNote(left !== null && left > 0 ? `Next round in ${Math.ceil(left / 1000)}…` : 'Spectating — back next round');
+        } else {
+          hud.setRespawnCountdown(respawnMsFor(roomMode) - (now - diedAt));
+        }
+      }
+      hud.setScoreboard(keys.isDown('Tab'), rankingRows(), meId, teamSummary());
     } else {
       hud.setTimer(0);
     }

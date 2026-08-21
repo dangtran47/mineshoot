@@ -22,4 +22,5 @@ export * from './ranking';
 export * from './bot';
 export * from './kills';
 export * from './ctf';
+export * from './td';
 export * from './nav';

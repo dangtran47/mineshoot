@@ -16,7 +16,7 @@ colleagues. npm workspaces monorepo, TypeScript everywhere, three packages:
 
 | Package | Role | Runtime deps |
 | --- | --- | --- |
-| `packages/shared` | Pure game core: constants, worldgen (arena + CTF map), physics, raycasts, gun/grenade/melee/drops/spawn/CTF/ranking rules, bot AI, wire protocol types | **none** (keep it that way) |
+| `packages/shared` | Pure game core: constants, worldgen (arena + CTF + TD maps), physics, raycasts, gun/grenade/melee/drops/spawn/CTF/TD/ranking rules, bot AI, wire protocol types | **none** (keep it that way) |
 | `packages/server` | Colyseus 0.16 `arena` room; `GET /rooms`, `GET /health` | `colyseus`, `@colyseus/schema`, `@colyseus/ws-transport` |
 | `packages/client` | Vite + three.js: lobby, renderer, FPS controls, HUD, results | `three`, `colyseus.js` |
 
@@ -88,11 +88,18 @@ are pistol/melee for wire compatibility, so key order ≠ value order).
 `weaponAllowed(mode, slot)` gates shoot/swing/charge/chargeCancel/reload/throw
 and the drop pool (`dropPool(mode)`: guns + grenade packs where guns are
 allowed, blades where melee is). Bots receive the mode too. Do not rely on
-the client hiding a button. Likewise the room mode (`'match'|'training'|'ctf'`):
+the client hiding a button. Likewise the room mode (`'match'|'training'|'ctf'|'td'`):
 `meleeSelectable(mode, weapons)` gates `selectWeapon` on the server; a match
 never lets you pick a weapon at will — but a deathmatch (re)spawn with guns
 allowed rolls a random primary (`spawnPrimary`, taser excluded); team modes
-always spawn pistol-only.
+(`isTeamMode`: ctf + td) always spawn pistol-only.
+
+**Team elimination (td) is round-based and server-authoritative.** Rounds
+(`RoomState.roundPhase/round/roundsRed/roundsBlue/roundLimit`) live in
+`ArenaRoom.tickRound/startRound` + pure `roundWinner` in `shared/td.ts`; no
+respawn mid-round, no clocks (`tickTimer` is skipped). Fixed weapon rows come
+from `GeneratedWorld.weaponSpots` × `tdWeaponLoadout` and never expire — only
+the pickup half of `tickDrops` runs in td.
 
 **Capture the flag is server-authoritative too.** Flags (`RoomState.flags`),
 scores, teams and every carrier rule live in `ArenaRoom.tickFlags` + pure
@@ -101,7 +108,8 @@ helpers in `shared/ctf.ts`: no friendly fire (`targetsExcluding`), a carrier's
 are validated in `validate.ts`. The client only mirrors: melee lock, carry
 speed, flag meshes, HUD. Never trust the client for any of it.
 
-**World size comes from the world.** The CTF map is 96×48, the arena 64×64.
+**World size comes from the world.** The CTF map is 96×48, the arena and the
+TD crossroads map 64×64.
 Read `world.sx/sz` (or the `GeneratedWorld`'s `dropZone`/`bases`), never
 `WORLD_SX/SZ`, outside `worldgen.ts`; poses are clamped to the room's world.
 
@@ -142,8 +150,9 @@ packages/shared/src/
   protocol.ts      MSG names, message payload types, CreateOptions/RoomMetadata,
                    WeaponMode helpers
   types.ts         Vec3, World, PlayerPose, PlayerPhysState, MoveInput, Block…
-  worldgen.ts      generateWorld(seed) / generateCtfWorld(seed) / generateWorldFor(mode, seed)
-                   → { world, spawnPoints, dropZone, bases }; plateau bounds
+  worldgen.ts      generateWorld(seed) / generateCtfWorld(seed) / generateTdWorld(seed) /
+                   generateWorldFor(mode, seed)
+                   → { world, spawnPoints, dropZone, bases, weaponSpots? }; plateau bounds
   world.ts / noise.ts / rng.ts   voxel storage, 2D noise, seeded RNG
   aabb.ts collision.ts playerPhysics.ts   swept-AABB movement (stepPlayer)
   raycast.ts hitbox.ts gun.ts   voxel DDA, body-part boxes, resolveShot()/resolveRay()
@@ -153,8 +162,9 @@ packages/shared/src/
   spawn.ts ranking.ts kills.ts  pickSpawn(), rankPlayers()/rankCtf()/splitTeams(), KillTracker/awards
   ctf.ts           FlagState, flagTouch(), canScore(), canReturn(), teamSpawns(), pickTeam(),
                    botRebalance(), matchWinner(), botCtfGoal()
+  td.ts            team elimination: roundWinner(), tdWeaponLoadout(), botTdGoal()
   bot.ts           createBot(rng, spawns, opts).compute(world, view, dt);
-                   view.goal / view.carrying for CTF; skill profiles
+                   view.goal / view.carrying for CTF (td sets view.goal too); skill profiles
   nav.ts           standable()/nearestStandable()/findPath() grid A* the bots walk by
 
 packages/server/src/

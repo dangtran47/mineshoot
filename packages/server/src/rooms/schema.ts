@@ -1,5 +1,5 @@
 import { MapSchema, Schema, type } from '@colyseus/schema';
-import { CTF_DEFAULT_CAPTURE_LIMIT, GRENADE_START, GUN_NONE, MAX_HP, MELEE_SWORD, TEAM_NONE, WEAPON_MELEE } from '@mineshoot/shared';
+import { CTF_DEFAULT_CAPTURE_LIMIT, GRENADE_START, GUN_NONE, MAX_HP, MELEE_SWORD, TD_DEFAULT_ROUND_LIMIT, TEAM_NONE, WEAPON_MELEE } from '@mineshoot/shared';
 
 export class PlayerSchema extends Schema {
   @type('string') name = '';
@@ -88,4 +88,13 @@ export class RoomState extends Schema {
   @type('uint8') blueScore = 0;
   /** CTF: captures needed to win. */
   @type('uint8') captureLimit = CTF_DEFAULT_CAPTURE_LIMIT;
+  /** TD: rounds won so far. */
+  @type('uint8') roundsRed = 0;
+  @type('uint8') roundsBlue = 0;
+  /** TD: the running round number, starting at 1. */
+  @type('uint8') round = 1;
+  /** TD: round wins needed to take the match. */
+  @type('uint8') roundLimit = TD_DEFAULT_ROUND_LIMIT;
+  /** TD: 'live' | 'intermission' (the pause between rounds). */
+  @type('string') roundPhase = 'live';
 }

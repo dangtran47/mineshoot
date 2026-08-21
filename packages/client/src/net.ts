@@ -81,6 +81,12 @@ export interface NetRoomState {
   redScore: number;
   blueScore: number;
   captureLimit: number;
+  /** TD: rounds won, running round number, round wins to take the match, 'live' | 'intermission'. */
+  roundsRed: number;
+  roundsBlue: number;
+  round: number;
+  roundLimit: number;
+  roundPhase: string;
 }
 export type GameRoom = Room<NetRoomState>;
 

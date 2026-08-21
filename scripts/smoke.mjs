@@ -159,7 +159,8 @@ await shot(a, 'bots.png');
 
 // --- Weapon drops: they land on the central plateau (1.5 s test interval); walking over one arms it until death.
 await a.waitForFunction(() => window.__mineshoot.room.state.drops.size > 0, null, { timeout: 8000 });
-const drop = await a.evaluate(() => { let d = null; window.__mineshoot.room.state.drops.forEach((v, id) => { if (!d) d = { id, kind: v.kind, x: v.x, y: v.y, z: v.z }; }); return d; });
+const firstDrop = (p) => p.evaluate(() => { let d = null; window.__mineshoot.room.state.drops.forEach((v, id) => { if (!d) d = { id, kind: v.kind, x: v.x, y: v.y, z: v.z }; }); return d; });
+const drop = await firstDrop(a);
 console.log('drop seen by alice:', JSON.stringify(drop), '| on plateau:', drop.x >= 25 && drop.x <= 39 && drop.z >= 25 && drop.z <= 39);
 // Look at it from a few blocks away for a screenshot, then walk onto it.
 // Stand 3 blocks away on the plateau side that has room, facing the drop.
@@ -167,12 +168,19 @@ const back = drop.z > 32 ? -3 : 3;
 await a.evaluate(([x, y, z, back]) => window.__mineshoot.local.teleport(x, y, z + back, back > 0 ? 0 : Math.PI), [drop.x, drop.y, drop.z, back]);
 await a.waitForTimeout(400);
 await shot(a, 'drop-on-ground.png');
-await a.evaluate(([x, y, z]) => window.__mineshoot.local.teleport(x, y, z, 0), [drop.x, drop.y, drop.z]);
-await a.waitForFunction((k) => window.__mineshoot.weapons.melee === k, drop.kind, { timeout: 4000 });
-await a.waitForFunction((id) => !window.__mineshoot.room.state.drops.has(id), drop.id, { timeout: 2000 });
-console.log('alice picked up kind', drop.kind, '| toast:', await a.textContent('.toast'), '| hud label:', await a.textContent('.weapon .label'),
+// A roaming bot can snatch a drop while Alice poses for the screenshot: keep walking onto drops until one arms her.
+let taken = null;
+for (let tries = 0; tries < 5 && !taken; tries++) {
+  const d = await firstDrop(a);
+  if (!d) { await a.waitForTimeout(1200); continue; }
+  await a.evaluate(([x, y, z]) => window.__mineshoot.local.teleport(x, y, z, 0), [d.x, d.y, d.z]);
+  await a.waitForFunction((id) => !window.__mineshoot.room.state.drops.has(id), d.id, { timeout: 5000 }).catch(() => {});
+  if (await a.evaluate((k) => window.__mineshoot.weapons.melee === k, d.kind)) taken = d;
+}
+if (!taken) throw new Error('no drop could be picked up (bots kept snatching them?)');
+console.log('alice picked up kind', taken.kind, '| toast:', await a.textContent('.toast'), '| hud label:', await a.textContent('.weapon .label'),
   '| hud icon:', await a.evaluate(() => document.querySelector('.weapon .name .icon')?.getAttribute('aria-label')),
-  '| drop gone:', await a.evaluate((id) => !window.__mineshoot.room.state.drops.has(id), drop.id));
+  '| drop gone:', await a.evaluate((id) => !window.__mineshoot.room.state.drops.has(id), taken.id));
 await a.waitForTimeout(300);
 await shot(a, 'drop-picked-up.png');
 await a.click('button:has-text("Leave match")');
@@ -217,6 +225,15 @@ await a.click('.create');
 // The CTF map is 2.25× the arena: under swiftshader the first frames are slow, so wait for the canvas to exist rather than be "visible".
 await a.waitForSelector('canvas.game', { state: 'attached', timeout: 15000 });
 await ready(a);
+// The creator's team is a coin flip (pickTeam): force Alice onto red so the flag run below is deterministic.
+// Switching while alive kills her (1 s test respawn), so wait until she is back.
+const myTeam = (p) => p.evaluate(() => window.__mineshoot.room.state.players.get(window.__mineshoot.room.sessionId).team);
+if ((await myTeam(a)) !== 1) {
+  await a.evaluate(() => window.__mineshoot.room.send('selectTeam', 1));
+  await a.waitForFunction(() => window.__mineshoot.room.state.players.get(window.__mineshoot.room.sessionId).team === 1, null, { timeout: 4000 });
+  await a.waitForFunction(() => window.__mineshoot.local.alive, null, { timeout: 8000 });
+  console.log('alice switched to red');
+}
 const flag = (p, team) => p.evaluate((t) => { const f = window.__mineshoot.room.state.flags.get(String(t)); return { status: f.status, x: f.x, y: f.y, z: f.z, carrierId: f.carrierId }; }, team);
 const meState = (p) => p.evaluate(() => { const g = window.__mineshoot; const m = g.room.state.players.get(g.room.sessionId); return { team: m.team, x: m.x, captures: m.captures }; });
 console.log('ctf room:', await a.textContent('.roomname'), '| score bar:', (await a.textContent('.ctfbar')).replace(/\s+/g, ' ').trim(), '| alice:', JSON.stringify(await meState(a)));
@@ -244,6 +261,80 @@ await b.waitForSelector('.lobby', { timeout: 5000 });
 await a.click('button:has-text("Leave match")');
 await a.waitForSelector('.lobby', { timeout: 5000 });
 console.log('both left ctf room');
+
+// --- Team elimination: crossroads rounds — Alice (red) wipes Bob (blue) three times; no respawn
+// mid-round, fixed weapon rows re-laid each round, first to 3 round wins ends the match.
+await a.fill('.roomname', 'Deathcross');
+await a.selectOption('.mode', 'td');
+console.log('td rounds field visible / duration hidden:',
+  await a.evaluate(() => !document.querySelector('.field.rounds').classList.contains('hidden')),
+  await a.evaluate(() => document.querySelector('.field.durfield').classList.contains('hidden')));
+await a.selectOption('.roundlimit', '3');
+await a.click('.create');
+await a.waitForSelector('canvas.game', { state: 'attached', timeout: 15000 });
+await ready(a);
+// The creator's team is a coin flip: put Bob on the other side and score for whichever side Alice got.
+const aTeam = await myTeam(a);
+const tdState = (p) => p.evaluate(() => { const s = window.__mineshoot.room.state; return { round: s.round, phase: s.roundPhase, red: s.roundsRed, blue: s.roundsBlue, limit: s.roundLimit, drops: s.drops.size }; });
+console.log('td room:', await a.textContent('.roomname'), '| alice team:', aTeam, '| bar:', (await a.textContent('.ctfbar')).replace(/\s+/g, ' ').trim(),
+  '| timer hidden:', await a.evaluate(() => document.querySelector('.timer').classList.contains('hidden')),
+  '| state:', JSON.stringify(await tdState(a)));
+await b.waitForFunction(() => document.querySelector('.rooms')?.textContent.includes('Deathcross'), null, { timeout: 6000 });
+console.log('lobby rows (td):', (await b.textContent('.rooms')).replace(/\s+/g, ' ').trim());
+await b.click(aTeam === 1 ? 'button.join.t-blue' : 'button.join.t-red');
+await b.waitForSelector('canvas.game', { state: 'attached', timeout: 15000 });
+await ready(b);
+// A fixed weapon on Alice's half: walking over it arms the primary. (Red is the north half, z < 32.)
+const gunDrop = await a.evaluate((t) => { let d = null; window.__mineshoot.room.state.drops.forEach((v) => { if (!d && (v.z < 32) === (t === 1)) d = { kind: v.kind, x: v.x, y: v.y, z: v.z }; }); return d; }, aTeam);
+await a.evaluate(([x, y, z]) => window.__mineshoot.local.teleport(x, y, z, 0), [gunDrop.x, gunDrop.y, gunDrop.z]);
+await a.waitForFunction((k) => window.__mineshoot.weapons.gun === k, gunDrop.kind, { timeout: 4000 });
+console.log('alice grabbed fixed gun kind', gunDrop.kind, '| toast:', await a.textContent('.toast'));
+await shot(a, 'td-gun-row.png');
+// Pistol headshots until the round falls (spawn protection is 500 ms under the test override;
+// the pair drops from the teleport height first, so early shots can miss mid-fall poses).
+const ourRounds = (n, timeout) => a.waitForFunction((args) => {
+  const s = window.__mineshoot.room.state;
+  return (args.t === 1 ? s.roundsRed : s.roundsBlue) === args.n;
+}, { t: aTeam, n }, { timeout });
+const wipeRound = async (n) => {
+  await tp(a, 32.5, 36.5, 0);
+  await tp(b, 32.5, 30.5, Math.PI);
+  await a.waitForTimeout(900);
+  for (let i = 0; i < 8; i++) {
+    await a.evaluate(() => { const g = window.__mineshoot; g.weapons.select(0); g.weapons.mouseDown(performance.now()); g.weapons.mouseUp(); });
+    try {
+      await ourRounds(n, 700);
+      return;
+    } catch { /* shot rate-limited or missed: fire again */ }
+  }
+  throw new Error(`round ${n} was not won`);
+};
+await wipeRound(1);
+console.log('round 1 to alice | state:', JSON.stringify(await tdState(a)), '| bar:', (await a.textContent('.ctfbar')).replace(/\s+/g, ' ').trim());
+// Bob stays dead through the intermission (no respawn countdown, a spectate note instead).
+await b.waitForFunction(() => !document.querySelector('.center-msg').classList.contains('hidden'), null, { timeout: 4000 });
+console.log('bob death note:', (await b.textContent('.center-msg .countdown')).trim());
+await shot(b, 'td-bob-waits.png');
+await a.waitForFunction(() => window.__mineshoot.room.state.round === 2 && window.__mineshoot.room.state.roundPhase === 'live', null, { timeout: 10000 });
+await b.waitForFunction(() => window.__mineshoot.local.alive, null, { timeout: 4000 });
+console.log('round 2 live | bob back:', await b.evaluate(() => window.__mineshoot.local.alive),
+  '| alice gun reset:', await a.evaluate(() => window.__mineshoot.weapons.gun === 0),
+  '| drops re-laid:', await a.evaluate(() => window.__mineshoot.room.state.drops.size));
+await wipeRound(2);
+await a.waitForFunction(() => window.__mineshoot.room.state.round === 3 && window.__mineshoot.room.state.roundPhase === 'live', null, { timeout: 10000 });
+await b.waitForFunction(() => window.__mineshoot.local.alive, null, { timeout: 4000 });
+await wipeRound(3);
+// First to 3 → team results without a Caps column.
+await a.waitForSelector('.results', { timeout: 8000 });
+await b.waitForSelector('.results', { timeout: 8000 });
+console.log('td results alice:', (await a.textContent('.results h1')).trim(), '|', (await a.textContent('.results .sub')).replace(/\s+/g, ' ').trim(),
+  '| caps column:', await a.evaluate(() => [...document.querySelectorAll('.results th')].some((th) => th.textContent === 'Caps')));
+await shot(a, 'td-results.png');
+await a.click('.results .back');
+await a.waitForSelector('.lobby', { timeout: 5000 });
+await b.click('.results .back');
+await b.waitForSelector('.lobby', { timeout: 5000 });
+console.log('both left td room');
 await browser.close();
 console.log('console errors:', errors.length ? errors : 'none');
 process.exit(errors.length ? 1 : 0);

@@ -6,6 +6,9 @@ export const CHUNK = 16;
 /** Capture-the-flag map: a long rectangle so the carry home is a real trek. */
 export const CTF_WORLD_SX = 96;
 export const CTF_WORLD_SZ = 48;
+/** Team-elimination map: a square crossroads, teams north/south. */
+export const TD_WORLD_SX = 64;
+export const TD_WORLD_SZ = 64;
 
 // Player body
 export const PLAYER_HALF_W = 0.3;
@@ -75,6 +78,14 @@ export const FLAG_DROP_GRACE_MS = 1500;
 export const CTF_BASE_ZONE_RADIUS = 4;
 /** Each team respawns on the spawn points nearest its base: this many of them. */
 export const CTF_TEAM_SPAWN_COUNT = 8;
+
+// Team elimination (td)
+export const TD_ROUND_LIMIT_OPTIONS = [3, 5, 7, 10] as const;
+export const TD_DEFAULT_ROUND_LIMIT = 5;
+/** Pause between a round ending and the next one starting (survivors keep walking, nobody respawns). */
+export const TD_INTERMISSION_MS = 5000;
+/** Someone clicking to play this soon after a round started still spawns into it; later they wait for the next round. */
+export const TD_JOIN_GRACE_MS = 10_000;
 
 // Health / damage
 export const MAX_HP = 100;

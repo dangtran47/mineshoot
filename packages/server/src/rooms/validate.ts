@@ -1,4 +1,4 @@
-import { ATTACK_LIGHT, CTF_CAPTURE_LIMIT_OPTIONS, CTF_DEFAULT_CAPTURE_LIMIT, DEFAULT_BOT_SKILL, DEFAULT_DURATION_MIN, DEFAULT_ROOM_MODE, DEFAULT_WEAPON_MODE, DURATION_OPTIONS_MIN, MAX_BOTS, MAX_NAME_LEN, TEAM_NONE, GUN_TASER, WEAPON_MELEE, WEAPON_MODES, WEAPON_PISTOL, WEAPON_PRIMARY, WEAPON_TASER, WORLD_SX, WORLD_SZ, isAttackKind, isBotSkill, isGunSlot, isMeleeKind, isPrimaryKind, isRoomMode, isTeam, isWeapon } from '@mineshoot/shared';
+import { ATTACK_LIGHT, CTF_CAPTURE_LIMIT_OPTIONS, CTF_DEFAULT_CAPTURE_LIMIT, DEFAULT_BOT_SKILL, DEFAULT_DURATION_MIN, DEFAULT_ROOM_MODE, DEFAULT_WEAPON_MODE, DURATION_OPTIONS_MIN, MAX_BOTS, MAX_NAME_LEN, TD_DEFAULT_ROUND_LIMIT, TD_ROUND_LIMIT_OPTIONS, TEAM_NONE, GUN_TASER, WEAPON_MELEE, WEAPON_MODES, WEAPON_PISTOL, WEAPON_PRIMARY, WEAPON_TASER, WORLD_SX, WORLD_SZ, isAttackKind, isBotSkill, isGunSlot, isMeleeKind, isPrimaryKind, isRoomMode, isTeam, isWeapon } from '@mineshoot/shared';
 import type { BotSkill, PoseMsg, ReloadMsg, RoomMode, SelectWeaponMsg, ShootMsg, SwingMsg, Team, ThrowMsg, Weapon, WeaponMode } from '@mineshoot/shared';
 
 export function sanitizeName(raw: unknown, fallback: string): string {
@@ -43,6 +43,11 @@ export function parseRoomMode(raw: unknown): RoomMode {
 /** CTF capture limit; must be one of the offered options, else the default. */
 export function parseCaptureLimit(raw: unknown): number {
   return (CTF_CAPTURE_LIMIT_OPTIONS as readonly unknown[]).includes(raw) ? (raw as number) : CTF_DEFAULT_CAPTURE_LIMIT;
+}
+
+/** TD round limit; must be one of the offered options, else the default. */
+export function parseRoundLimit(raw: unknown): number {
+  return (TD_ROUND_LIMIT_OPTIONS as readonly unknown[]).includes(raw) ? (raw as number) : TD_DEFAULT_ROUND_LIMIT;
 }
 
 /** A team choice (join options / MSG.selectTeam); anything else means "no preference". */

@@ -17,8 +17,8 @@ import {
   WEAPON_PISTOL,
   WEAPON_MELEE,
 } from '@mineshoot/shared';
-import type { ExplodeMsg, FlagEventMsg, HitMsg, KillMsg, PickupMsg, ShotMsg, SwungMsg } from '@mineshoot/shared';
-import { CTF_WORLD_SX, DROP_MAX_ACTIVE, GRENADE_DROP_AMOUNT, GRENADE_FUSE_MS, GRENADE_SERVER_MIN_INTERVAL_MS, GRENADE_START, GUN_NONE, GUN_PISTOL, GUN_SHOTGUN, GUN_SNIPER, GUN_TASER, MAX_PLAYERS, MELEE_KATANA, MELEE_STATS, MELEE_SWORD, PLATEAU_MAX, PLATEAU_MIN, SPAWN_PRIMARY_KINDS, TEAM_BLUE, TEAM_RED, WEAPON_GRENADE, WEAPON_PRIMARY, WEAPON_TASER, gunSpec } from '@mineshoot/shared';
+import type { ExplodeMsg, FlagEventMsg, HitMsg, KillMsg, PickupMsg, RoundEventMsg, ShotMsg, SwungMsg } from '@mineshoot/shared';
+import { CTF_WORLD_SX, DROP_MAX_ACTIVE, GRENADE_DROP_AMOUNT, GRENADE_FUSE_MS, GRENADE_SERVER_MIN_INTERVAL_MS, GRENADE_START, GUN_NONE, GUN_PISTOL, GUN_SHOTGUN, GUN_SNIPER, GUN_TASER, MAX_PLAYERS, MELEE_KATANA, MELEE_STATS, MELEE_SWORD, PLATEAU_MAX, PLATEAU_MIN, SPAWN_PRIMARY_KINDS, TD_WORLD_SZ, TEAM_BLUE, TEAM_RED, WEAPON_GRENADE, WEAPON_PRIMARY, WEAPON_TASER, gunSpec } from '@mineshoot/shared';
 import { createApp } from '../src/app';
 import type { RoomListEntry } from '../src/app';
 
@@ -1186,6 +1186,134 @@ describe('arena room', () => {
         await until(() => Math.hypot(alice.state.players.get('bot2').x - start.x, alice.state.players.get('bot2').z - start.z) > 4, 5000, 'bot moves');
       } finally {
         await bob?.leave();
+        await alice.leave();
+      }
+    }, 20000);
+  });
+
+  describe('team elimination', () => {
+    const listen = (room: AnyRoom): void => {
+      for (const m of [MSG.round, MSG.shot, MSG.swung, MSG.hit, MSG.kill, MSG.pickup]) room.onMessage(m, () => {});
+    };
+
+    it('rounds: wipe → intermission (no respawn) → reset, first to the limit ends the match', async () => {
+      const alice: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, {
+        name: 'TD',
+        nickname: 'Alice',
+        mode: 'td',
+        roundLimit: 3,
+        team: TEAM_RED,
+        testOverrides: { respawnMs: 100, spawnProtectMs: 0, roundIntermissionMs: 1500 },
+      });
+      const rounds: RoundEventMsg[] = [];
+      const shots: ShotMsg[] = [];
+      listen(alice);
+      alice.onMessage(MSG.round, (m: RoundEventMsg) => rounds.push(m));
+      alice.onMessage(MSG.shot, (m: ShotMsg) => shots.push(m));
+      let bob: AnyRoom | null = null;
+      let carol: AnyRoom | null = null;
+      try {
+        await ready(alice);
+        expect(alice.state.mode).toBe('td');
+        expect(alice.state.roundLimit).toBe(3);
+        expect(alice.state.round).toBe(1);
+        expect(alice.state.roundPhase).toBe('live');
+        expect(alice.state.timeLeftMs).toBe(0); // no clock in td
+        expect(me(alice).team).toBe(TEAM_RED);
+        expect(me(alice).z).toBeLessThan(TD_WORLD_SZ / 2); // spawned in the red zone
+        expect(me(alice).gun).toBe(GUN_NONE); // pistol-only spawn: guns come off the ground
+        // The fixed weapon rows: 8 primaries per side, none of them expiring.
+        expect(alice.state.drops.size).toBe(16);
+        for (const d of alice.state.drops.values()) expect(d.slot).toBe(WEAPON_PRIMARY);
+
+        bob = await new Client(wsUrl).joinById(alice.roomId, { nickname: 'Bob', team: TEAM_BLUE });
+        listen(bob);
+        await ready(bob);
+        expect(me(bob).z).toBeGreaterThan(TD_WORLD_SZ / 2);
+        const rooms = (await (await fetch(`${httpUrl}/rooms`)).json()) as RoomListEntry[];
+        expect(rooms.find((r) => r.roomId === alice.roomId)!.metadata).toMatchObject({ mode: 'td', roundLimit: 3, teams: [1, 1] });
+
+        // Alice grabs a gun off the ground: walking over a fixed spot arms her.
+        const spot = [...alice.state.drops.values()].find((d: any) => d.z < TD_WORLD_SZ / 2);
+        alice.send(MSG.pose, { x: spot.x, y: spot.y, z: spot.z, yaw: 0, pitch: 0, epoch: me(alice).spawnEpoch, weapon: WEAPON_PISTOL });
+        await until(() => me(alice).gun !== GUN_NONE, 3000, 'alice armed off the ground');
+        expect(alice.state.drops.size).toBe(15);
+
+        // Alice wipes blue (Bob) → red takes the round. Shots repeat past the server's rate limit.
+        const wipe = async (round: number): Promise<void> => {
+          bob!.send(MSG.pose, poseOf(bob!, 32, 30, 0));
+          await until(() => Math.abs(alice.state.players.get(bob!.sessionId).z - 30) < 0.01, 3000, 'bob in the sky');
+          const deadline = Date.now() + 5000;
+          while (alice.state.roundsRed < round) {
+            if (Date.now() > deadline) throw new Error(`timed out wiping round ${round}`);
+            alice.send(MSG.shoot, poseOf(alice, 32, 40, 0)); // level pistol headshot
+            await sleep(GUN_SERVER_MIN_INTERVAL_MS + 60);
+          }
+        };
+        await wipe(1);
+        expect(alice.state.roundPhase).toBe('intermission');
+        expect(rounds.at(-1)).toMatchObject({ kind: 'end', winner: TEAM_RED, round: 1, roundsRed: 1, roundsBlue: 0 });
+        // Longer than respawnMs: the dead wait for the next round, they never auto-respawn.
+        await sleep(250);
+        expect(alice.state.players.get(bob.sessionId).alive).toBe(false);
+        // Carol joins mid-intermission: ready, but only spawned when the next round starts.
+        carol = await new Client(wsUrl).joinById(alice.roomId, { nickname: 'Carol', team: TEAM_RED });
+        listen(carol);
+        await until(() => me(carol!) !== undefined, 3000, 'carol in state');
+        carol.send(MSG.ready);
+        await sleep(150);
+        expect(me(carol).alive).toBe(false);
+
+        // Round 2: everyone (Bob and Carol included) comes back, loadouts reset, weapons re-laid.
+        const bobEpoch = alice.state.players.get(bob.sessionId).spawnEpoch;
+        await until(() => alice.state.round === 2 && alice.state.roundPhase === 'live', 3000, 'round 2');
+        await until(() => me(carol!).alive === true && alice.state.players.get(bob!.sessionId).alive === true, 3000, 'all spawned');
+        expect(alice.state.players.get(bob.sessionId).spawnEpoch).not.toBe(bobEpoch);
+        expect(me(alice).gun).toBe(GUN_NONE); // the picked-up rifle died with the round
+        expect(alice.state.drops.size).toBe(16);
+        expect(rounds.at(-1)).toMatchObject({ kind: 'start', round: 2 });
+
+        // No friendly fire: Alice cannot hurt Carol.
+        carol.send(MSG.pose, poseOf(carol, 32, 30, 0));
+        await until(() => Math.abs(alice.state.players.get(carol!.sessionId).z - 30) < 0.01, 3000, 'carol in the sky');
+        const before = shots.length;
+        alice.send(MSG.shoot, poseOf(alice, 32, 40, 0));
+        await until(() => shots.length > before, 3000, 'shot fired');
+        expect(alice.state.players.get(carol.sessionId).hp).toBe(100);
+        carol.send(MSG.pose, poseOf(carol, 10, 10, 0)); // out of the firing line
+
+        // Rounds 2 and 3 go red too: the limit ends the match.
+        await wipe(2);
+        await until(() => alice.state.round === 3 && alice.state.roundPhase === 'live', 3000, 'round 3');
+        await wipe(3);
+        await until(() => alice.state.phase === 'ended', 3000, 'round limit ends the match');
+        expect(alice.state.roundsRed).toBe(3);
+        expect(alice.state.roundsBlue).toBe(0);
+      } finally {
+        await carol?.leave();
+        await bob?.leave();
+        await alice.leave();
+      }
+    }, 30000);
+
+    it('bots split over both teams and spawn into round 1', async () => {
+      const alice: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, {
+        nickname: 'Alice',
+        mode: 'td',
+        bots: 2,
+        team: TEAM_RED,
+        testOverrides: { spawnProtectMs: 0, roundIntermissionMs: 500 },
+      });
+      listen(alice);
+      try {
+        await ready(alice);
+        expect(alice.state.players.get('bot1').team).toBe(TEAM_RED);
+        expect(alice.state.players.get('bot2').team).toBe(TEAM_BLUE);
+        expect(alice.state.players.get('bot2').alive).toBe(true);
+        // Bots play: the blue bot leaves its spawn (for a gun, an enemy or the crossroads).
+        const start = { x: alice.state.players.get('bot2').x, z: alice.state.players.get('bot2').z };
+        await until(() => Math.hypot(alice.state.players.get('bot2').x - start.x, alice.state.players.get('bot2').z - start.z) > 4, 5000, 'bot moves');
+      } finally {
         await alice.leave();
       }
     }, 20000);

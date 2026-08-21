@@ -10,6 +10,7 @@ import {
   parsePose,
   parseReload,
   parseRoomMode,
+  parseRoundLimit,
   parseSelectWeapon,
   parseShoot,
   parseSwing,
@@ -19,7 +20,7 @@ import {
   sanitizeName,
   sanitizeRoomName,
 } from '../src/rooms/validate';
-import { ATTACK_HEAVY, ATTACK_LIGHT, CTF_DEFAULT_CAPTURE_LIMIT, GUN_PISTOL, GUN_SNIPER, MAX_BOTS, MELEE_KATANA, MELEE_SWORD, TEAM_BLUE, TEAM_NONE, TEAM_RED, WEAPON_GRENADE, WEAPON_MELEE, WEAPON_PISTOL, WEAPON_PRIMARY } from '@mineshoot/shared';
+import { ATTACK_HEAVY, ATTACK_LIGHT, CTF_DEFAULT_CAPTURE_LIMIT, GUN_PISTOL, GUN_SNIPER, MAX_BOTS, MELEE_KATANA, MELEE_SWORD, TD_DEFAULT_ROUND_LIMIT, TEAM_BLUE, TEAM_NONE, TEAM_RED, WEAPON_GRENADE, WEAPON_MELEE, WEAPON_PISTOL, WEAPON_PRIMARY } from '@mineshoot/shared';
 
 describe('sanitizeName', () => {
   it('trims, strips junk, limits length, falls back', () => {
@@ -171,6 +172,13 @@ describe('ctf options', () => {
     expect(parseCaptureLimit(4)).toBe(CTF_DEFAULT_CAPTURE_LIMIT);
     expect(parseCaptureLimit('3')).toBe(CTF_DEFAULT_CAPTURE_LIMIT);
     expect(parseCaptureLimit(undefined)).toBe(CTF_DEFAULT_CAPTURE_LIMIT);
+  });
+  it('parseRoundLimit accepts only the offered options', () => {
+    expect(parseRoundLimit(3)).toBe(3);
+    expect(parseRoundLimit(7)).toBe(7);
+    expect(parseRoundLimit(4)).toBe(TD_DEFAULT_ROUND_LIMIT);
+    expect(parseRoundLimit('5')).toBe(TD_DEFAULT_ROUND_LIMIT);
+    expect(parseRoundLimit(undefined)).toBe(TD_DEFAULT_ROUND_LIMIT);
   });
   it('parseTeam knows red and blue, everything else is no preference', () => {
     expect(parseTeam(TEAM_RED)).toBe(TEAM_RED);

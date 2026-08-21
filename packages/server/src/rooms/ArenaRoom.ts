@@ -9,17 +9,27 @@ import {
   ENDED_LINGER_MS,
   FLAG_DROP_GRACE_MS,
   FLAG_RETURN_MS,
+  TD_INTERMISSION_MS,
+  TD_JOIN_GRACE_MS,
   TEAM_BLUE,
+  TEAM_NONE,
   TEAM_RED,
   TEAMS,
   botCtfGoal,
   botRebalance,
+  botTdGoal,
   canReturn,
   canScore,
   carriedFlag,
+  columnTop,
   flagTouch,
   isCtf,
+  isTd,
+  isTeam,
+  isTeamMode,
   pickTeam,
+  roundWinner,
+  tdWeaponLoadout,
   teamSpawns,
   PHYSICS_DT,
   SERVER_TICK_MS,
@@ -80,12 +90,13 @@ import {
   throwGrenade,
   weaponAllowed,
 } from '@mineshoot/shared';
-import type { AttackKind, Bot, BotSkill, BotView, ExplodeMsg, FlagEventKind, FlagEventMsg, FlagState, GrenadeState, GunKind, GunSpec, HitMsg, KillMsg, MeleeKind, PickupMsg, PlayerPhysState, PlayerPose, Rect, RoomMode, ShotMsg, ShotRay, ShotTarget, SpawnPoint, SwungMsg, Team, Weapon, WeaponMode, World } from '@mineshoot/shared';
+import type { AttackKind, Bot, BotSkill, BotView, ExplodeMsg, FlagEventKind, FlagEventMsg, FlagState, GrenadeState, GunKind, GunSpec, HitMsg, KillMsg, MeleeKind, PickupMsg, PlayerPhysState, PlayerPose, Rect, RoomMode, RoundEventMsg, RoundSide, ShotMsg, ShotRay, ShotTarget, SpawnPoint, SwungMsg, Team, Vec3, Weapon, WeaponMode, World } from '@mineshoot/shared';
 import { DropSchema, FlagSchema, GrenadeSchema, PlayerSchema, RoomState } from './schema';
 import {
   parseBotCount,
   parseBotSkill,
   parseCaptureLimit,
+  parseRoundLimit,
   parseCharge,
   parseChargeCancel,
   parseDropFlag,
@@ -107,6 +118,8 @@ import {
 interface PlayerMeta {
   /** False until the client clicks to play (MSG.ready); the player is not spawned before that. Bots are always ready. */
   ready: boolean;
+  /** TD: spawned into the running round (dead or alive); false while waiting for the next one. */
+  inRound: boolean;
   respawnAt: number;
   /** Spawn protection: cannot be targeted or damaged before this time (0 = none). */
   protectedUntil: number;
@@ -129,6 +142,7 @@ const freshReloads = (): Record<number, number> => ({ [WEAPON_PISTOL]: 0, [WEAPO
 
 const freshMeta = (ready: boolean): PlayerMeta => ({
   ready,
+  inRound: false,
   respawnAt: 0,
   protectedUntil: 0,
   lastShotAt: freshReloads(),
@@ -151,6 +165,8 @@ interface TestOverrides {
   dropLifetimeMs?: number;
   /** CTF: how long a dropped flag lies around before returning home. */
   flagReturnMs?: number;
+  /** TD: pause between rounds. */
+  roundIntermissionMs?: number;
 }
 
 /** Server-side bot runtime: brain + simulated body. */
@@ -171,6 +187,7 @@ interface CreateOptionsRaw {
   weapons?: unknown;
   mode?: unknown;
   captureLimit?: unknown;
+  roundLimit?: unknown;
   nickname?: unknown;
   testOverrides?: TestOverrides;
 }
@@ -181,8 +198,16 @@ export class ArenaRoom extends Room<RoomState> {
   private world!: World;
   private spawnPoints: SpawnPoint[] = [];
   private dropZone!: Rect;
-  /** CTF: flag stand per team. */
+  /** Team modes: flag stand (ctf) / spawn-zone centre (td) per team. */
   private bases!: Record<Team, SpawnPoint>;
+  /** TD: the fixed weapon spots (8 per side, mirrored). */
+  private weaponSpots: SpawnPoint[] = [];
+  /** TD: where the roads cross (the bots' fallback goal). */
+  private tdCenter: Vec3 = { x: 0, y: 0, z: 0 };
+  /** TD: when the running round started / when the intermission ends. */
+  private roundStartedAt = 0;
+  private nextRoundAt = 0;
+  private intermissionMs = TD_INTERMISSION_MS;
   /** CTF: when each dropped flag hit the ground (server-only; returns home after FLAG_RETURN_MS). */
   private readonly flagDroppedAt = new Map<Team, number>();
   /** CTF: who put a flag down on purpose and until when they may not take it back (server-only). */
@@ -242,6 +267,7 @@ export class ArenaRoom extends Room<RoomState> {
       if (typeof t.dropIntervalMs === 'number') this.dropIntervalMin = this.dropIntervalMax = t.dropIntervalMs;
       if (typeof t.dropLifetimeMs === 'number') this.dropLifetimeMs = t.dropLifetimeMs;
       if (typeof t.flagReturnMs === 'number') this.flagReturnMs = t.flagReturnMs;
+      if (typeof t.roundIntermissionMs === 'number') this.intermissionMs = t.roundIntermissionMs;
     }
 
     const seed = hashSeed(`${this.roomId}:${Date.now()}`);
@@ -251,6 +277,7 @@ export class ArenaRoom extends Room<RoomState> {
     this.spawnPoints = gen.spawnPoints;
     this.dropZone = gen.dropZone;
     this.bases = gen.bases;
+    this.weaponSpots = gen.weaponSpots ?? [];
     this.rng = createRng(seed ^ 0xabcdef);
     if (this.ctf) {
       this.state.captureLimit = parseCaptureLimit(options.captureLimit);
@@ -263,9 +290,20 @@ export class ArenaRoom extends Room<RoomState> {
         this.state.flags.set(flagKey(team), f);
       }
     }
+    if (this.td) {
+      this.state.roundLimit = parseRoundLimit(options.roundLimit);
+      const cx = Math.floor((this.dropZone.minX + this.dropZone.maxX) / 2);
+      const cz = Math.floor((this.dropZone.minZ + this.dropZone.maxZ) / 2);
+      this.tdCenter = { x: cx + 0.5, y: columnTop(this.world, cx, cz) + 1, z: cz + 0.5 };
+      this.roundStartedAt = Date.now();
+      this.layTdWeapons();
+    }
 
-    this.endsAt = Date.now() + durationMs;
-    this.state.timeLeftMs = durationMs;
+    // TD has no clock: rounds end by elimination, the match by round wins (endsAt stays 0).
+    if (!this.td) {
+      this.endsAt = Date.now() + durationMs;
+      this.state.timeLeftMs = durationMs;
+    }
     this.scheduleDrop(Date.now());
     this.botCount = botCount;
     this.syncMetadata();
@@ -296,8 +334,15 @@ export class ArenaRoom extends Room<RoomState> {
   private get ctf(): boolean {
     return isCtf(this.mode);
   }
+  private get td(): boolean {
+    return isTd(this.mode);
+  }
+  /** Red vs. blue (ctf and td): team pick/switch, team spawns, no friendly fire. */
+  private get teams(): boolean {
+    return isTeamMode(this.mode);
+  }
 
-  /** Lobby metadata; CTF rooms also carry the capture limit and the team head counts. */
+  /** Lobby metadata; team rooms also carry their win limit and the team head counts. */
   private syncMetadata(): void {
     this.setMetadata({
       name: this.state.name,
@@ -307,7 +352,9 @@ export class ArenaRoom extends Room<RoomState> {
       botSkill: this.botSkill,
       weapons: this.weaponMode,
       mode: this.mode,
-      ...(this.ctf ? { captureLimit: this.state.captureLimit, teams: [this.teamCount(TEAM_RED), this.teamCount(TEAM_BLUE)] } : {}),
+      ...(this.teams ? { teams: [this.teamCount(TEAM_RED), this.teamCount(TEAM_BLUE)] } : {}),
+      ...(this.ctf ? { captureLimit: this.state.captureLimit } : {}),
+      ...(this.td ? { roundLimit: this.state.roundLimit } : {}),
     });
   }
 
@@ -326,7 +373,7 @@ export class ArenaRoom extends Room<RoomState> {
     const p = new PlayerSchema();
     p.name = `Bot ${n}`;
     p.isBot = true;
-    if (this.ctf) {
+    if (this.teams) {
       p.team = n % 2 === 1 ? TEAM_RED : TEAM_BLUE;
       p.color = teamColor(p.team as Team);
     } else {
@@ -366,6 +413,13 @@ export class ArenaRoom extends Room<RoomState> {
         const flags = this.flagStates();
         view.goal = botCtfGoal(p.team as Team, id, rt.phys, flags, this.bases);
         view.carrying = carriedFlag(flags, id) !== null;
+      } else if (this.td) {
+        // Weapons on the own half of the map (worth a detour while unarmed).
+        const ownHalf = (z: number): boolean => (z < this.world.sz / 2) === (p.team === TEAM_RED);
+        const drops: Vec3[] = [];
+        for (const d of this.state.drops.values()) if (ownHalf(d.z)) drops.push({ x: d.x, y: d.y, z: d.z });
+        const armed = this.weaponMode === 'sword' || p.gun !== GUN_NONE;
+        view.goal = botTdGoal(rt.phys, { enemies, drops, armed, center: this.tdCenter });
       }
       const d = rt.brain.compute(this.world, view, dt);
       let phys = { ...rt.phys, yaw: d.yaw, pitch: d.pitch };
@@ -382,7 +436,7 @@ export class ArenaRoom extends Room<RoomState> {
   onJoin(client: Client, options?: { nickname?: unknown; team?: unknown }): void {
     const p = new PlayerSchema();
     p.name = sanitizeName(options?.nickname, `Player${this.state.players.size + 1}`);
-    if (this.ctf) {
+    if (this.teams) {
       // Requested team, or the smaller one.
       p.team = parseTeam(options?.team) || pickTeam(this.teamCounts(), this.rng);
       p.color = teamColor(p.team as Team);
@@ -409,6 +463,8 @@ export class ArenaRoom extends Room<RoomState> {
     const meta = this.meta.get(client.sessionId);
     if (!p || !meta || meta.ready) return;
     meta.ready = true;
+    // TD: joining mid-round (past the grace) or during the intermission means waiting for startRound.
+    if (this.td && (this.state.roundPhase !== 'live' || Date.now() - this.roundStartedAt > TD_JOIN_GRACE_MS)) return;
     this.spawn(client.sessionId, p);
   }
 
@@ -474,9 +530,9 @@ export class ArenaRoom extends Room<RoomState> {
     return !meta || now >= meta.protectedUntil;
   }
 
-  /** CTF: no friendly fire (teammates are never targets). */
+  /** Team modes: no friendly fire (teammates are never targets). */
   private sameTeam(a: PlayerSchema, b: PlayerSchema): boolean {
-    return this.ctf && a.team === b.team;
+    return this.teams && a.team === b.team;
   }
 
   private targetsExcluding(id: string, now: number): ShotTarget[] {
@@ -797,11 +853,14 @@ export class ArenaRoom extends Room<RoomState> {
   /** Spawn due drops, expire stale ones, and hand a drop to the first living player standing on it. */
   private tickDrops(now: number): void {
     if (!this.dropsEnabled) return;
-    if (now >= this.nextDropAt) {
-      if (this.state.drops.size < this.dropMaxActive) this.spawnDrop(now);
-      this.scheduleDrop(now);
+    // TD: the fixed weapon rows replace the random timed drops (and never expire) — only the pickup loop runs.
+    if (!this.td) {
+      if (now >= this.nextDropAt) {
+        if (this.state.drops.size < this.dropMaxActive) this.spawnDrop(now);
+        this.scheduleDrop(now);
+      }
+      for (const [id, expiresAt] of this.dropExpiry) if (now >= expiresAt) this.removeDrop(id);
     }
-    for (const [id, expiresAt] of this.dropExpiry) if (now >= expiresAt) this.removeDrop(id);
     if (this.state.drops.size === 0) return;
     for (const [pid, p] of this.state.players) {
       if (!p.alive) continue;
@@ -866,9 +925,9 @@ export class ArenaRoom extends Room<RoomState> {
     this.broadcast(MSG.kill, msg);
   }
 
-  /** Spawn points available to a player: CTF teams respawn near their own base. */
+  /** Spawn points available to a player: teams (ctf/td) respawn near their own base. */
   private spawnsFor(p: PlayerSchema): SpawnPoint[] {
-    return this.ctf ? teamSpawns(this.spawnPoints, this.bases[p.team as Team]) : this.spawnPoints;
+    return this.teams ? teamSpawns(this.spawnPoints, this.bases[p.team as Team]) : this.spawnPoints;
   }
 
   /** Training dummies stand on the central plateau, spaced out like drops; everyone else uses spawn points. */
@@ -902,6 +961,7 @@ export class ArenaRoom extends Room<RoomState> {
     p.shielded = this.spawnProtectMs > 0;
     const meta = this.meta.get(id);
     if (meta) {
+      meta.inRound = true;
       meta.chargeStartAt = 0;
       meta.protectedUntil = this.spawnProtectMs > 0 ? Date.now() + this.spawnProtectMs : 0;
       meta.ammo = freshAmmo();
@@ -929,7 +989,8 @@ export class ArenaRoom extends Room<RoomState> {
       const meta = this.meta.get(id);
       if (!meta || !meta.ready) continue;
       if (!p.alive) {
-        if (now >= meta.respawnAt) this.spawn(id, p);
+        // TD: the dead wait for the next round instead.
+        if (!this.td && now >= meta.respawnAt) this.spawn(id, p);
       } else if (p.shielded && now >= meta.protectedUntil) {
         p.shielded = false;
       }
@@ -938,6 +999,80 @@ export class ArenaRoom extends Room<RoomState> {
     this.tickDrops(now);
     this.tickGrenades(now);
     this.tickFlags(now);
+    this.tickRound(now);
+  }
+
+  // --- team elimination rounds ---
+
+  /**
+   * TD round state machine: while live, end the round the moment one team is
+   * wiped (a simultaneous wipe is a drawn round); the first team at
+   * `roundLimit` round wins takes the match, otherwise a short intermission
+   * (survivors keep walking, nobody respawns) leads into the next round.
+   */
+  private tickRound(now: number): void {
+    if (!this.td) return;
+    if (this.state.roundPhase === 'live') {
+      const sides: Record<Team, RoundSide> = { [TEAM_RED]: { alive: 0, inRound: 0, ready: 0 }, [TEAM_BLUE]: { alive: 0, inRound: 0, ready: 0 } };
+      for (const [id, p] of this.state.players) {
+        const meta = this.meta.get(id);
+        if (!meta?.ready || !isTeam(p.team)) continue;
+        const s = sides[p.team];
+        s.ready++;
+        if (meta.inRound) s.inRound++;
+        if (p.alive) s.alive++;
+      }
+      const winner = roundWinner(sides[TEAM_RED], sides[TEAM_BLUE]);
+      if (winner === null) return;
+      if (winner === TEAM_RED) this.state.roundsRed++;
+      else if (winner === TEAM_BLUE) this.state.roundsBlue++;
+      this.roundEvent('end', winner);
+      if (Math.max(this.state.roundsRed, this.state.roundsBlue) >= this.state.roundLimit) {
+        this.endMatch();
+        return;
+      }
+      this.state.roundPhase = 'intermission';
+      this.nextRoundAt = now + this.intermissionMs;
+    } else if (now >= this.nextRoundAt) {
+      this.startRound(now);
+    }
+  }
+
+  /** Fresh round: everyone ready respawns at their own end and the fixed weapons are laid out again. */
+  private startRound(now: number): void {
+    this.state.round++;
+    this.state.roundPhase = 'live';
+    this.roundStartedAt = now;
+    // A grenade from the last round must not explode into this one.
+    this.grenadeSim.clear();
+    this.state.grenades.clear();
+    this.layTdWeapons();
+    for (const [id, p] of this.state.players) {
+      if (this.meta.get(id)?.ready) this.spawn(id, p);
+    }
+    this.roundEvent('start', TEAM_NONE);
+  }
+
+  private roundEvent(kind: RoundEventMsg['kind'], winner: RoundEventMsg['winner']): void {
+    const msg: RoundEventMsg = { kind, winner, round: this.state.round, roundsRed: this.state.roundsRed, roundsBlue: this.state.roundsBlue };
+    this.broadcast(MSG.round, msg);
+  }
+
+  /** Clear the ground and lay each side's fixed weapon row (same spots and kinds every round; they never expire). */
+  private layTdWeapons(): void {
+    this.state.drops.clear();
+    this.dropExpiry.clear();
+    const loadout = tdWeaponLoadout(this.weaponMode);
+    for (const [i, s] of this.weaponSpots.entries()) {
+      const k = loadout[i % loadout.length];
+      const d = new DropSchema();
+      d.slot = k.slot;
+      d.kind = k.kind;
+      d.x = s.x;
+      d.y = s.y;
+      d.z = s.z;
+      this.state.drops.set(`d${++this.dropSeq}`, d);
+    }
   }
 
   // --- capture the flag ---
@@ -1055,9 +1190,9 @@ export class ArenaRoom extends Room<RoomState> {
     }
   }
 
-  /** CTF: pick / switch team (always allowed; bots even the teams out afterwards). */
+  /** Team modes: pick / switch team (always allowed; bots even the teams out afterwards). */
   private handleSelectTeam(client: Client, raw: unknown): void {
-    if (!this.ctf || this.state.phase !== 'playing') return;
+    if (!this.teams || this.state.phase !== 'playing') return;
     const team = parseTeam(raw);
     const p = this.state.players.get(client.sessionId);
     if (!team || !p || p.team === team) return;
@@ -1066,9 +1201,9 @@ export class ArenaRoom extends Room<RoomState> {
     this.syncMetadata();
   }
 
-  /** CTF: bots keep the sides even (humans pick freely). */
+  /** Team modes: bots keep the sides even (humans pick freely). */
   private rebalanceBots(): void {
-    if (!this.ctf) return;
+    if (!this.teams) return;
     const now = Date.now();
     for (let guard = 0; guard < this.bots.size; guard++) {
       const botsByTeam: Record<Team, string[]> = { [TEAM_RED]: [], [TEAM_BLUE]: [] };
@@ -1108,7 +1243,7 @@ export class ArenaRoom extends Room<RoomState> {
   }
 
   private tickTimer(): void {
-    if (this.state.phase !== 'playing') return;
+    if (this.state.phase !== 'playing' || this.td) return;
     const left = Math.max(0, this.endsAt - Date.now());
     this.state.timeLeftMs = left;
     if (left <= 0) this.endMatch();

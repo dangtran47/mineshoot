@@ -1,4 +1,4 @@
-import { CTF_WORLD_SX, CTF_WORLD_SZ, WORLD_SX, WORLD_SY, WORLD_SZ } from './constants';
+import { CTF_WORLD_SX, CTF_WORLD_SZ, TD_WORLD_SX, TD_WORLD_SZ, WORLD_SX, WORLD_SY, WORLD_SZ } from './constants';
 import { createNoise2D } from './noise';
 import { TEAM_BLUE, TEAM_RED } from './protocol';
 import type { RoomMode, Team } from './protocol';
@@ -20,8 +20,10 @@ export interface GeneratedWorld {
   spawnPoints: SpawnPoint[];
   /** Where weapon drops land (see drops.ts). */
   dropZone: Rect;
-  /** Capture the flag only: the flag stand of each team (feet position). */
+  /** Team modes only: the flag stand (ctf) / spawn-zone centre (td) of each team (feet position). */
   bases: Record<Team, SpawnPoint>;
+  /** Team elimination only: the fixed weapon spots, 8 red-side then their 8 blue-side mirrors (same order). */
+  weaponSpots?: SpawnPoint[];
 }
 
 const BORDER_WALL_H = 6;
@@ -58,7 +60,7 @@ const CTF_SPAWN_BAND = 22;
 
 /** Pick the generator for a room mode. */
 export function generateWorldFor(mode: RoomMode, seed: number): GeneratedWorld {
-  return mode === 'ctf' ? generateCtfWorld(seed) : generateWorld(seed);
+  return mode === 'ctf' ? generateCtfWorld(seed) : mode === 'td' ? generateTdWorld(seed) : generateWorld(seed);
 }
 
 /**
@@ -237,6 +239,116 @@ export function generateCtfWorld(seed: number): GeneratedWorld {
   };
 }
 
+// --- TD map layout (teams north/south; the map is mirrored across its z middle so both sides get the same ground) ---
+/** The two brick-paved roads whose crossing is the "ngã tư"; flattened to this height so they are always walkable. */
+const TD_ROAD_MIN = 28;
+const TD_ROAD_MAX = 35; // inclusive: 8 wide
+const TD_ROAD_H = 3;
+/** Hollow corner buildings framing the intersection (north pair; the south pair is the mirror). */
+const TD_BUILDINGS: readonly Rect[] = [
+  { minX: 15, maxX: 23, minZ: 15, maxZ: 23 },
+  { minX: 40, maxX: 48, minZ: 15, maxZ: 23 },
+];
+const TD_WALL_H = 4;
+const TD_DOOR_WIDTH = 3;
+/** Each team spawns in the band z 2..TD_SPAWN_BAND at its own end. */
+const TD_SPAWN_BAND = 11;
+const TD_TARGET_SPAWNS = 24;
+const TD_MIN_SPAWN_DIST = 6;
+/** Fixed weapon spots: this row of x columns at TD_WEAPON_Z (red) and its mirror (blue). */
+const TD_WEAPON_XS: readonly number[] = [12, 18, 24, 30, 34, 40, 46, 52];
+const TD_WEAPON_Z = 13;
+
+/**
+ * Deterministic team-elimination map: a square crossroads ("ngã tư tử thần").
+ * Two flat brick roads cross in the middle; four hollow corner buildings frame
+ * the intersection, each with a doorway onto both roads. Each team spawns in
+ * its own band at the north/south end behind a row of fixed weapon spots, with
+ * a little cover. Everything is mirrored across the z middle so both teams
+ * fight over identical ground, and the north-south road runs base to base so
+ * the bots always have a route.
+ */
+export function generateTdWorld(seed: number): GeneratedWorld {
+  const world = createWorld(TD_WORLD_SX, WORLD_SY, TD_WORLD_SZ);
+  const rng = createRng(seed ^ 0x6a09e667);
+  const noise = createNoise2D(seed ^ 0xbb67ae85);
+  const sz = world.sz;
+  const mirrorZ = (z: number): number => sz - 1 - z;
+  const onRoad = (x: number, z: number): boolean => (x >= TD_ROAD_MIN && x <= TD_ROAD_MAX) || (z >= TD_ROAD_MIN && z <= TD_ROAD_MAX);
+  const buildings: Rect[] = [
+    ...TD_BUILDINGS,
+    ...TD_BUILDINGS.map((r) => ({ minX: r.minX, maxX: r.maxX, minZ: mirrorZ(r.maxZ), maxZ: mirrorZ(r.minZ) })),
+  ];
+
+  // Gentle mirrored ground (3..4, so the flat roads never have a bank too tall to jump out over),
+  // brick-paved roads, flat building floors.
+  fillTerrain(world, (x, z) => {
+    const nz = z < sz / 2 ? z : mirrorZ(z);
+    let h = 3 + Math.floor(noise(x / 12, nz / 12) * 2);
+    let brick = false;
+    if (buildings.some((r) => inRect(r, x, z))) h = TD_ROAD_H;
+    if (onRoad(x, z)) {
+      h = TD_ROAD_H;
+      brick = true;
+    }
+    return { h, brick };
+  });
+  borderWall(world);
+
+  // Corner buildings: a doorway onto each road they face (the mirrored pair faces north instead of south).
+  for (const r of TD_BUILDINGS) {
+    const south = { minX: r.minX, maxX: r.maxX, minZ: mirrorZ(r.maxZ), maxZ: mirrorZ(r.minZ) };
+    const roadSide = r.maxX < TD_ROAD_MIN ? 'e' : 'w';
+    roomAt(world, r, [roadSide, 's']);
+    roomAt(world, south, [roadSide, 'n']);
+  }
+
+  // Spawn-zone cover: a short wall in front of each spawn band, mirrored.
+  for (const x0 of [10, 22, 42, 52]) {
+    wallCells(world, x0, 9, 4, 1);
+    wallCells(world, x0, mirrorZ(9), 4, 1);
+  }
+  // A few mirrored trees and pillars in the side strips between the buildings and the border.
+  const strip = (x: number, z: number): boolean => (x >= 3 && x <= 11 || x >= 52 && x <= 60) && z >= 15 && z <= 24;
+  for (let i = 0, tries = 0; i < 6 && tries < 36; tries++) {
+    const x = randInt(rng, 3, world.sx - 4);
+    const z = randInt(rng, 15, 24);
+    if (!strip(x, z)) continue;
+    if (rng() < 0.6) {
+      const trunk = randInt(rng, 3, 4);
+      treeAt(world, x, z, trunk);
+      treeAt(world, x, mirrorZ(z), trunk);
+    } else {
+      if (!strip(x + 1, z + 1)) continue;
+      const h = randInt(rng, 4, 6);
+      pillarAt(world, x, z, h);
+      pillarAt(world, x, mirrorZ(z + 1), h);
+    }
+    i++;
+  }
+
+  const spawnPoints = computeSpawnPoints(
+    world,
+    createRng(seed ^ 0x3c6ef372),
+    TD_TARGET_SPAWNS,
+    TD_MIN_SPAWN_DIST,
+    (_x, z) => z <= TD_SPAWN_BAND || z >= sz - 1 - TD_SPAWN_BAND,
+  );
+  const spotAt = (x: number, z: number): SpawnPoint => ({ x: x + 0.5, y: columnTop(world, x, z) + 1, z: z + 0.5 });
+  const weaponSpots = [
+    ...TD_WEAPON_XS.map((x) => spotAt(x, TD_WEAPON_Z)),
+    ...TD_WEAPON_XS.map((x) => spotAt(x, mirrorZ(TD_WEAPON_Z))),
+  ];
+  const baseX = Math.floor((TD_ROAD_MIN + TD_ROAD_MAX) / 2);
+  return {
+    world,
+    spawnPoints,
+    dropZone: { minX: TD_ROAD_MIN, maxX: TD_ROAD_MAX, minZ: TD_ROAD_MIN, maxZ: TD_ROAD_MAX },
+    bases: { [TEAM_RED]: spotAt(baseX, 6), [TEAM_BLUE]: spotAt(baseX, mirrorZ(6)) },
+    weaponSpots,
+  };
+}
+
 // --- shared building blocks ---
 
 const noBases = (): Record<Team, SpawnPoint> => ({ [TEAM_RED]: { x: 0, y: 0, z: 0 }, [TEAM_BLUE]: { x: 0, y: 0, z: 0 } });
@@ -338,6 +450,31 @@ function wallCells(world: World, x0: number, z0: number, w: number, d: number): 
     for (let dz = 0; dz < d; dz++) {
       const base = columnTop(world, x0 + dx, z0 + dz) + 1;
       for (let y = base; y < base + 3 && y < world.sy; y++) setBlock(world, x0 + dx, y, z0 + dz, Block.Brick);
+    }
+}
+
+/**
+ * A hollow, roofless brick room over `r`: walls TD_WALL_H tall on the rect
+ * edge, with a TD_DOOR_WIDTH-wide, two-block-tall doorway centred on each
+ * side named in `doors` ('n' = minZ, 's' = maxZ, 'w' = minX, 'e' = maxX).
+ */
+function roomAt(world: World, r: Rect, doors: readonly ('n' | 's' | 'e' | 'w')[]): void {
+  const cx = Math.floor((r.minX + r.maxX) / 2);
+  const cz = Math.floor((r.minZ + r.maxZ) / 2);
+  const half = Math.floor(TD_DOOR_WIDTH / 2);
+  const inDoor = (x: number, z: number): boolean =>
+    doors.some((side) => {
+      if (side === 'n') return z === r.minZ && Math.abs(x - cx) <= half;
+      if (side === 's') return z === r.maxZ && Math.abs(x - cx) <= half;
+      if (side === 'w') return x === r.minX && Math.abs(z - cz) <= half;
+      return x === r.maxX && Math.abs(z - cz) <= half;
+    });
+  for (let x = r.minX; x <= r.maxX; x++)
+    for (let z = r.minZ; z <= r.maxZ; z++) {
+      if (!onRectEdge(r, x, z)) continue;
+      const base = columnTop(world, x, z) + 1;
+      const from = inDoor(x, z) ? base + 2 : base;
+      for (let y = from; y < base + TD_WALL_H && y < world.sy; y++) setBlock(world, x, y, z, Block.Brick);
     }
 }
 

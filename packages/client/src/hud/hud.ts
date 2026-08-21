@@ -205,7 +205,24 @@ export class Hud {
     this.ctfBar.title = `First to ${limit} captures. Flags: red ${redFlag}, blue ${blueFlag}.`;
   }
 
-  /** CTF: team buttons on the overlay ("Red (2)" / "Blue (3)"), the own team highlighted. */
+  /** TD score bar: `Red 2 / 5 1 Blue · Round 4` (round wins so far, wins needed, running round). */
+  setTdScore(red: number, blue: number, limit: number, round: number): void {
+    this.ctfBar.classList.remove('hidden');
+    this.ctfBar.replaceChildren(
+      el('span', `side ${TEAM_CLASS[TEAM_RED]}`, `Red ${red}`),
+      el('span', 'limit', `/ ${limit}`),
+      el('span', `side ${TEAM_CLASS[TEAM_BLUE]}`, `${blue} Blue`),
+      el('span', 'limit', `· Round ${round}`),
+    );
+    this.ctfBar.title = `First to ${limit} round wins takes the match.`;
+  }
+
+  /** TD has no clock: hide the timer instead of showing 0:00. */
+  setTimerVisible(visible: boolean): void {
+    this.timer.classList.toggle('hidden', !visible);
+  }
+
+  /** Team modes: team buttons on the overlay ("Red (2)" / "Blue (3)"), the own team highlighted. */
   setTeams(mine: Team | 0, counts: Record<Team, number>): void {
     this.teamRow.classList.remove('hidden');
     for (const [team, b] of this.teamButtons) {
@@ -352,8 +369,13 @@ export class Hud {
   }
 
   setRespawnCountdown(ms: number): void {
+    this.setDeathNote(`Respawning in ${Math.max(0, Math.ceil(ms / 1000))}…`);
+  }
+
+  /** Line under the death banner (TD: "Spectating — back next round" instead of a respawn countdown). */
+  setDeathNote(text: string): void {
     const c = this.centerMsg.querySelector('.countdown');
-    if (c) c.textContent = `Respawning in ${Math.max(0, Math.ceil(ms / 1000))}…`;
+    if (c) c.textContent = text;
   }
 
   hideDeath(): void {

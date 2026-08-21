@@ -57,12 +57,13 @@ Pure TypeScript, `"exports": "./src/index.ts"` (consumed as source by Vite and
 | Tunables | `constants.ts` | every number: world size, movement, weapon timings, damage, hitbox bands, HP, respawn, spawn protection, durations, `MAX_PLAYERS`, `MAX_BOTS` |
 | Protocol | `protocol.ts` | `MSG` names, payload interfaces (`PoseMsg`, `ShootMsg`, `SwingMsg`, `ShotMsg`, `HitMsg`, `KillMsg`, `PickupMsg`, …), `CreateOptions`, `RoomMetadata`, `WeaponMode` + `weaponAllowed()/defaultWeapon()/allowedWeapons()`, `ROOM_NAME` |
 | Data | `types.ts`, `world.ts`, `rng.ts`, `noise.ts` | `World` (flat `Uint8Array` of `Block`), `PlayerPhysState`, `MoveInput`, `Vec3`; `createRng(seed)` (mulberry-style), 2D value noise |
-| World | `worldgen.ts` | `generateWorld(seed)` (arena) and `generateCtfWorld(seed)` (96×48 CTF map) → `{ world, spawnPoints, dropZone, bases }`; `generateWorldFor(mode, seed)`; `PLATEAU_MIN/MAX` |
+| World | `worldgen.ts` | `generateWorld(seed)` (arena), `generateCtfWorld(seed)` (96×48 CTF map) and `generateTdWorld(seed)` (64×64 crossroads) → `{ world, spawnPoints, dropZone, bases, weaponSpots? }`; `generateWorldFor(mode, seed)`; `PLATEAU_MIN/MAX` |
 | Physics | `aabb.ts`, `collision.ts`, `playerPhysics.ts` | `moveAABB` (axis-separated swept AABB vs voxels), `stepPlayer(world, state, input, dt)`, `forwardVector` |
 | Hitscan | `raycast.ts`, `hitbox.ts`, `gun.ts` | `raycastVoxels` (DDA), `segmentVsAABB`, `playerHitboxes(feet)` (legs/torso/head boxes), `resolveShot(world, shooter, targets, range)` |
 | Melee | `sword.ts`, `melee.ts`, `drops.ts` | `MELEE_STATS` per `MeleeKind` → `attacks[AttackKind]` (`AttackSpec`: cone, reach, damage, sweep, cooldown, anim), `meleeStats()`, `attackSpec()`, `swordVictims(world, pose, targets, attack, kind)`, `swordDamage()`, `pickDropKind()`, `pickDropSpot()`, `canPickUp()`, drop cadence constants |
 | Match | `spawn.ts`, `ranking.ts`, `kills.ts` | `pickSpawn(points, enemies, rng)` (farthest-from-enemies with randomness), `rankPlayers`, `rankCtf`, `kdRatio`, `KillTracker` (multi-kill / streak / shutdown awards) |
 | CTF | `ctf.ts` | `FlagState`, `flagTouch()`, `canScore()`, `canReturn()`, `carriedFlag()`, `teamSpawns()`, `pickTeam()`, `botRebalance()`, `matchWinner()`, `botCtfGoal()` (offence-first bot goal); teams (`TEAM_RED/BLUE`, `Team`, `otherTeam`, `teamName`) live in `protocol.ts` |
+| TD | `td.ts` | team elimination: `roundWinner(red, blue)` (per-team `{alive, inRound, ready}` → round outcome), `tdWeaponLoadout(weapons)` (the fixed ground-weapon row per side), `botTdGoal()` (gun → enemy → crossroads) |
 | Bots | `bot.ts` | `createBot(rng, waypoints, { weapons, passive, skill })` → `{ compute(world, view, dt), reset() }`; `passive` = training dummy (faces the nearest enemy, never moves or attacks); `skill` (`BotSkill` in `protocol.ts`, profiles via `botSkillProfile()`) scales sight / turn rate / reaction / aim error / attack interval; `view.goal` / `view.carrying` drive CTF behaviour. Movement toward any destination goes through `nav.ts` |
 | Navigation | `nav.ts` | `standable()`, `nearestStandable(world, x, y, z)`, `findPath(world, from, to)` (A* over standable cells: step up 1 with a jump, drop ≤ `MAX_DROP`, diagonals only with both orthogonal cells free), `cellCentre()`; the bot re-plans every 1.5 s, when its destination moves 2 blocks or when it strays 3 blocks off the route |
 
@@ -230,11 +231,12 @@ mode); it waits for `shot`/`hit` for anything that implies damage.
 
 ```
 onCreate(opts)
-  ├ sanitize name/duration/bots/botSkill/weapons/mode(/captureLimit); maxClients = MAX_PLAYERS(16) - bots
-  ├ respawnMs = respawnMsFor(mode) (3 s match / 1 s training / 5 s ctf); training bots are passive
+  ├ sanitize name/duration/bots/botSkill/weapons/mode(/captureLimit/roundLimit); maxClients = MAX_PLAYERS(16) - bots
+  ├ respawnMs = respawnMsFor(mode) (3 s match / 1 s training / 5 s ctf; unused in td); training bots are passive
   ├ mode 'ctf': faster drops, two FlagSchema entries at gen.bases, captureLimit
-  ├ seed = hash(roomId:now); generateWorldFor(mode, seed) → world, spawnPoints, dropZone, bases
-  ├ setMetadata({name, durationMin, endsAt, bots, botSkill, weapons, mode, captureLimit?, teams?})   ← lobby list
+  ├ mode 'td': roundLimit, no timers (endsAt 0), fixed weapon rows laid (layTdWeapons)
+  ├ seed = hash(roomId:now); generateWorldFor(mode, seed) → world, spawnPoints, dropZone, bases, weaponSpots?
+  ├ setMetadata({name, durationMin, endsAt, bots, botSkill, weapons, mode, captureLimit?, roundLimit?, teams?})   ← lobby list
   ├ onMessage handlers (pose/shoot/swing/charge/chargeCancel/reload/ready/selectMelee/selectTeam/dropFlag/ping)
   ├ clock: tickLifecycle every 50 ms, tickTimer every 1 s
   └ addBot()×N; setSimulationInterval(pumpBots, 50 ms) if bots > 0
@@ -242,7 +244,7 @@ onCreate(opts)
 onJoin(client, {nickname, team?})
   └ PlayerSchema parked at a spawn, alive=false, meta.ready=false
      (camera previews the arena; nobody can hit them)
-     ctf: team = requested or the smaller one; colour = team colour; bots rebalance
+     team modes (ctf/td): team = requested or the smaller one; colour = team colour; bots rebalance
 
 'ready' → spawn(): pick spawn far from enemies, hp=100, weapon=default,
           melee=sword, shielded for SPAWN_PROTECT_MS, spawnEpoch++
@@ -250,15 +252,16 @@ onJoin(client, {nickname, team?})
 'selectMelee' → training range only (meleeSelectable): p.melee = kind,
           pending charge dropped; the client sees it through the state patch
 
-'selectTeam' → ctf only: switch sides (drop flag, die without a death, respawn
-          on the new side; unspawned players are re-parked), then botRebalance
+'selectTeam' → team modes only: switch sides (drop flag, die without a death,
+          respawn on the new side — in td: wait for the next round; unspawned
+          players are re-parked), then botRebalance
 'dropFlag' → ctf only, actor(): put the carried flag down (dropper may not
           re-take it for FLAG_DROP_GRACE_MS)
 
-tickLifecycle (50 ms): respawn dead ready players when respawnAt passes,
-          clear expired shields, mirror charging/reloading flags, tickDrops(),
-          tickFlags()
-tickTimer  (1 s):   timeLeftMs; at 0 → endMatch()
+tickLifecycle (50 ms): respawn dead ready players when respawnAt passes (not
+          in td: the dead wait for the next round), clear expired shields,
+          mirror charging/reloading flags, tickDrops(), tickFlags(), tickRound()
+tickTimer  (1 s):   timeLeftMs; at 0 → endMatch()  (skipped in td)
 endMatch:  phase='ended', lock() (hidden from /rooms), disconnect() after
            ENDED_LINGER_MS (15 s) so clients can show results
 
@@ -343,6 +346,48 @@ own flag wherever it is) and `carrying` to the
 `BotView`; the brain walks to the goal when no enemy is in sight, patrols
 nearby waypoints once there, and as a carrier runs for the goal melee-out,
 only swinging at enemies within reach. Teams alternate (bot1 red, bot2 blue, …).
+
+**Team elimination** (`mode: 'td'`, rules in `shared/td.ts`, numbers in
+`constants.ts`). Round-based elimination on `generateTdWorld` (64×64,
+mirrored across the z-middle: two flat brick roads crossing in the middle,
+four hollow corner buildings with doorways onto both roads, a team spawn zone
+at each z end behind a row of 8 fixed weapon spots; the north–south road is
+base-to-base walkable for the bots). It shares all the CTF *team* machinery —
+`isTeamMode` gates team pick/switch, `teamSpawns`, no friendly fire, team
+colours, lobby team buttons, split scoreboard and team results — but has no
+flags and **no clocks**: `tickTimer` is skipped, `endsAt`/`timeLeftMs` stay 0,
+and rounds have no time limit.
+
+The round state machine lives in `tickRound` (50 ms) with state in
+`RoomState.roundPhase ('live'|'intermission') / round / roundsRed /
+roundsBlue / roundLimit`:
+
+- While `'live'`, the pure `roundWinner(red, blue)` decides on per-team
+  `{alive, inRound, ready}` counts: a side whose fighters are wiped loses the
+  round, a simultaneous wipe is a drawn round (no point), a side with nobody
+  ready freezes the round (solo rooms never loop instant rounds), and a side
+  whose ready players are all *waiting outside* the round draws it rather
+  than gifting a point. `meta.inRound` (set by `spawn()`, cleared for
+  late joiners) is what separates fighters from waiters.
+- A decided round broadcasts `MSG.round` (`RoundEventMsg`), then either
+  `endMatch()` (a team reached `roundLimit`) or `roundPhase='intermission'`
+  for `TD_INTERMISSION_MS`; survivors keep walking, **nobody respawns**
+  (`tickLifecycle` skips the `respawnAt` path in td — the dead spectate).
+- `startRound` clears grenades (a round-1 grenade must not explode into
+  round 2; in-flight shots die with the `spawnEpoch` bump), re-lays the
+  weapons and respawns every ready player at their own end.
+
+Loadouts: td spawns are pistol-only (`spawnPrimary` rolls nothing outside
+deathmatch). The better weapons lie at the map's `weaponSpots` (8 per side,
+mirrored) zipped with `tdWeaponLoadout(weapons)` (two of each primary gun, or
+two of each blade in sword-only rooms) into ordinary `DropSchema` drops —
+laid by `layTdWeapons` at round start with **no expiry**, picked up by the
+normal proximity loop; the random timed-drop half of `tickDrops` is disabled.
+Joining mid-round spawns you only within `TD_JOIN_GRACE_MS` of the round
+start; later (or during an intermission) you are ready-but-waiting until
+`startRound`. **TD bots**: `botTdGoal` sends an unarmed bot to the nearest
+weapon on its own half, else to the nearest known enemy, else to the
+crossroads centre.
 
 ## 5. Client frame
 

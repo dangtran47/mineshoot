@@ -47,12 +47,13 @@ around, and shoot each other for 3–15 minutes. Then argue about the K/D table.
 
 1. Open the demo (or your local build), enter a nickname.
 2. **Create room** — pick a name, duration (3/5/10/15 min), the **room
-   type** (Deathmatch, Training range or Capture the Flag), how many **AI
-   bots** (0–15) and how sharp they are (**Easy / Normal / Hard**), and the
-   **allowed weapons** (Guns + Sword, Sword only); a CTF room also
-   picks the captures needed to win (3/5/10). Or
-   **Join** an existing room from the public list — CTF rooms offer **Red /
-   Blue / Auto** buttons so you can pick a side.
+   type** (Deathmatch, Training range, Capture the Flag or Team Elimination),
+   how many **AI bots** (0–15) and how sharp they are (**Easy / Normal /
+   Hard**), and the **allowed weapons** (Guns + Sword, Sword only); a CTF room
+   also picks the captures needed to win (3/5/10), a Team Elimination room the
+   round wins needed (3/**5**/7/10 — no duration, rounds have no clock). Or
+   **Join** an existing room from the public list — team rooms (CTF and Team
+   Elimination) offer **Red / Blue / Auto** buttons so you can pick a side.
 3. **Click to play.** You are not in the arena until you click; nobody can
    hit you while you are still reading the overlay.
 4. Fight until the timer runs out. Rankings (kills, deaths, K/D) are shown at
@@ -249,21 +250,55 @@ central plateau more often than in the arena (see above). CTF spawns are
 always pistol-only — the deathmatch random-primary roll does not apply to
 team modes.
 
+### Team Elimination
+
+Create a room as **Team Elimination** (⚔️ TD in the lobby list) for round-based
+two-team play on a **dedicated 64×64 crossroads map** ("ngã tư tử thần"),
+mirrored so both teams fight over identical ground: two flat brick roads cross
+in the middle, four hollow corner buildings with doorways onto both roads frame
+the intersection, and each team spawns in its own zone at the north/south end.
+
+- **Rounds.** Everyone spawns at their own end with the default loadout
+  (pistol + sword + grenades; the deathmatch random-primary roll does not
+  apply). **Dying takes you out for the round** — you spectate until it ends.
+  Wiping the enemy team wins the round; a simultaneous wipe is a drawn round
+  (no point). Rounds have **no time limit**, and there is no match clock.
+- **Weapons on the ground.** Better weapons lie at **fixed spots** — a row of
+  8 in front of each spawn zone, two of each primary gun (rifle / SMG /
+  shotgun / sniper; blades ×2 in a sword-only room) — the **same spots and
+  kinds every round**, so you learn where your favourite gun waits. Walk over
+  one to take it; they never expire, and the random timed drops don't run.
+- **Between rounds** there is a **5 s intermission** (survivors keep walking,
+  nobody respawns), then everyone comes back at their own end with a fresh
+  loadout and the weapon rows are laid out again. Kills and deaths carry
+  across rounds.
+- **Joining mid-round**: you spawn straight in within the first **10 s** of a
+  round; later you wait for the next one (your arrival never decides a round
+  you didn't fight in — it draws instead if your side had nobody in it).
+- **Winning.** First team to the round limit (3/**5**/7/10) takes the match;
+  the results screen says Victory / Defeat with one ranked table per team.
+- **Teams** work like CTF: pick Red / Blue / Auto, switch from the `Esc`
+  overlay (switching while alive kills you — you wait for the next round),
+  red/blue skins, **no friendly fire**, bots alternate sides and rebalance.
+  Bots fetch a gun from their own row when unarmed, then hunt the nearest
+  known enemy or push the crossroads.
+
 ### Tuning
 
 All knobs are constants in `packages/shared`:
 
-- `constants.ts` — world size (arena and CTF map), walk/jump, gun
+- `constants.ts` — world size (arena, CTF and TD maps), walk/jump, gun
   cooldown/range/magazine/reload, sword range/cone/charge, HP and per-body-part
   damage, hitbox bands, respawn delay, spawn protection, room durations, max
-  players, CTF capture limits / carry speed / base zone / flag return timers.
+  players, CTF capture limits / carry speed / base zone / flag return timers,
+  TD round limits / intermission / join grace.
 - `melee.ts` — the melee move-set table (`MELEE_STATS`: light / heavy per
   weapon, each with cone, reach, damage, sweep, cooldown and animation), drop
   cadence (arena and CTF), cap, lifetime and pickup radius.
 - `bot.ts` — the skill profiles (sight, turn rate, reaction, aim error,
   attack interval), preferred range, CTF goal/patrol radii, re-plan cadence;
-  `nav.ts` — max drop height; `ctf.ts` — flag/team rules, `worldgen.ts` —
-  both map layouts.
+  `nav.ts` — max drop height; `ctf.ts` — flag/team rules, `td.ts` — round /
+  loadout / bot-goal rules, `worldgen.ts` — all three map layouts.
 
 ## Run it locally
 

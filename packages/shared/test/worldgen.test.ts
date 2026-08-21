@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { CTF_WORLD_SX, CTF_WORLD_SZ, WORLD_SX, WORLD_SY, WORLD_SZ } from '../src/constants';
+import { CTF_WORLD_SX, CTF_WORLD_SZ, TD_WORLD_SX, TD_WORLD_SZ, WORLD_SX, WORLD_SY, WORLD_SZ } from '../src/constants';
 import { TEAM_BLUE, TEAM_RED } from '../src/protocol';
 import { Block } from '../src/types';
 import type { World } from '../src/types';
 import { columnTop, getBlock, hashWorld, isSolid } from '../src/world';
-import { PLATEAU_MAX, PLATEAU_MIN, generateCtfWorld, generateWorld, generateWorldFor, isStandable } from '../src/worldgen';
+import { PLATEAU_MAX, PLATEAU_MIN, generateCtfWorld, generateTdWorld, generateWorld, generateWorldFor, isStandable } from '../src/worldgen';
 
 /** Feet height of a player standing on column (x, z), or -1 if it is not standable. */
 function feetY(world: World, x: number, z: number): number {
@@ -226,6 +226,99 @@ describe('generateCtfWorld', () => {
     expect(generateWorldFor('match', 5).world.sx).toBe(WORLD_SX);
     expect(generateWorldFor('training', 5).world.sx).toBe(WORLD_SX);
     expect(generateWorldFor('ctf', 5).world.sx).toBe(CTF_WORLD_SX);
+    expect(generateWorldFor('td', 5).world.sz).toBe(TD_WORLD_SZ);
     expect(generateWorld(5).dropZone).toEqual({ minX: PLATEAU_MIN, maxX: PLATEAU_MAX, minZ: PLATEAU_MIN, maxZ: PLATEAU_MAX });
+  });
+});
+
+describe('generateTdWorld', () => {
+  it('is deterministic per seed and mirrored across the z middle', () => {
+    const a = generateTdWorld(42);
+    const b = generateTdWorld(42);
+    expect(hashWorld(a.world)).toBe(hashWorld(b.world));
+    expect(a.spawnPoints).toEqual(b.spawnPoints);
+    expect(a.weaponSpots).toEqual(b.weaponSpots);
+    expect(a.world.sx).toBe(TD_WORLD_SX);
+    expect(a.world.sz).toBe(TD_WORLD_SZ);
+    expect(hashWorld(generateTdWorld(43).world)).not.toBe(hashWorld(a.world));
+    // Both halves are the same ground (mirror image), so neither team gets better cover.
+    const { world } = a;
+    for (let x = 0; x < world.sx; x++)
+      for (let z = 0; z < world.sz / 2; z++)
+        for (let y = 0; y < world.sy; y++) {
+          expect(getBlock(world, x, y, z), `block ${x},${y},${z}`).toBe(getBlock(world, x, y, world.sz - 1 - z));
+        }
+  });
+
+  it('puts each base in its own spawn zone, standable, on the road axis', () => {
+    for (const seed of [1, 2, 3, 500]) {
+      const { world, bases } = generateTdWorld(seed);
+      const red = bases[TEAM_RED];
+      const blue = bases[TEAM_BLUE];
+      expect(isStandable(world, Math.floor(red.x), red.y, Math.floor(red.z))).toBe(true);
+      expect(isStandable(world, Math.floor(blue.x), blue.y, Math.floor(blue.z))).toBe(true);
+      expect(red.z).toBeLessThan(world.sz / 4);
+      expect(blue.z).toBeGreaterThan((world.sz * 3) / 4);
+      expect(blue.z).toBeCloseTo(world.sz - red.z);
+      expect(red.x).toBeCloseTo(blue.x);
+    }
+  });
+
+  it('spreads standable spawn points over both zones, none in the middle', () => {
+    for (const seed of [1, 2, 3, 12345]) {
+      const { world, spawnPoints } = generateTdWorld(seed);
+      const red = spawnPoints.filter((s) => s.z < world.sz / 2);
+      const blue = spawnPoints.filter((s) => s.z >= world.sz / 2);
+      expect(red.length).toBeGreaterThanOrEqual(8);
+      expect(blue.length).toBeGreaterThanOrEqual(8);
+      for (const s of spawnPoints) {
+        expect(isStandable(world, Math.floor(s.x), s.y, Math.floor(s.z))).toBe(true);
+        expect(s.z <= 11.5 || s.z >= world.sz - 12.5, `spawn at z ${s.z}`).toBe(true);
+      }
+    }
+  });
+
+  it('lays 8 mirrored standable weapon spots per side, in matching order', () => {
+    for (const seed of [1, 2, 3, 12345]) {
+      const { world, weaponSpots } = generateTdWorld(seed);
+      expect(weaponSpots).toHaveLength(16);
+      const red = weaponSpots!.slice(0, 8);
+      const blue = weaponSpots!.slice(8);
+      for (const s of weaponSpots!) expect(isStandable(world, Math.floor(s.x), s.y, Math.floor(s.z))).toBe(true);
+      for (let i = 0; i < 8; i++) {
+        expect(red[i].z).toBeLessThan(world.sz / 2);
+        expect(blue[i].x).toBe(red[i].x);
+        expect(blue[i].z).toBeCloseTo(world.sz - red[i].z);
+      }
+    }
+  });
+
+  it('keeps the north-south road walkable from base to base (one-block steps at most)', () => {
+    for (let seed = 0; seed < 100; seed++) {
+      const { world, bases } = generateTdWorld(seed);
+      const x = Math.floor(bases[TEAM_RED].x);
+      let prev = feetY(world, x, Math.floor(bases[TEAM_RED].z));
+      for (let z = Math.floor(bases[TEAM_RED].z) + 1; z <= Math.floor(bases[TEAM_BLUE].z); z++) {
+        const y = feetY(world, x, z);
+        expect(y, `seed ${seed} z ${z}`).toBeGreaterThan(0);
+        expect(Math.abs(y - prev), `seed ${seed} z ${z}: ${prev} -> ${y}`).toBeLessThanOrEqual(1);
+        prev = y;
+      }
+    }
+  });
+
+  it('has a bedrock floor, a border wall and headroom', () => {
+    const { world } = generateTdWorld(9);
+    for (let x = 0; x < world.sx; x++)
+      for (let z = 0; z < world.sz; z++) {
+        expect(getBlock(world, x, 0, z)).toBe(Block.Bedrock);
+        expect(getBlock(world, x, world.sy - 1, z)).toBe(Block.Air);
+      }
+    for (let y = 0; y < 6; y++) {
+      expect(getBlock(world, 0, y, 10)).not.toBe(Block.Air);
+      expect(getBlock(world, world.sx - 1, y, 10)).not.toBe(Block.Air);
+      expect(getBlock(world, 10, y, 0)).not.toBe(Block.Air);
+      expect(getBlock(world, 10, y, world.sz - 1)).not.toBe(Block.Air);
+    }
   });
 });

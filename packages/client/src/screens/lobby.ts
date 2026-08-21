@@ -1,4 +1,4 @@
-import { BOT_SKILLS, CTF_CAPTURE_LIMIT_OPTIONS, CTF_DEFAULT_CAPTURE_LIMIT, DEFAULT_BOT_SKILL, DEFAULT_DURATION_MIN, DURATION_OPTIONS_MIN, MAX_BOTS, MAX_NAME_LEN, MAX_PLAYERS, ROOM_MODES, TEAM_BLUE, TEAM_NONE, TEAM_RED, WEAPON_MODES } from '@mineshoot/shared';
+import { BOT_SKILLS, CTF_CAPTURE_LIMIT_OPTIONS, CTF_DEFAULT_CAPTURE_LIMIT, DEFAULT_BOT_SKILL, DEFAULT_DURATION_MIN, DURATION_OPTIONS_MIN, MAX_BOTS, MAX_NAME_LEN, MAX_PLAYERS, ROOM_MODES, TD_DEFAULT_ROUND_LIMIT, TD_ROUND_LIMIT_OPTIONS, TEAM_BLUE, TEAM_NONE, TEAM_RED, WEAPON_MODES, isTeamMode } from '@mineshoot/shared';
 import type { BotSkill, RoomMode, WeaponMode } from '@mineshoot/shared';
 import { createRoom, joinRoom, listRooms } from '../net';
 import type { GameRoom, RoomListEntry } from '../net';
@@ -8,7 +8,7 @@ const NICK_KEY = 'mineshoot.nick';
 const POLL_MS = 2000;
 
 const WEAPON_MODE_LABEL: Record<WeaponMode, string> = { all: 'Guns + Sword', sword: 'Sword only' };
-const ROOM_MODE_LABEL: Record<RoomMode, string> = { match: 'Deathmatch', training: 'Training range', ctf: 'Capture the Flag' };
+const ROOM_MODE_LABEL: Record<RoomMode, string> = { match: 'Deathmatch', training: 'Training range', ctf: 'Capture the Flag', td: 'Team Elimination' };
 const BOT_SKILL_LABEL: Record<BotSkill, string> = { easy: 'Easy bots', normal: 'Normal bots', hard: 'Hard bots' };
 /** Bots a training range gets when the creator left the bot count at zero (a range needs dummies). */
 const TRAINING_DEFAULT_BOTS = 3;
@@ -23,7 +23,7 @@ export function botSkillBadge(bots: number | undefined, skill: BotSkill | undefi
 }
 /** Short badge for the room list ('' for a normal match). */
 export function roomModeBadge(mode: RoomMode | undefined): string {
-  return mode === 'training' ? '\u{1F3AF} training' : mode === 'ctf' ? '\u{1F6A9} CTF' : '';
+  return mode === 'training' ? '\u{1F3AF} training' : mode === 'ctf' ? '\u{1F6A9} CTF' : mode === 'td' ? '⚔️ TD' : '';
 }
 /** CTF room row: `🔴 2 · 🔵 3` from the metadata head counts. */
 export function teamCountsLabel(teams: [number, number] | undefined): string {
@@ -56,12 +56,13 @@ export function showLobby(opts: LobbyOptions): { dispose(): void } {
         <h2>Create a room</h2>
         <div class="fields">
           <label class="field name"><span>Room name</span><input class="roomname" maxlength="24" placeholder="Room name" autocomplete="off" /></label>
-          <label class="field"><span>Duration</span><select class="duration"></select></label>
+          <label class="field durfield"><span>Duration</span><select class="duration"></select></label>
           <label class="field"><span>Mode</span><select class="mode" title="Room type"></select></label>
           <label class="field"><span>Bots</span><select class="bots" title="AI bots"></select></label>
           <label class="field botskill hidden"><span>Bot skill</span><select class="skill" title="How sharp the bots are"></select></label>
           <label class="field"><span>Weapons</span><select class="weapons" title="Allowed weapons"></select></label>
           <label class="field captures hidden"><span>Captures</span><select class="capturelimit" title="Captures to win"></select></label>
+          <label class="field rounds hidden"><span>Rounds</span><select class="roundlimit" title="Round wins to take the match"></select></label>
           <button class="primary create">Create room</button>
         </div>
       </section>
@@ -94,8 +95,11 @@ export function showLobby(opts: LobbyOptions): { dispose(): void } {
   const skillField = root.querySelector<HTMLElement>('.botskill')!;
   const skill = root.querySelector<HTMLSelectElement>('.skill')!;
   const weapons = root.querySelector<HTMLSelectElement>('.weapons')!;
+  const durationField = root.querySelector<HTMLElement>('.durfield')!;
   const captureField = root.querySelector<HTMLElement>('.captures')!;
   const captureLimit = root.querySelector<HTMLSelectElement>('.capturelimit')!;
+  const roundsField = root.querySelector<HTMLElement>('.rounds')!;
+  const roundLimit = root.querySelector<HTMLSelectElement>('.roundlimit')!;
   const createBtn = root.querySelector<HTMLButtonElement>('.create')!;
   const rooms = root.querySelector<HTMLElement>('.rooms')!;
   const error = root.querySelector<HTMLElement>('.error')!;
@@ -119,6 +123,9 @@ export function showLobby(opts: LobbyOptions): { dispose(): void } {
   mode.addEventListener('change', () => {
     if (mode.value === 'training' && Number(bots.value) === 0) bots.value = String(TRAINING_DEFAULT_BOTS);
     captureField.classList.toggle('hidden', mode.value !== 'ctf');
+    roundsField.classList.toggle('hidden', mode.value !== 'td');
+    // TD has no clock: rounds end by elimination, the match by round wins.
+    durationField.classList.toggle('hidden', mode.value === 'td');
     syncSkillField();
   });
   for (const n of CTF_CAPTURE_LIMIT_OPTIONS) {
@@ -127,6 +134,13 @@ export function showLobby(opts: LobbyOptions): { dispose(): void } {
     o.textContent = `First to ${n}`;
     if (n === CTF_DEFAULT_CAPTURE_LIMIT) o.selected = true;
     captureLimit.appendChild(o);
+  }
+  for (const n of TD_ROUND_LIMIT_OPTIONS) {
+    const o = document.createElement('option');
+    o.value = String(n);
+    o.textContent = `First to ${n} rounds`;
+    if (n === TD_DEFAULT_ROUND_LIMIT) o.selected = true;
+    roundLimit.appendChild(o);
   }
   for (let n = 0; n <= MAX_BOTS; n++) {
     const o = document.createElement('option');
@@ -185,6 +199,7 @@ export function showLobby(opts: LobbyOptions): { dispose(): void } {
         weapons: weapons.value as WeaponMode,
         mode: mode.value as RoomMode,
         ...(mode.value === 'ctf' ? { captureLimit: Number(captureLimit.value) } : {}),
+        ...(mode.value === 'td' ? { roundLimit: Number(roundLimit.value) } : {}),
       };
       // Dev-only: ?testDurationMs=... shortens the match, ?testDropMs=... speeds up weapon drops
       // (the server honours them only with MINESHOOT_TEST=1).
@@ -242,20 +257,22 @@ export function showLobby(opts: LobbyOptions): { dispose(): void } {
         const full = r.clients >= r.maxClients;
         const botCount = r.metadata.bots ?? 0;
         const players = `${r.clients + botCount}/${MAX_PLAYERS}${botCount ? ` (\u{1F916} ${botCount})` : ''}`;
-        const ctf = r.metadata.mode === 'ctf';
+        const teamMode = r.metadata.mode !== undefined && isTeamMode(r.metadata.mode);
         const badges = [roomModeBadge(r.metadata.mode), weaponModeBadge(r.metadata.weapons), botSkillBadge(botCount, r.metadata.botSkill)].filter(Boolean);
         const name = `${escapeHtml(r.metadata.name)}${badges.map((b) => ` <span class="badge">${b}</span>`).join('')}`;
-        const teams = ctf ? ` <span class="teams">${teamCountsLabel(r.metadata.teams)}</span>` : '';
+        const teams = teamMode ? ` <span class="teams">${teamCountsLabel(r.metadata.teams)}</span>` : '';
         const dis = full || busy ? 'disabled' : '';
-        // CTF: pick a side (or let the server balance); other rooms: one Join button.
+        // Team modes: pick a side (or let the server balance); other rooms: one Join button.
         const joinBtns = full
           ? '<button class="join" disabled>Full</button>'
-          : ctf
+          : teamMode
             ? `<button class="join team t-red" data-id="${r.roomId}" data-team="${TEAM_RED}" ${dis} title="Join the red team">Red</button>` +
               `<button class="join team t-blue" data-id="${r.roomId}" data-team="${TEAM_BLUE}" ${dis} title="Join the blue team">Blue</button>` +
               `<button class="join" data-id="${r.roomId}" data-team="${TEAM_NONE}" ${dis} title="Join the smaller team">Auto</button>`
             : `<button class="join" data-id="${r.roomId}" ${dis}>Join</button>`;
-        tr.innerHTML = `<td>${name}</td><td>${players}${teams}</td><td>${formatTime(left)}</td><td class="actions">${joinBtns}</td>`;
+        // TD has no clock, so no time-left either.
+        const timeLeft = r.metadata.mode === 'td' ? '—' : formatTime(left);
+        tr.innerHTML = `<td>${name}</td><td>${players}${teams}</td><td>${timeLeft}</td><td class="actions">${joinBtns}</td>`;
         return tr;
       }),
     );

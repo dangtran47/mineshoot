@@ -49,8 +49,10 @@ export function allowedWeapons(mode: WeaponMode): Weapon[] {
  * on the central plateau (they never attack, respawn fast) and any melee
  * weapon can be picked directly (MSG.selectMelee) instead of waiting for a drop.
  * `ctf` is capture the flag: two teams on a dedicated long map, see ctf.ts.
+ * `td` is team elimination: rounds on a crossroads map, no respawn until the
+ * next round, first team to `roundLimit` round wins takes the match, see td.ts.
  */
-export const ROOM_MODES = ['match', 'training', 'ctf'] as const;
+export const ROOM_MODES = ['match', 'training', 'ctf', 'td'] as const;
 export type RoomMode = (typeof ROOM_MODES)[number];
 export const DEFAULT_ROOM_MODE: RoomMode = 'match';
 export function isRoomMode(v: unknown): v is RoomMode {
@@ -59,7 +61,14 @@ export function isRoomMode(v: unknown): v is RoomMode {
 export function isCtf(mode: RoomMode): boolean {
   return mode === 'ctf';
 }
-/** Respawn delay for a room mode (server rule; the client uses it for the countdown). */
+export function isTd(mode: RoomMode): boolean {
+  return mode === 'td';
+}
+/** Modes played red vs. blue (team pick/switch, team spawns, no friendly fire, team results). */
+export function isTeamMode(mode: RoomMode): boolean {
+  return mode === 'ctf' || mode === 'td';
+}
+/** Respawn delay for a room mode (server rule; the client uses it for the countdown). Unused in td: the dead wait for the next round. */
 export function respawnMsFor(mode: RoomMode): number {
   return mode === 'training' ? TRAINING_RESPAWN_MS : mode === 'ctf' ? CTF_RESPAWN_MS : RESPAWN_MS;
 }
@@ -103,10 +112,12 @@ export interface CreateOptions {
   botSkill?: BotSkill;
   /** Allowed weapons (default 'all'). */
   weapons?: WeaponMode;
-  /** Deathmatch, training range or capture the flag (default 'match'). */
+  /** Deathmatch, training range, capture the flag or team elimination (default 'match'). */
   mode?: RoomMode;
   /** CTF: captures needed to win (one of CTF_CAPTURE_LIMIT_OPTIONS). */
   captureLimit?: number;
+  /** TD: round wins needed to take the match (one of TD_ROUND_LIMIT_OPTIONS). */
+  roundLimit?: number;
 }
 export interface JoinOptions {
   nickname: string;
@@ -125,7 +136,9 @@ export interface RoomMetadata {
   mode: RoomMode;
   /** CTF only: captures needed to win. */
   captureLimit?: number;
-  /** CTF only: [red, blue] head counts (humans + bots), for the lobby list. */
+  /** TD only: round wins needed to take the match. */
+  roundLimit?: number;
+  /** Team modes only: [red, blue] head counts (humans + bots), for the lobby list. */
   teams?: [number, number];
 }
 
@@ -190,6 +203,15 @@ export interface SelectWeaponMsg {
 export type SelectTeamMsg = number;
 /** CTF: let go of the carried flag (hand-off); payload is the spawn epoch. */
 export type DropFlagMsg = number;
+
+/** TD: a round started or ended; `winner` is TEAM_NONE for a start and for a drawn round. */
+export interface RoundEventMsg {
+  kind: 'start' | 'end';
+  winner: Team | typeof TEAM_NONE;
+  round: number;
+  roundsRed: number;
+  roundsBlue: number;
+}
 
 export type FlagEventKind = 'taken' | 'dropped' | 'returned' | 'captured';
 /** CTF: something happened to a flag; `team` is the flag's owner. */
@@ -282,6 +304,7 @@ export const MSG = {
   pickup: 'pickup',
   explode: 'explode',
   flag: 'flag',
+  round: 'round',
 } as const;
 
 export const ROOM_NAME = 'arena';
