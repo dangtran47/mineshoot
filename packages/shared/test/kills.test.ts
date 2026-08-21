@@ -90,4 +90,16 @@ describe('KillTracker', () => {
     expect(t.recordKill('a', 'b', 0).multi).toBe(1);
     expect(t.recordKill('a', 'b', 0).streak).toBe(2);
   });
+
+  it('resetStreaks (td round change) clears streaks and multi chains but keeps the revenge grudge', () => {
+    const t = new KillTracker();
+    t.recordKill('a', 'b', 0);
+    t.recordKill('a', 'c', 100);
+    t.resetStreaks();
+    const next = t.recordKill('a', 'b', 200);
+    expect(next.streak).toBe(1);
+    expect(next.multi).toBe(1);
+    // b was last killed by a before the reset: killing a back is still revenge.
+    expect(t.recordKill('b', 'a', 300).revenge).toBe(true);
+  });
 });

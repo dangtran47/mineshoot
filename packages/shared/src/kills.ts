@@ -88,4 +88,13 @@ export class KillTracker {
   remove(id: string): void {
     this.records.delete(id);
   }
+
+  /** TD round change: streaks and multi-kill chains end with the round; the revenge grudge survives. */
+  resetStreaks(): void {
+    for (const r of this.records.values()) {
+      r.streak = 0;
+      r.multi = 0;
+      r.lastKillAt = -Infinity;
+    }
+  }
 }

@@ -12,6 +12,7 @@ import {
   MELEE_KINDS,
   MELEE_SWORD,
   PRIMARY_KINDS,
+  TD_FREEZE_MS,
   TD_INTERMISSION_MS,
   TEAM_BLUE,
   TEAM_NONE,
@@ -132,6 +133,9 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
   let epoch = initial?.spawnEpoch ?? 1;
   let diedAt = 0;
   let ended = false;
+  /** TD: no moving or attacking until this time after a spawn (the 3-2-1 countdown). */
+  let frozenUntil = 0;
+  let freezeCount = 0;
   /** CTF: the flag we carry (its owning team), or null. */
   let carrying: Team | null = null;
   const canPickMelee = meleeSelectable(roomMode, weaponMode);
@@ -246,7 +250,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
 
   // --- input wiring ---
   look.onMouseDown = (b) => {
-    if (!local.alive) return;
+    if (!local.alive || (td && performance.now() < frozenUntil)) return;
     if (b === 0) weapons.mouseDown(performance.now());
     else if (b === 2) weapons.altDown(performance.now());
   };
@@ -330,6 +334,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
         epoch = me.spawnEpoch;
         local.teleport(me.x, me.y, me.z, me.yaw);
         local.alive = true;
+        if (td) frozenUntil = now + TD_FREEZE_MS;
         weapons.resetAmmo();
         // Gun-deathmatch spawn roll: arm the rolled primary from this patch (the slot sync below
         // runs too late — death cleared the local slot) and bring it out right away.
@@ -398,19 +403,19 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     }
   };
 
-  /** TD: a round started or ended → banner + feed line; the end time drives the intermission countdown. */
+  /** TD: a round started or ended → big banner + feed line; the end time drives the intermission countdown. */
   let roundEndedAt = 0;
   const onRound = (m: RoundEventMsg): void => {
     const score = `${m.roundsRed} – ${m.roundsBlue}`;
     if (m.kind === 'end') {
       roundEndedAt = performance.now();
-      const text = m.winner === TEAM_NONE ? `Round ${m.round}: a draw — nobody scores` : `${teamName(m.winner as Team)} takes round ${m.round}! ${score}`;
+      const text = m.winner === TEAM_NONE ? `Round ${m.round}: a draw — nobody scores` : `${teamName(m.winner as Team)} takes round ${m.round}!  ${score}`;
       const myTeam = room?.state.players.get(meId)?.team;
-      hud.toast(`⚔️ ${text}`, 3000);
+      hud.roundBanner(text, 2800);
       hud.pushFeedText(`⚔️ ${text}`, m.winner === TEAM_NONE || myTeam === undefined ? 'neutral' : m.winner === myTeam ? 'good' : 'bad');
     } else {
+      // The post-spawn 3-2-1 countdown announces the new round.
       roundEndedAt = 0;
-      hud.toast(`⚔️ Round ${m.round} — fight!`, 2500);
     }
   };
 
@@ -563,7 +568,17 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
 
-    const inputEnabled = look.locked;
+    // TD: frozen in place (look around only) while the 3-2-1 countdown runs; the banner counts it down.
+    const frozen = td && local.alive && now < frozenUntil;
+    if (td) {
+      const count = frozen ? Math.ceil((frozenUntil - now) / 1000) : 0;
+      if (count !== freezeCount) {
+        if (count > 0) hud.roundBanner(String(count), 1200);
+        else if (local.alive && frozenUntil > 0) hud.roundBanner('FIGHT!', 900);
+        freezeCount = count;
+      }
+    }
+    const inputEnabled = look.locked && !frozen;
     if (inputEnabled) {
       if (keys.wasPressed('Digit1')) weapons.select(WEAPON_PRIMARY);
       if (keys.wasPressed('Digit2')) weapons.select(WEAPON_PISTOL);

@@ -92,6 +92,8 @@ export class Hud {
   private readonly ping = el('div', 'ping');
   private readonly feedEl = el('div', 'feed');
   private readonly announceEl = el('div', 'announce hidden');
+  private readonly roundEl = el('div', 'round-banner hidden');
+  private roundTimer = 0;
   private readonly centerMsg = el('div', 'center-msg hidden');
   private readonly overlay = el('div', 'overlay');
   private readonly teamRow = el('div', 'teams hidden');
@@ -164,6 +166,7 @@ export class Hud {
       this.ping,
       this.feedEl,
       this.announceEl,
+      this.roundEl,
       this.toastEl,
       this.carryEl,
       this.centerMsg,
@@ -220,6 +223,17 @@ export class Hud {
   /** TD has no clock: hide the timer instead of showing 0:00. */
   setTimerVisible(visible: boolean): void {
     this.timer.classList.toggle('hidden', !visible);
+  }
+
+  /** TD: big centre banner for round results and the 3-2-1 spawn countdown. */
+  roundBanner(text: string, ms = 2500): void {
+    this.roundEl.textContent = text;
+    this.roundEl.classList.remove('hidden');
+    // Restart the pop animation even if a banner is already showing.
+    this.roundEl.classList.remove('pop');
+    void this.roundEl.offsetWidth;
+    this.roundEl.classList.add('pop');
+    this.roundTimer = performance.now() + ms;
   }
 
   /** Team modes: team buttons on the overlay ("Red (2)" / "Blue (3)"), the own team highlighted. */
@@ -457,6 +471,10 @@ export class Hud {
     if (this.announceTimer && now > this.announceTimer) {
       this.announceEl.classList.add('hidden');
       this.announceTimer = 0;
+    }
+    if (this.roundTimer && now > this.roundTimer) {
+      this.roundEl.classList.add('hidden');
+      this.roundTimer = 0;
     }
     if (this.toastTimer && now > this.toastTimer) {
       this.toastEl.classList.add('hidden');

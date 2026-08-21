@@ -51,7 +51,8 @@ console.log('alice shield after 500ms test override: hidden');
 const b = await mk('Bob');
 await b.waitForSelector('button.join:not([disabled])', { timeout: 10000 });
 console.log('lobby rows:', (await b.textContent('.rooms')).replace(/\s+/g, ' ').trim());
-await b.click('button.join');
+// Scope every join to its room's row: a human playing on the same dev server adds rows of their own.
+await b.click('tr:has-text("Smoke Room") button.join');
 await b.waitForSelector('canvas.game', { timeout: 10000 });
 await ready(b);
 await b.waitForFunction(() => document.querySelector('.shield').classList.contains('hidden'), null, { timeout: 4000 });
@@ -239,7 +240,7 @@ const meState = (p) => p.evaluate(() => { const g = window.__mineshoot; const m 
 console.log('ctf room:', await a.textContent('.roomname'), '| score bar:', (await a.textContent('.ctfbar')).replace(/\s+/g, ' ').trim(), '| alice:', JSON.stringify(await meState(a)));
 await b.waitForFunction(() => document.querySelector('.rooms')?.textContent.includes('Flags'), null, { timeout: 6000 });
 console.log('lobby rows (ctf):', (await b.textContent('.rooms')).replace(/\s+/g, ' ').trim());
-await b.click('button.join.t-blue');
+await b.click('tr:has-text("Flags") button.join.t-blue');
 await b.waitForSelector('canvas.game', { state: 'attached', timeout: 15000 });
 await ready(b);
 console.log('bob:', JSON.stringify(await meState(b)), '| overlay team buttons:', (await b.textContent('.overlay .teams')).replace(/\s+/g, ' ').trim());
@@ -281,7 +282,7 @@ console.log('td room:', await a.textContent('.roomname'), '| alice team:', aTeam
   '| state:', JSON.stringify(await tdState(a)));
 await b.waitForFunction(() => document.querySelector('.rooms')?.textContent.includes('Deathcross'), null, { timeout: 6000 });
 console.log('lobby rows (td):', (await b.textContent('.rooms')).replace(/\s+/g, ' ').trim());
-await b.click(aTeam === 1 ? 'button.join.t-blue' : 'button.join.t-red');
+await b.click(`tr:has-text("Deathcross") button.join.${aTeam === 1 ? 't-blue' : 't-red'}`);
 await b.waitForSelector('canvas.game', { state: 'attached', timeout: 15000 });
 await ready(b);
 // A fixed weapon on Alice's half: walking over it arms the primary. (Red is the north half, z < 32.)
@@ -311,6 +312,9 @@ const wipeRound = async (n) => {
 };
 await wipeRound(1);
 console.log('round 1 to alice | state:', JSON.stringify(await tdState(a)), '| bar:', (await a.textContent('.ctfbar')).replace(/\s+/g, ' ').trim());
+// The round result shows as a big centre banner on everyone.
+console.log('round banner:', (await a.textContent('.round-banner')).trim(),
+  '| visible:', await a.evaluate(() => !document.querySelector('.round-banner').classList.contains('hidden')));
 // Bob stays dead through the intermission (no respawn countdown, a spectate note instead).
 await b.waitForFunction(() => !document.querySelector('.center-msg').classList.contains('hidden'), null, { timeout: 4000 });
 console.log('bob death note:', (await b.textContent('.center-msg .countdown')).trim());
@@ -320,6 +324,9 @@ await b.waitForFunction(() => window.__mineshoot.local.alive, null, { timeout: 4
 console.log('round 2 live | bob back:', await b.evaluate(() => window.__mineshoot.local.alive),
   '| alice gun reset:', await a.evaluate(() => window.__mineshoot.weapons.gun === 0),
   '| drops re-laid:', await a.evaluate(() => window.__mineshoot.room.state.drops.size));
+// Fresh spawns are frozen behind the 3-2-1 countdown (the wipe helper just retries through it).
+console.log('countdown banner on bob:', (await b.textContent('.round-banner')).trim());
+await shot(b, 'td-countdown.png');
 await wipeRound(2);
 await a.waitForFunction(() => window.__mineshoot.room.state.round === 3 && window.__mineshoot.room.state.roundPhase === 'live', null, { timeout: 10000 });
 await b.waitForFunction(() => window.__mineshoot.local.alive, null, { timeout: 4000 });

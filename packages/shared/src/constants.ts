@@ -84,6 +84,8 @@ export const TD_ROUND_LIMIT_OPTIONS = [3, 5, 7, 10] as const;
 export const TD_DEFAULT_ROUND_LIMIT = 5;
 /** Pause between a round ending and the next one starting (survivors keep walking, nobody respawns). */
 export const TD_INTERMISSION_MS = 5000;
+/** Freeze after a td spawn: no moving or attacking while the 3-2-1 countdown runs (server drops attacks too). */
+export const TD_FREEZE_MS = 3000;
 /** Someone clicking to play this soon after a round started still spawns into it; later they wait for the next round. */
 export const TD_JOIN_GRACE_MS = 10_000;
 

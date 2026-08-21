@@ -99,7 +99,10 @@ allowed rolls a random primary (`spawnPrimary`, taser excluded); team modes
 `ArenaRoom.tickRound/startRound` + pure `roundWinner` in `shared/td.ts`; no
 respawn mid-round, no clocks (`tickTimer` is skipped). Fixed weapon rows come
 from `GeneratedWorld.weaponSpots` × `tdWeaponLoadout` and never expire — only
-the pickup half of `tickDrops` runs in td.
+the pickup half of `tickDrops` runs in td. Every td spawn is frozen for
+`TD_FREEZE_MS` (3-2-1 countdown): the server drops attacks from frozen
+players and holds bots still; kill streaks reset each round
+(`KillTracker.resetStreaks`).
 
 **Capture the flag is server-authoritative too.** Flags (`RoomState.flags`),
 scores, teams and every carrier rule live in `ArenaRoom.tickFlags` + pure

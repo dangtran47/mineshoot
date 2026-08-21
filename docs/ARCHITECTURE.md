@@ -374,8 +374,16 @@ roundsBlue / roundLimit`:
   for `TD_INTERMISSION_MS`; survivors keep walking, **nobody respawns**
   (`tickLifecycle` skips the `respawnAt` path in td — the dead spectate).
 - `startRound` clears grenades (a round-1 grenade must not explode into
-  round 2; in-flight shots die with the `spawnEpoch` bump), re-lays the
-  weapons and respawns every ready player at their own end.
+  round 2; in-flight shots die with the `spawnEpoch` bump), resets kill
+  streaks/multi chains (`KillTracker.resetStreaks`; the revenge grudge
+  survives), re-lays the weapons and respawns every ready player at their
+  own end.
+- Every td spawn starts **frozen** for `TD_FREEZE_MS` (the 3-2-1 countdown):
+  the client blocks movement and attacks and shows the countdown banner, the
+  server drops shoot/swing/throw from frozen players (`meta.frozenUntil`) and
+  skips frozen bots. Poses are not rejected — movement stays
+  client-authoritative by design, so the freeze is honest-client UX plus a
+  server-side attack gate, not an anti-cheat wall.
 
 Loadouts: td spawns are pistol-only (`spawnPrimary` rolls nothing outside
 deathmatch). The better weapons lie at the map's `weaponSpots` (8 per side,

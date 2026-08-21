@@ -9,6 +9,7 @@ import {
   ENDED_LINGER_MS,
   FLAG_DROP_GRACE_MS,
   FLAG_RETURN_MS,
+  TD_FREEZE_MS,
   TD_INTERMISSION_MS,
   TD_JOIN_GRACE_MS,
   TEAM_BLUE,
@@ -120,6 +121,8 @@ interface PlayerMeta {
   ready: boolean;
   /** TD: spawned into the running round (dead or alive); false while waiting for the next one. */
   inRound: boolean;
+  /** TD: frozen (3-2-1 countdown) until this time after a spawn; attacks are dropped meanwhile (0 = not frozen). */
+  frozenUntil: number;
   respawnAt: number;
   /** Spawn protection: cannot be targeted or damaged before this time (0 = none). */
   protectedUntil: number;
@@ -143,6 +146,7 @@ const freshReloads = (): Record<number, number> => ({ [WEAPON_PISTOL]: 0, [WEAPO
 const freshMeta = (ready: boolean): PlayerMeta => ({
   ready,
   inRound: false,
+  frozenUntil: 0,
   respawnAt: 0,
   protectedUntil: 0,
   lastShotAt: freshReloads(),
@@ -167,6 +171,8 @@ interface TestOverrides {
   flagReturnMs?: number;
   /** TD: pause between rounds. */
   roundIntermissionMs?: number;
+  /** TD: post-spawn freeze (the 3-2-1 countdown). */
+  roundFreezeMs?: number;
 }
 
 /** Server-side bot runtime: brain + simulated body. */
@@ -208,6 +214,7 @@ export class ArenaRoom extends Room<RoomState> {
   private roundStartedAt = 0;
   private nextRoundAt = 0;
   private intermissionMs = TD_INTERMISSION_MS;
+  private freezeMs = TD_FREEZE_MS;
   /** CTF: when each dropped flag hit the ground (server-only; returns home after FLAG_RETURN_MS). */
   private readonly flagDroppedAt = new Map<Team, number>();
   /** CTF: who put a flag down on purpose and until when they may not take it back (server-only). */
@@ -268,6 +275,7 @@ export class ArenaRoom extends Room<RoomState> {
       if (typeof t.dropLifetimeMs === 'number') this.dropLifetimeMs = t.dropLifetimeMs;
       if (typeof t.flagReturnMs === 'number') this.flagReturnMs = t.flagReturnMs;
       if (typeof t.roundIntermissionMs === 'number') this.intermissionMs = t.roundIntermissionMs;
+      if (typeof t.roundFreezeMs === 'number') this.freezeMs = t.roundFreezeMs;
     }
 
     const seed = hashSeed(`${this.roomId}:${Date.now()}`);
@@ -404,6 +412,9 @@ export class ArenaRoom extends Room<RoomState> {
     for (const [id, rt] of this.bots) {
       const p = this.state.players.get(id);
       if (!p || !p.alive) continue;
+      // TD: bots hold still through the 3-2-1 countdown like everyone else.
+      const meta = this.meta.get(id);
+      if (meta && this.frozen(meta, now)) continue;
       const enemies: BotView['enemies'] = [];
       for (const [sid, other] of this.state.players) {
         if (sid !== id && this.targetable(sid, other, now) && !this.sameTeam(p, other)) enemies.push({ id: sid, x: other.x, y: other.y, z: other.z });
@@ -523,6 +534,11 @@ export class ArenaRoom extends Room<RoomState> {
     if (p.reloading !== reloading) p.reloading = reloading;
   }
 
+  /** TD: still inside the post-spawn countdown — attacks are dropped, bots stand still. */
+  private frozen(meta: PlayerMeta, now: number): boolean {
+    return this.td && now < meta.frozenUntil;
+  }
+
   /** Alive and not under spawn protection. */
   private targetable(id: string, p: PlayerSchema, now: number): boolean {
     if (!p.alive) return false;
@@ -619,6 +635,7 @@ export class ArenaRoom extends Room<RoomState> {
    */
   private attackShoot(id: string, p: PlayerSchema, pose: PlayerPose, now: number, slot: Weapon): void {
     const meta = this.meta.get(id)!;
+    if (this.frozen(meta, now)) return;
     // CTF: a flag carrier is melee-only.
     if (this.ctf && carriedFlag(this.flagStates(), id)) return;
     const kind = this.gunKindFor(p, slot);
@@ -682,6 +699,7 @@ export class ArenaRoom extends Room<RoomState> {
   /** Server-authoritative grenade throw: stock, carrier lock and rate limit checked here; `charge` (0..1) sets the throw speed. */
   private throwFrom(id: string, p: PlayerSchema, pose: PlayerPose, now: number, charge: number): void {
     const meta = this.meta.get(id)!;
+    if (this.frozen(meta, now)) return;
     if (this.ctf && carriedFlag(this.flagStates(), id)) return;
     if (p.grenades <= 0 || now - meta.lastThrowAt < GRENADE_SERVER_MIN_INTERVAL_MS) return;
     meta.lastThrowAt = now;
@@ -796,6 +814,7 @@ export class ArenaRoom extends Room<RoomState> {
    */
   private attackSwing(id: string, p: PlayerSchema, pose: PlayerPose, now: number, wants: AttackKind): void {
     const meta = this.meta.get(id)!;
+    if (this.frozen(meta, now)) return;
     const kind = p.melee as MeleeKind;
     const charge = meta.chargeStartAt > 0 ? chargeFraction(kind, now - meta.chargeStartAt) : 0;
     const attack: AttackKind = wants === ATTACK_HEAVY && charge < MELEE_MIN_CHARGE_FRACTION ? ATTACK_LIGHT : wants;
@@ -962,6 +981,7 @@ export class ArenaRoom extends Room<RoomState> {
     const meta = this.meta.get(id);
     if (meta) {
       meta.inRound = true;
+      meta.frozenUntil = this.td ? Date.now() + this.freezeMs : 0;
       meta.chargeStartAt = 0;
       meta.protectedUntil = this.spawnProtectMs > 0 ? Date.now() + this.spawnProtectMs : 0;
       meta.ammo = freshAmmo();
@@ -1046,6 +1066,8 @@ export class ArenaRoom extends Room<RoomState> {
     // A grenade from the last round must not explode into this one.
     this.grenadeSim.clear();
     this.state.grenades.clear();
+    // Kill streaks and multi-kill chains end with the round (kills/deaths stay cumulative).
+    this.killTracker.resetStreaks();
     this.layTdWeapons();
     for (const [id, p] of this.state.players) {
       if (this.meta.get(id)?.ready) this.spawn(id, p);

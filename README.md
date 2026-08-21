@@ -260,9 +260,12 @@ the intersection, and each team spawns in its own zone at the north/south end.
 
 - **Rounds.** Everyone spawns at their own end with the default loadout
   (pistol + sword + grenades; the deathmatch random-primary roll does not
-  apply). **Dying takes you out for the round** — you spectate until it ends.
-  Wiping the enemy team wins the round; a simultaneous wipe is a drawn round
-  (no point). Rounds have **no time limit**, and there is no match clock.
+  apply), frozen behind a **3-2-1 countdown** (3 s: no moving or attacking —
+  the server drops attacks too, and bots hold still). **Dying takes you out
+  for the round** — you spectate until it ends. Wiping the enemy team wins
+  the round (a big banner announces the result); a simultaneous wipe is a
+  drawn round (no point). Rounds have **no time limit**, and there is no
+  match clock.
 - **Weapons on the ground.** Better weapons lie at **fixed spots** — a row of
   8 in front of each spawn zone, two of each primary gun (rifle / SMG /
   shotgun / sniper; blades ×2 in a sword-only room) — the **same spots and
@@ -271,7 +274,8 @@ the intersection, and each team spawns in its own zone at the north/south end.
 - **Between rounds** there is a **5 s intermission** (survivors keep walking,
   nobody respawns), then everyone comes back at their own end with a fresh
   loadout and the weapon rows are laid out again. Kills and deaths carry
-  across rounds.
+  across rounds, but **kill streaks and multi-kill chains reset every round**
+  (the revenge grudge survives).
 - **Joining mid-round**: you spawn straight in within the first **10 s** of a
   round; later you wait for the next one (your arrival never decides a round
   you didn't fight in — it draws instead if your side had nobody in it).
@@ -291,7 +295,7 @@ All knobs are constants in `packages/shared`:
   cooldown/range/magazine/reload, sword range/cone/charge, HP and per-body-part
   damage, hitbox bands, respawn delay, spawn protection, room durations, max
   players, CTF capture limits / carry speed / base zone / flag return timers,
-  TD round limits / intermission / join grace.
+  TD round limits / intermission / spawn freeze / join grace.
 - `melee.ts` — the melee move-set table (`MELEE_STATS`: light / heavy per
   weapon, each with cone, reach, damage, sweep, cooldown and animation), drop
   cadence (arena and CTF), cap, lifetime and pickup radius.

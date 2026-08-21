@@ -1203,13 +1203,15 @@ describe('arena room', () => {
         mode: 'td',
         roundLimit: 3,
         team: TEAM_RED,
-        testOverrides: { respawnMs: 100, spawnProtectMs: 0, roundIntermissionMs: 1500 },
+        testOverrides: { respawnMs: 100, spawnProtectMs: 0, roundIntermissionMs: 1500, roundFreezeMs: 0 },
       });
       const rounds: RoundEventMsg[] = [];
       const shots: ShotMsg[] = [];
+      const kills: KillMsg[] = [];
       listen(alice);
       alice.onMessage(MSG.round, (m: RoundEventMsg) => rounds.push(m));
       alice.onMessage(MSG.shot, (m: ShotMsg) => shots.push(m));
+      alice.onMessage(MSG.kill, (m: KillMsg) => kills.push(m));
       let bob: AnyRoom | null = null;
       let carol: AnyRoom | null = null;
       try {
@@ -1282,8 +1284,10 @@ describe('arena room', () => {
         expect(alice.state.players.get(carol.sessionId).hp).toBe(100);
         carol.send(MSG.pose, poseOf(carol, 10, 10, 0)); // out of the firing line
 
-        // Rounds 2 and 3 go red too: the limit ends the match.
+        // Rounds 2 and 3 go red too: the limit ends the match. Streaks reset per
+        // round, so Alice's second kill is streak 1, not 2.
         await wipe(2);
+        expect(kills.at(-1)).toMatchObject({ killerId: alice.sessionId, streak: 1 });
         await until(() => alice.state.round === 3 && alice.state.roundPhase === 'live', 3000, 'round 3');
         await wipe(3);
         await until(() => alice.state.phase === 'ended', 3000, 'round limit ends the match');
@@ -1296,13 +1300,44 @@ describe('arena room', () => {
       }
     }, 30000);
 
+    it('drops attacks during the post-spawn freeze (3-2-1 countdown)', async () => {
+      const alice: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, {
+        nickname: 'Alice',
+        mode: 'td',
+        roundLimit: 3,
+        team: TEAM_RED,
+        testOverrides: { spawnProtectMs: 0, roundIntermissionMs: 300, roundFreezeMs: 60_000 },
+      });
+      const shots: ShotMsg[] = [];
+      listen(alice);
+      alice.onMessage(MSG.shot, (m: ShotMsg) => shots.push(m));
+      let bob: AnyRoom | null = null;
+      try {
+        await ready(alice);
+        bob = await new Client(wsUrl).joinById(alice.roomId, { nickname: 'Bob', team: TEAM_BLUE });
+        listen(bob);
+        await ready(bob);
+        bob.send(MSG.pose, poseOf(bob, 32, 30, 0));
+        await until(() => Math.abs(alice.state.players.get(bob!.sessionId).z - 30) < 0.01, 3000, 'bob in the sky');
+        alice.send(MSG.shoot, poseOf(alice, 32, 40, 0));
+        await sleep(300);
+        // Frozen: no shot broadcast, no damage, the round runs on.
+        expect(shots).toHaveLength(0);
+        expect(alice.state.players.get(bob.sessionId).hp).toBe(100);
+        expect(alice.state.roundsRed).toBe(0);
+      } finally {
+        await bob?.leave();
+        await alice.leave();
+      }
+    }, 20000);
+
     it('bots split over both teams and spawn into round 1', async () => {
       const alice: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, {
         nickname: 'Alice',
         mode: 'td',
         bots: 2,
         team: TEAM_RED,
-        testOverrides: { spawnProtectMs: 0, roundIntermissionMs: 500 },
+        testOverrides: { spawnProtectMs: 0, roundIntermissionMs: 500, roundFreezeMs: 0 },
       });
       listen(alice);
       try {
