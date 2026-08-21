@@ -66,10 +66,25 @@ export function recoilKick(kind: GunKind, shotIndex: number): RecoilKick {
  * A pause this long without firing ends the burst: the pattern index resets
  * and the un-compensated offset starts recovering. Two cooldowns keeps a
  * held-trigger auto gun in one burst; the 300 ms floor keeps fast guns from
- * resetting between deliberate taps.
+ * resetting between deliberate taps. Single-shot guns have single-entry
+ * patterns — no burst to protect — so their aim settles right after the floor
+ * instead of waiting out two long cooldowns.
  */
 export function recoilResetMs(spec: GunSpec): number {
+  if (!spec.auto) return 300;
   return Math.max(300, spec.cooldownMs * 2);
+}
+
+/**
+ * How long one kick takes to reach full deflection: heavy single-shot kicks
+ * ramp the camera up as a short continuous motion instead of snapping in one
+ * frame; fast guns stay instant so the spray pattern reads crisply. Always
+ * shorter than the 300 ms reset floor, so recovery never starts mid-kick.
+ */
+export function recoilKickMs(kind: GunKind): number {
+  if (kind === GUN_SNIPER) return 120;
+  if (kind === GUN_SHOTGUN) return 70;
+  return 0;
 }
 
 /** How fast the un-compensated recoil offset settles back to the original aim. */

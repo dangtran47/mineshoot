@@ -149,8 +149,9 @@ export class Weapons {
     return gunSpec(this.guns[slot].kind);
   }
 
+  /** RMB held on a zooming gun — but never while that gun is reloading (the scope waits for the reload). */
   get zooming(): boolean {
-    return this.zoomHeld && isGunSlot(this.current) && this.specOf(this.current).zoom > 1;
+    return this.zoomHeld && isGunSlot(this.current) && this.specOf(this.current).zoom > 1 && this.guns[this.current].reloadStartAt === null;
   }
 
   get zoomFactor(): number {
@@ -313,12 +314,18 @@ export class Weapons {
     }
   }
 
-  /** Finish due reloads; auto-repeat while LMB is held (auto guns / throws / light swings); auto-release an over-held charge. */
+  /** Finish due reloads (per-shell guns load round by round); auto-repeat while LMB is held (auto guns / throws / light swings); auto-release an over-held charge. */
   update(now: number): void {
     for (const g of Object.values(this.guns)) {
-      if (g.reloadStartAt !== null && now - g.reloadStartAt >= gunSpec(g.kind).reloadMs) {
+      const spec = gunSpec(g.kind);
+      if (spec.perShell) {
+        while (g.reloadStartAt !== null && now - g.reloadStartAt >= spec.reloadMs) {
+          g.ammo = Math.min(spec.magSize, g.ammo + 1);
+          g.reloadStartAt = g.ammo >= spec.magSize ? null : g.reloadStartAt + spec.reloadMs;
+        }
+      } else if (g.reloadStartAt !== null && now - g.reloadStartAt >= spec.reloadMs) {
         g.reloadStartAt = null;
-        g.ammo = gunSpec(g.kind).magSize;
+        g.ammo = spec.magSize;
       }
     }
     if (this.holding) {
@@ -395,7 +402,12 @@ export class Weapons {
     const slot = this.current;
     const g = this.guns[slot];
     const spec = gunSpec(g.kind);
-    if (g.kind === GUN_NONE || g.reloadStartAt !== null) return;
+    if (g.kind === GUN_NONE) return;
+    if (g.reloadStartAt !== null) {
+      // A per-shell gun (shotgun) shoots straight out of its reload once a round is in.
+      if (!spec.perShell || g.ammo <= 0 || now - g.lastFireAt < spec.cooldownMs) return;
+      g.reloadStartAt = null;
+    }
     if (g.ammo <= 0) {
       this.reload(now);
       return;
@@ -406,6 +418,8 @@ export class Weapons {
     this.events.onFire(slot);
     // A consumable gun (taser) leaves with its last round (the server confirms via the state patch).
     if (spec.consumable && g.ammo <= 0 && slot === WEAPON_TASER) this.setTaser(GUN_NONE);
+    // The last round starts the reload by itself.
+    else if (g.ammo <= 0) this.reload(now);
   }
 
   /** Start holding a throw (stock permitting); the cooldown is checked at release. */

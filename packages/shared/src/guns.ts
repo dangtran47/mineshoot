@@ -43,18 +43,20 @@ export interface GunSpec {
   zoom: number;
   /** Empty magazine ⇒ the weapon is gone (taser). */
   consumable: boolean;
+  /** Reloads one round per `reloadMs` (shotgun): shooting interrupts the reload and keeps the rounds loaded so far. */
+  perShell: boolean;
 }
 
-type SpecInput = Omit<GunSpec, 'serverMinIntervalMs' | 'serverReloadMinMs'>;
-const spec = (s: SpecInput): GunSpec => ({ ...s, serverMinIntervalMs: s.cooldownMs - 50, serverReloadMinMs: Math.max(0, s.reloadMs - 100) });
+type SpecInput = Omit<GunSpec, 'serverMinIntervalMs' | 'serverReloadMinMs' | 'perShell'> & { perShell?: boolean };
+const spec = (s: SpecInput): GunSpec => ({ perShell: false, ...s, serverMinIntervalMs: s.cooldownMs - 50, serverReloadMinMs: Math.max(0, s.reloadMs - 100) });
 
 export const GUN_STATS: Record<GunKind, GunSpec> = {
   [GUN_NONE]: spec({ name: 'Empty', magSize: 0, cooldownMs: 1000, reloadMs: 0, range: 0, damage: { head: 0, torso: 0, legs: 0 }, pellets: 0, spreadDeg: 0, auto: false, zoom: 1, consumable: false }),
   // Today's gun, unchanged.
-  [GUN_PISTOL]: { name: 'Pistol', magSize: GUN_MAG_SIZE, cooldownMs: GUN_COOLDOWN_MS, serverMinIntervalMs: GUN_SERVER_MIN_INTERVAL_MS, reloadMs: GUN_RELOAD_MS, serverReloadMinMs: GUN_RELOAD_SERVER_MIN_MS, range: GUN_RANGE, damage: { ...GUN_DAMAGE }, pellets: 1, spreadDeg: 0, auto: false, zoom: 1, consumable: false },
+  [GUN_PISTOL]: { name: 'Pistol', magSize: GUN_MAG_SIZE, cooldownMs: GUN_COOLDOWN_MS, serverMinIntervalMs: GUN_SERVER_MIN_INTERVAL_MS, reloadMs: GUN_RELOAD_MS, serverReloadMinMs: GUN_RELOAD_SERVER_MIN_MS, range: GUN_RANGE, damage: { ...GUN_DAMAGE }, pellets: 1, spreadDeg: 0, auto: false, zoom: 1, consumable: false, perShell: false },
   [GUN_RIFLE]: spec({ name: 'Rifle', magSize: 25, cooldownMs: 150, reloadMs: 2000, range: 60, damage: { head: 70, torso: 25, legs: 12 }, pellets: 1, spreadDeg: 1.5, auto: true, zoom: 1, consumable: false }),
   [GUN_SMG]: spec({ name: 'SMG', magSize: 35, cooldownMs: 80, reloadMs: 1800, range: 40, damage: { head: 40, torso: 15, legs: 8 }, pellets: 1, spreadDeg: 3, auto: true, zoom: 1, consumable: false }),
-  [GUN_SHOTGUN]: spec({ name: 'Shotgun', magSize: 6, cooldownMs: 600, reloadMs: 2500, range: 18, damage: { head: 35, torso: 20, legs: 10 }, pellets: 8, spreadDeg: 6, auto: false, zoom: 1, consumable: false }),
+  [GUN_SHOTGUN]: spec({ name: 'Shotgun', magSize: 6, cooldownMs: 400, reloadMs: 450, perShell: true, range: 18, damage: { head: 45, torso: 25, legs: 12 }, pellets: 8, spreadDeg: 6, auto: false, zoom: 1, consumable: false }),
   [GUN_SNIPER]: spec({ name: 'Sniper', magSize: 4, cooldownMs: 1200, reloadMs: 2800, range: 60, damage: { head: 100, torso: 100, legs: 60 }, pellets: 1, spreadDeg: 0, auto: false, zoom: 3, consumable: false }),
   // Two charges, then it's gone.
   [GUN_TASER]: spec({ name: 'Taser', magSize: 2, cooldownMs: 1000, reloadMs: 0, range: 5, damage: { head: 100, torso: 100, legs: 100 }, pellets: 1, spreadDeg: 0, auto: false, zoom: 1, consumable: true }),
@@ -85,6 +87,27 @@ export function pelletDirections(yaw: number, pitch: number, spec: GunSpec, rng:
     out.push(forwardVector(yaw + r * Math.cos(a), pitch + r * Math.sin(a)));
   }
   return out;
+}
+
+/**
+ * Server-side minimum reload window for a gun holding `ammo` rounds: the usual
+ * full-mag window, or one shell interval per missing round for per-shell guns
+ * (the jitter slack is applied once to the total).
+ */
+export function serverReloadMs(spec: GunSpec, ammo: number): number {
+  if (!spec.perShell) return spec.serverReloadMinMs;
+  const missing = Math.max(1, spec.magSize - ammo);
+  return Math.max(spec.serverReloadMinMs, missing * spec.reloadMs - (spec.reloadMs - spec.serverReloadMinMs));
+}
+
+/**
+ * Magazine contents when a reload that would finish `remainingMs` from now is
+ * interrupted by a shot: per-shell guns keep the rounds already loaded (one
+ * per elapsed interval), full-mag reloads load nothing until they finish.
+ */
+export function interruptedReloadAmmo(spec: GunSpec, ammo: number, remainingMs: number): number {
+  if (!spec.perShell) return ammo;
+  return Math.max(ammo, spec.magSize - Math.ceil(Math.max(0, remainingMs) / spec.reloadMs));
 }
 
 /** Primaries a deathmatch spawn can roll (the taser is a pickup, never a roll). */

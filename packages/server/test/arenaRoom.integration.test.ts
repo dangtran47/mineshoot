@@ -380,7 +380,7 @@ describe('arena room', () => {
       // CTF spawns are pistol-only (no deathmatch roll).
       expect(me(alice).gun).toBe(GUN_NONE);
       await until(() => alice.state.drops.size >= 3, 4000, 'drops');
-      for (const d of alice.state.drops.values()) expect([WEAPON_PRIMARY, WEAPON_GRENADE, WEAPON_MELEE]).toContain((d as any).slot);
+      for (const d of alice.state.drops.values()) expect([WEAPON_PRIMARY, WEAPON_GRENADE, WEAPON_MELEE, WEAPON_TASER]).toContain((d as any).slot);
       // Hunt a primary drop: consume whatever is on the ground until one appears (uniform 10-item pool → fast).
       let gunDrop: any = null;
       const deadline = Date.now() + 12_000;
@@ -718,6 +718,39 @@ describe('arena room', () => {
       await sleep(50);
       await fireOnce();
       expect(shots).toHaveLength(GUN_MAG_SIZE + 2);
+    } finally {
+      await alice.leave();
+    }
+  }, 15000);
+
+  it('shotgun: a shot mid-reload fires with the shells loaded so far (per-shell reload)', async () => {
+    const alice: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, {
+      nickname: 'Alice',
+      durationMin: 3,
+      mode: 'training',
+      testOverrides: { spawnProtectMs: 0 },
+    });
+    const shots: ShotMsg[] = [];
+    alice.onMessage(MSG.shot, (m: ShotMsg) => shots.push(m));
+    const spec = gunSpec(GUN_SHOTGUN);
+    try {
+      await ready(alice);
+      alice.send(MSG.selectWeapon, { epoch: me(alice).spawnEpoch, slot: WEAPON_PRIMARY, kind: GUN_SHOTGUN });
+      await until(() => me(alice).gun === GUN_SHOTGUN, 2000, 'shotgun armed');
+      const fireOnce = async (): Promise<void> => {
+        alice.send(MSG.shoot, poseOf(alice, 32, 40, 0, WEAPON_PRIMARY));
+        await sleep(spec.serverMinIntervalMs + 30);
+      };
+      for (let i = 0; i < spec.magSize; i++) await fireOnce();
+      expect(shots.filter((s) => s.gun === GUN_SHOTGUN)).toHaveLength(spec.magSize);
+      // Empty: dropped.
+      await fireOnce();
+      expect(shots.filter((s) => s.gun === GUN_SHOTGUN)).toHaveLength(spec.magSize);
+      // Reload, wait roughly one shell interval, then shoot: the loaded shell fires.
+      alice.send(MSG.reload, { epoch: me(alice).spawnEpoch, weapon: WEAPON_PRIMARY });
+      await sleep(spec.reloadMs + 250);
+      await fireOnce();
+      expect(shots.filter((s) => s.gun === GUN_SHOTGUN)).toHaveLength(spec.magSize + 1);
     } finally {
       await alice.leave();
     }

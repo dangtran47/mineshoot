@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { GUN_KINDS, GUN_NONE, GUN_RIFLE, GUN_SMG, GUN_SNIPER, GUN_TASER, gunSpec } from '../src/guns';
+import { GUN_KINDS, GUN_NONE, GUN_RIFLE, GUN_SHOTGUN, GUN_SMG, GUN_SNIPER, GUN_TASER, gunSpec } from '../src/guns';
 import type { GunKind } from '../src/guns';
-import { RECOIL_PATTERNS, RECOIL_RECOVER_DEG_PER_S, recoilKick, recoilResetMs } from '../src/recoil';
+import { RECOIL_PATTERNS, RECOIL_RECOVER_DEG_PER_S, recoilKick, recoilKickMs, recoilResetMs } from '../src/recoil';
 
 describe('recoil', () => {
   it('every gun kind (and empty) has a non-empty pattern of finite upward kicks', () => {
@@ -45,9 +45,19 @@ describe('recoil', () => {
   it('unknown kinds kick like nothing at all', () => {
     expect(recoilKick(42 as never, 0)).toEqual({ pitchDeg: 0, yawDeg: 0 });
   });
-  it('the burst resets after a gap of at least two cooldowns, never sooner than 300 ms', () => {
+  it('auto bursts reset after two cooldowns (floor 300 ms); single-shot guns recover right after the floor', () => {
     expect(recoilResetMs(gunSpec(GUN_SMG))).toBe(300); // 2 × 80 < 300
-    expect(recoilResetMs(gunSpec(GUN_SNIPER))).toBe(2400); // 2 × 1200
+    // Non-auto guns have single-entry patterns: no burst to protect, recovery starts at the floor.
+    expect(recoilResetMs(gunSpec(GUN_SNIPER))).toBe(300);
+  });
+  it('heavy single kicks ramp over a short window (always shorter than the reset floor); autos snap', () => {
+    expect(recoilKickMs(GUN_SNIPER)).toBeGreaterThan(0);
+    expect(recoilKickMs(GUN_SHOTGUN)).toBeGreaterThan(0);
+    expect(recoilKickMs(GUN_SNIPER)).toBeLessThan(300);
+    expect(recoilKickMs(GUN_SHOTGUN)).toBeLessThan(300);
+    expect(recoilKickMs(GUN_RIFLE)).toBe(0);
+    expect(recoilKickMs(GUN_SMG)).toBe(0);
+    expect(recoilKickMs(GUN_NONE)).toBe(0);
   });
   it('recovery speed is a sane positive constant', () => {
     expect(RECOIL_RECOVER_DEG_PER_S).toBeGreaterThan(0);

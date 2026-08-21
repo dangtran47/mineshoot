@@ -67,10 +67,12 @@ import {
   grenadeFuseDone,
   gunSpec,
   hashSeed,
+  interruptedReloadAmmo,
   meleeSelectable,
   pelletDirections,
   pickSpawn,
   resolveRay,
+  serverReloadMs,
   spawnPrimary,
   stepGrenade,
   swordDamage,
@@ -502,8 +504,11 @@ export class ArenaRoom extends Room<RoomState> {
 
   /**
    * Take one round from a gun slot's magazine. A shot that arrives mid-reload
-   * with rounds left means the client cancelled the reload (weapon switch), so
-   * it is honoured; with an empty magazine it is dropped. Bots reload automatically.
+   * means the client interrupted the reload (weapon switch, or a per-shell gun
+   * firing straight out of its reload), so it is honoured with whatever the
+   * magazine holds — per-shell guns keep the shells loaded so far
+   * (`interruptedReloadAmmo`); with an empty magazine it is dropped. Bots
+   * reload automatically.
    */
   private takeRound(id: string, meta: PlayerMeta, now: number, slot: Weapon, spec: GunSpec): boolean {
     const done = meta.reloadDoneAt[slot];
@@ -511,14 +516,15 @@ export class ArenaRoom extends Room<RoomState> {
       if (now >= done) {
         meta.ammo[slot] = spec.magSize;
         meta.reloadDoneAt[slot] = 0;
-      } else if (meta.ammo[slot] > 0) {
-        meta.reloadDoneAt[slot] = 0;
       } else {
-        return false;
+        meta.ammo[slot] = interruptedReloadAmmo(spec, meta.ammo[slot], done - now);
+        if (meta.ammo[slot] <= 0) return false;
+        meta.reloadDoneAt[slot] = 0;
       }
     }
     if (meta.ammo[slot] <= 0) {
-      if (this.bots.has(id) && spec.reloadMs > 0) meta.reloadDoneAt[slot] = now + spec.reloadMs;
+      // Bots pay the full client-side reload time (per-shell guns: the whole magazine).
+      if (this.bots.has(id) && spec.reloadMs > 0) meta.reloadDoneAt[slot] = now + (spec.perShell ? spec.magSize * spec.reloadMs : spec.reloadMs);
       return false;
     }
     meta.ammo[slot]--;
@@ -536,7 +542,7 @@ export class ArenaRoom extends Room<RoomState> {
     const meta = this.meta.get(client.sessionId)!;
     if (spec.reloadMs === 0 || meta.reloadDoneAt[m.weapon] || meta.ammo[m.weapon] >= spec.magSize) return;
     const now = Date.now();
-    meta.reloadDoneAt[m.weapon] = now + spec.serverReloadMinMs;
+    meta.reloadDoneAt[m.weapon] = now + serverReloadMs(spec, meta.ammo[m.weapon]);
     this.syncFlags(client.sessionId, p, now);
   }
 

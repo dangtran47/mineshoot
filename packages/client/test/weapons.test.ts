@@ -196,7 +196,7 @@ describe('Weapons', () => {
     expect(log[log.length - 1]).toBe('swing');
   });
 
-  it('gun: each shot spends a round; an empty magazine auto-reloads instead of firing', () => {
+  it('gun: each shot spends a round; the last round starts the reload by itself', () => {
     const { w, log } = make();
     expect(w.ammo).toBe(GUN_MAG_SIZE);
     let t = 0;
@@ -204,25 +204,96 @@ describe('Weapons', () => {
       w.mouseDown(t);
       w.mouseUp(t + 1);
     }
+    const lastShotAt = t - GUN_COOLDOWN_MS;
     expect(w.ammo).toBe(0);
     expect(log.filter((e) => e === 'fire')).toHaveLength(GUN_MAG_SIZE);
-    // Empty: the trigger starts a reload, no shot; further pulls during the reload do nothing.
-    w.mouseDown(t);
-    w.mouseUp(t + 1);
+    // Empty magazine: the reload started with the last shot, no trigger pull needed.
     expect(log[log.length - 1]).toBe('reload');
-    expect(w.reloadFraction(t + GUN_RELOAD_MS / 2)).toBeCloseTo(0.5);
-    w.mouseDown(t + GUN_RELOAD_MS / 2);
-    w.update(t + GUN_RELOAD_MS / 2 + 1);
-    w.mouseUp(t + GUN_RELOAD_MS / 2 + 2);
+    expect(w.reloadFraction(lastShotAt + GUN_RELOAD_MS / 2)).toBeCloseTo(0.5);
+    // Trigger pulls during the reload do nothing.
+    w.mouseDown(lastShotAt + GUN_RELOAD_MS / 2);
+    w.update(lastShotAt + GUN_RELOAD_MS / 2 + 1);
+    w.mouseUp(lastShotAt + GUN_RELOAD_MS / 2 + 2);
     expect(log.filter((e) => e === 'fire')).toHaveLength(GUN_MAG_SIZE);
     // Reload completes on update; the magazine is full and the gun fires again.
-    w.update(t + GUN_RELOAD_MS);
-    expect(w.reloadFraction(t + GUN_RELOAD_MS)).toBeNull();
+    w.update(lastShotAt + GUN_RELOAD_MS);
+    expect(w.reloadFraction(lastShotAt + GUN_RELOAD_MS)).toBeNull();
     expect(w.ammo).toBe(GUN_MAG_SIZE);
-    w.mouseDown(t + GUN_RELOAD_MS + 1);
-    w.mouseUp(t + GUN_RELOAD_MS + 2);
+    w.mouseDown(lastShotAt + GUN_RELOAD_MS + 1);
+    w.mouseUp(lastShotAt + GUN_RELOAD_MS + 2);
     expect(w.ammo).toBe(GUN_MAG_SIZE - 1);
     expect(log.filter((e) => e === 'fire')).toHaveLength(GUN_MAG_SIZE + 1);
+  });
+  it('shotgun: reloads one shell at a time and a trigger pull mid-reload fires right away', () => {
+    const { w, log } = make();
+    w.setGun(GUN_SHOTGUN);
+    w.select(WEAPON_PRIMARY);
+    const s = gunSpec(GUN_SHOTGUN);
+    let t = 0;
+    for (let i = 0; i < s.magSize; i++, t += s.cooldownMs) {
+      w.mouseDown(t);
+      w.mouseUp(t + 1);
+    }
+    const lastShotAt = t - s.cooldownMs;
+    expect(w.ammo).toBe(0);
+    expect(log[log.length - 1]).toBe(`reload:${WEAPON_PRIMARY}`); // the last shell auto-reloads too
+    // Shells come back one at a time, one per reloadMs.
+    w.update(lastShotAt + s.reloadMs);
+    expect(w.ammo).toBe(1);
+    w.update(lastShotAt + s.reloadMs * 2);
+    expect(w.ammo).toBe(2);
+    // A trigger pull mid-reload interrupts it and fires immediately.
+    w.mouseDown(lastShotAt + s.reloadMs * 2 + 1);
+    w.mouseUp(lastShotAt + s.reloadMs * 2 + 2);
+    expect(log.filter((e) => e === `fire:${WEAPON_PRIMARY}`)).toHaveLength(s.magSize + 1);
+    expect(w.ammo).toBe(1);
+    expect(w.reloadFraction(lastShotAt + s.reloadMs * 2 + 3)).toBeNull();
+    // Left alone, a restarted reload runs shell by shell to a full magazine and stops.
+    const reloadAt = lastShotAt + s.reloadMs * 3;
+    w.reload(reloadAt);
+    w.update(reloadAt + s.reloadMs * (s.magSize + 3));
+    expect(w.ammo).toBe(s.magSize);
+    expect(w.reloadFraction(reloadAt + s.reloadMs * (s.magSize + 3))).toBeNull();
+  });
+  it('shotgun: while empty mid-reload the trigger stays dead until the first shell is in', () => {
+    const { w, log } = make();
+    w.setGun(GUN_SHOTGUN);
+    w.select(WEAPON_PRIMARY);
+    const s = gunSpec(GUN_SHOTGUN);
+    let t = 0;
+    for (let i = 0; i < s.magSize; i++, t += s.cooldownMs) {
+      w.mouseDown(t);
+      w.mouseUp(t + 1);
+    }
+    const lastShotAt = t - s.cooldownMs;
+    // No shell loaded yet: the pull neither fires nor cancels the reload.
+    w.mouseDown(lastShotAt + s.reloadMs / 2);
+    w.mouseUp(lastShotAt + s.reloadMs / 2 + 1);
+    expect(log.filter((e) => e === `fire:${WEAPON_PRIMARY}`)).toHaveLength(s.magSize);
+    expect(w.reloadFraction(lastShotAt + s.reloadMs / 2 + 2)).not.toBeNull();
+    // First shell in: the pull fires again (and firing the last shell restarts the reload).
+    w.update(lastShotAt + s.reloadMs);
+    w.mouseDown(lastShotAt + s.reloadMs + 1);
+    w.mouseUp(lastShotAt + s.reloadMs + 2);
+    expect(log.filter((e) => e === `fire:${WEAPON_PRIMARY}`)).toHaveLength(s.magSize + 1);
+    expect(w.ammo).toBe(0);
+    expect(w.reloadFraction(lastShotAt + s.reloadMs + 3)).not.toBeNull(); // empty again → auto-reload restarted
+  });
+  it('sniper: the scope stays down while reloading and comes back once the reload ends', () => {
+    const { w } = make();
+    w.setGun(GUN_SNIPER);
+    w.select(WEAPON_PRIMARY);
+    const s = gunSpec(GUN_SNIPER);
+    w.mouseDown(0);
+    w.mouseUp(1);
+    w.reload(100);
+    w.altDown(150); // RMB during the reload: no zoom
+    expect(w.zooming).toBe(false);
+    expect(w.zoomFactor).toBe(1);
+    w.update(100 + s.reloadMs); // reload done, RMB still held: the scope comes up
+    expect(w.zooming).toBe(true);
+    w.altUp(100 + s.reloadMs + 1);
+    expect(w.zooming).toBe(false);
   });
   it('gun: manual reload tops up a partial magazine; a full one or a sword ignores it', () => {
     const { w, log } = make();

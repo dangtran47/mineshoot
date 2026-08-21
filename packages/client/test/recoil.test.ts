@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GUN_RIFLE, GUN_SNIPER, RECOIL_RECOVER_DEG_PER_S, recoilKick, recoilResetMs, gunSpec } from '@mineshoot/shared';
+import { GUN_PISTOL, GUN_RIFLE, GUN_SNIPER, RECOIL_RECOVER_DEG_PER_S, recoilKick, recoilKickMs, recoilResetMs, gunSpec } from '@mineshoot/shared';
 import { RecoilController } from '../src/game/recoil';
 import { PITCH_LIMIT } from '../src/input/pointerLock';
 
@@ -65,12 +65,12 @@ describe('RecoilController', () => {
   });
   it('over-compensating zeroes the offset: nothing recovers, the aim stays where the player put it', () => {
     const { look, recoil } = make();
-    recoil.kick(GUN_SNIPER, 1000);
-    const pull = rad(6.0);
+    recoil.kick(GUN_PISTOL, 1000); // instant 1° kick
+    const pull = rad(2.0);
     look.pitch -= pull;
     look.onDelta!(0, -pull);
     const aimed = look.pitch;
-    recoil.update(10, 1000 + recoilResetMs(gunSpec(GUN_SNIPER)) + 1);
+    recoil.update(10, 1000 + recoilResetMs(gunSpec(GUN_PISTOL)) + 1);
     expect(look.pitch).toBeCloseTo(aimed);
   });
   it('mouse movement along the kick direction does not grow the debt', () => {
@@ -85,9 +85,37 @@ describe('RecoilController', () => {
     const start = PITCH_LIMIT - rad(1.0);
     const { look, recoil } = make(start);
     recoil.kick(GUN_SNIPER, 1000); // 4° kick, only 1° of room
+    recoil.update(0.2, 1000 + recoilKickMs(GUN_SNIPER)); // the ramp finishes against the clamp
     expect(look.pitch).toBeCloseTo(PITCH_LIMIT);
     recoil.update(10, 1000 + recoilResetMs(gunSpec(GUN_SNIPER)) + 1);
     expect(look.pitch).toBeCloseTo(start); // recovers the 1° that was applied, no more
+  });
+  it('a heavy single-shot kick ramps up over recoilKickMs instead of snapping', () => {
+    const { look, recoil } = make();
+    const kickMs = recoilKickMs(GUN_SNIPER);
+    recoil.kick(GUN_SNIPER, 1000);
+    expect(look.pitch).toBeCloseTo(0); // nothing applied yet: the kick is an animation, not a snap
+    recoil.update(kickMs / 2 / 1000, 1000 + kickMs / 2);
+    expect(look.pitch).toBeCloseTo(rad(2.0)); // halfway through the ramp: half the kick
+    recoil.update(kickMs / 2 / 1000, 1000 + kickMs);
+    expect(look.pitch).toBeCloseTo(rad(4.0)); // ramp done: the full kick
+  });
+  it('a late frame past the ramp deadline applies the whole remaining kick at once', () => {
+    const { look, recoil } = make();
+    recoil.kick(GUN_SNIPER, 1000);
+    recoil.update(0.001, 1000 + recoilKickMs(GUN_SNIPER) + 50); // one tiny frame, long after the deadline
+    expect(look.pitch).toBeCloseTo(rad(4.0));
+  });
+  it('compensating during the ramp is credited: recovery returns to the compensated aim, never below', () => {
+    const { look, recoil } = make();
+    recoil.kick(GUN_SNIPER, 1000);
+    const pull = rad(2.0);
+    look.pitch -= pull; // player pulls down while the kick is still ramping
+    look.onDelta!(0, -pull);
+    recoil.update(0.2, 1000 + recoilKickMs(GUN_SNIPER) + 1); // ramp finishes
+    expect(look.pitch).toBeCloseTo(rad(2.0)); // net: 4° kick minus the 2° pull
+    recoil.update(10, 1000 + recoilResetMs(gunSpec(GUN_SNIPER)) + 1);
+    expect(look.pitch).toBeCloseTo(0); // only the un-compensated 2° recovers
   });
   it('yaw kicks recover too', () => {
     const { look, recoil } = make();

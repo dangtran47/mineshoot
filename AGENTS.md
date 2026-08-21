@@ -131,10 +131,11 @@ room create options (short match, fast respawn/drops). The client passes
 packages/shared/src/
   constants.ts     every tunable number (world, movement, weapons, HP, timers)
   guns.ts          GunKind (pistol/rifle/smg/shotgun/sniper/taser), GUN_STATS,
-                   pelletDirections() spread rays, spawnPrimary() deathmatch roll
+                   pelletDirections() spread rays, spawnPrimary() deathmatch roll,
+                   per-shell reload rules (serverReloadMs/interruptedReloadAmmo)
   recoil.ts        per-gun spray patterns (RECOIL_PATTERNS), recoilKick(),
-                   recoilResetMs(), recovery rate — applied client-side
-                   (the taser lives in its own slot, WEAPON_TASER)
+                   recoilKickMs() ramp, recoilResetMs(), recovery rate — applied
+                   client-side (the taser lives in its own slot, WEAPON_TASER)
   grenade.ts       grenade constants, throwGrenade()/stepGrenade() bounce sim
                    (throw speed scales with the LMB hold), blastDamage()/
                    explosionVictims()

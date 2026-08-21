@@ -97,14 +97,16 @@ empty and is filled from drops.
   | --- | --- | --- | --- | --- | --- | --- |
   | Rifle | 25 | 150 ms | 2.0 s | 60 | 70 / 25 / 12 | full-auto, slight spread (1.5°); spray climbs ~1.3°/shot then S-drifts right, then left |
   | SMG | 35 | 80 ms | 1.8 s | 40 | 40 / 15 / 8 | full-auto, wide spread (3°); soft ~0.7°/shot climb with a gentle zigzag |
-  | Shotgun | 6 | 600 ms | 2.5 s | 18 | 35 / 20 / 10 **per pellet** | 8 pellets in a 6° cone — one-shots up close, useless far; 3° kick per shot |
-  | Sniper | 4 | 1.2 s | 2.8 s | 60 | 100 / 100 / 60 | `RMB` opens the round scope (×3); no crosshair from the hip; body shots kill; 4° kick per shot |
+  | Shotgun | 6 | 400 ms | 450 ms **per shell** | 18 | 45 / 25 / 12 **per pellet** | 8 pellets in a 6° cone — one-shots up close, useless far; 3° kick per shot; reloads shell by shell and **fires straight out of the reload** once a shell is in |
+  | Sniper | 4 | 1.2 s | 2.8 s | 60 | 100 / 100 / 60 | `RMB` opens the round scope (×3) — but not while reloading; no crosshair from the hip; body shots kill; 4° kick per shot |
 
   **Recoil** — every shot kicks the camera along a **fixed per-gun pattern**
   (the pistol nudges 1° up; the taser doesn't kick), so the spray is
   learnable: pull the mouse against the pattern to keep a burst on target.
-  The part you didn't compensate settles back to your original aim shortly
-  after you stop firing (25°/s, starting after max(300 ms, 2 × cooldown)).
+  Heavy single-shot kicks (sniper 120 ms, shotgun 70 ms) ramp up as a smooth
+  motion instead of snapping. The part you didn't compensate settles back to
+  your original aim shortly after you stop firing (25°/s, starting after
+  max(300 ms, 2 × cooldown) for full-autos, after 300 ms for everything else).
   Recoil moves your real aim — the next bullet goes where the kick put you.
 
 - **Taser** (slot `5`, from drops) — 2 charges, no reload, range 5, kills in

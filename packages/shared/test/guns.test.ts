@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GUN_COOLDOWN_MS, GUN_DAMAGE, GUN_MAG_SIZE, GUN_RANGE, GUN_RELOAD_MS } from '../src/constants';
-import { GUN_KINDS, GUN_NONE, GUN_PISTOL, GUN_SHOTGUN, GUN_SNIPER, GUN_TASER, PRIMARY_KINDS, SPAWN_PRIMARY_KINDS, gunSpec, isGunKind, isPrimaryKind, pelletDirections, spawnPrimary } from '../src/guns';
+import { GUN_KINDS, GUN_NONE, GUN_PISTOL, GUN_SHOTGUN, GUN_SNIPER, GUN_TASER, PRIMARY_KINDS, SPAWN_PRIMARY_KINDS, gunSpec, interruptedReloadAmmo, isGunKind, isPrimaryKind, pelletDirections, serverReloadMs, spawnPrimary } from '../src/guns';
 import { forwardVector } from '../src/playerPhysics';
 import { createRng } from '../src/rng';
 
@@ -50,6 +50,36 @@ describe('guns', () => {
       expect(d.x * fwd.x + d.y * fwd.y + d.z * fwd.z).toBeGreaterThanOrEqual(cosMax);
     }
     expect(new Set(a.map((d) => d.x)).size).toBeGreaterThan(1);
+  });
+  it('shotgun: hard-hitting fast pump gun that reloads one shell at a time', () => {
+    const s = gunSpec(GUN_SHOTGUN);
+    expect(s.cooldownMs).toBe(400);
+    expect(s.damage).toEqual({ head: 45, torso: 25, legs: 12 });
+    expect(s.perShell).toBe(true);
+    expect(s.reloadMs).toBe(450); // per shell
+    for (const k of GUN_KINDS) {
+      if (k !== GUN_SHOTGUN) expect(gunSpec(k).perShell).toBe(false);
+    }
+  });
+  it('serverReloadMs: full-mag window for normal guns, one shell interval per missing round for per-shell guns', () => {
+    const pistol = gunSpec(GUN_PISTOL);
+    expect(serverReloadMs(pistol, 0)).toBe(pistol.serverReloadMinMs);
+    expect(serverReloadMs(pistol, pistol.magSize - 1)).toBe(pistol.serverReloadMinMs);
+    const s = gunSpec(GUN_SHOTGUN);
+    // One missing shell: one interval (minus the usual jitter slack, floored at the per-shell minimum).
+    expect(serverReloadMs(s, s.magSize - 1)).toBe(s.serverReloadMinMs);
+    // Empty: six shells, the slack applied once to the total.
+    expect(serverReloadMs(s, 0)).toBe(s.magSize * s.reloadMs - (s.reloadMs - s.serverReloadMinMs));
+  });
+  it('interruptedReloadAmmo: a shot mid-reload keeps the shells already loaded (never fewer than before)', () => {
+    const pistol = gunSpec(GUN_PISTOL);
+    expect(interruptedReloadAmmo(pistol, 3, 500)).toBe(3); // full-mag reloads load nothing until they finish
+    const s = gunSpec(GUN_SHOTGUN);
+    const total = serverReloadMs(s, 0);
+    expect(interruptedReloadAmmo(s, 0, total)).toBe(0); // no time has passed
+    expect(interruptedReloadAmmo(s, 0, total - s.reloadMs)).toBe(1); // one shell in
+    expect(interruptedReloadAmmo(s, 0, 0)).toBe(s.magSize); // ran to completion
+    expect(interruptedReloadAmmo(s, 4, s.reloadMs * 2)).toBe(4); // never lowers what was already there
   });
   it('deathmatches with guns spawn a random primary; every other mode spawns none', () => {
     const rng = createRng(9);

@@ -318,7 +318,9 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
         local.teleport(me.x, me.y, me.z, me.yaw);
         local.alive = true;
         weapons.resetAmmo();
-        // Gun-deathmatch spawn roll: bring the rolled primary out right away.
+        // Gun-deathmatch spawn roll: arm the rolled primary from this patch (the slot sync below
+        // runs too late — death cleared the local slot) and bring it out right away.
+        weapons.setGun(me.gun as GunKind);
         if (weapons.gun !== GUN_NONE) weapons.select(WEAPON_PRIMARY);
         hud.hideDeath();
         renderer.domElement.classList.remove('dead');
