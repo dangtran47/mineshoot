@@ -12,6 +12,8 @@ export class PlayerSchema extends Schema {
   @type('uint8') hp = MAX_HP;
   @type('uint16') kills = 0;
   @type('uint16') deaths = 0;
+  /** Kills helped along: >= ASSIST_MIN_DAMAGE dealt to the victim inside ASSIST_WINDOW_MS before someone else finished them. */
+  @type('uint16') assists = 0;
   /** Bumped on every (re)spawn; the owning client teleports to x/y/z when it changes. */
   @type('uint16') spawnEpoch = 0;
   @type('uint8') weapon = 0;

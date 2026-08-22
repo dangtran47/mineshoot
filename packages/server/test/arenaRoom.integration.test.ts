@@ -281,6 +281,59 @@ describe('arena room', () => {
     }
   }, 15000);
 
+  it('credits an assist to whoever softened the victim shortly before the kill (never the killer)', async () => {
+    const alice: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, {
+      nickname: 'Alice',
+      durationMin: 3,
+      testOverrides: { respawnMs: 200, spawnProtectMs: 0 },
+    });
+    const kills: KillMsg[] = [];
+    alice.onMessage(MSG.kill, (m: KillMsg) => kills.push(m));
+    alice.onMessage(MSG.shot, () => {});
+    alice.onMessage(MSG.hit, () => {});
+    let bob: AnyRoom | null = null;
+    let carol: AnyRoom | null = null;
+    try {
+      await ready(alice);
+      bob = await new Client(wsUrl).joinById(alice.roomId, { nickname: 'Bob' });
+      carol = await new Client(wsUrl).joinById(alice.roomId, { nickname: 'Carol' });
+      for (const r of [bob, carol]) {
+        r.onMessage(MSG.shot, () => {});
+        r.onMessage(MSG.hit, () => {});
+        r.onMessage(MSG.kill, () => {});
+      }
+      await until(() => alice.state.players.size === 3 && me(bob!) !== undefined && me(carol!) !== undefined, 3000, 'all in state');
+      await ready(bob);
+      await ready(carol);
+      const view = (r: AnyRoom): any => alice.state.players.get(r.sessionId);
+      // Bob in the sky at z=30; Carol 10 blocks south (facing -Z), Alice 10 blocks north (facing +Z).
+      bob.send(MSG.pose, poseOf(bob, 32, 30, 0));
+      carol.send(MSG.pose, poseOf(carol, 32, 40, 0));
+      alice.send(MSG.pose, poseOf(alice, 32, 20, Math.PI));
+      await until(() => Math.abs(view(bob!).z - 30) < 0.01 && Math.abs(view(carol!).z - 40) < 0.01 && Math.abs(me(alice).z - 20) < 0.01, 3000, 'positions synced');
+
+      // Carol: chest shot, 30 damage. Then Alice finishes with a level headshot.
+      carol.send(MSG.shoot, poseOf(carol, 32, 40, 0, WEAPON_PISTOL, pitchToHeight(1.0, 10)));
+      await until(() => view(bob!).hp === 70, 3000, 'bob at 70');
+      alice.send(MSG.shoot, poseOf(alice, 32, 20, Math.PI));
+      await until(() => kills.length === 1, 3000, 'kill broadcast');
+      expect(kills[0]).toMatchObject({
+        killerId: alice.sessionId,
+        victimId: bob.sessionId,
+        assistIds: [carol.sessionId],
+        assistNames: ['Carol'],
+      });
+      await until(() => view(carol!).assists === 1, 3000, 'carol assist synced');
+      expect(me(alice).assists).toBe(0);
+      expect(me(alice).kills).toBe(1);
+      expect(view(bob!).assists).toBe(0);
+    } finally {
+      await carol?.leave();
+      await bob?.leave();
+      await alice.leave();
+    }
+  }, 15000);
+
   it('drops melee weapons mid-arena; walking over one arms you until you die', async () => {
     const alice: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, {
       nickname: 'Alice',

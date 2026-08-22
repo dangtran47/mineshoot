@@ -22,6 +22,7 @@ const player = (over: Partial<NetPlayer> = {}): NetPlayer => ({
   hp: 100,
   kills: 0,
   deaths: 0,
+  assists: 0,
   spawnEpoch: 1,
   weapon: 0,
   melee: 0,

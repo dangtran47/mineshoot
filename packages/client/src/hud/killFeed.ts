@@ -23,6 +23,8 @@ export interface KillLineInput extends KillAwards {
   /** Gun kind used (meaningful when weapon is a gun slot). */
   gun?: GunKind;
   headshot: boolean;
+  /** Display names of players credited with an assist (shown after the killer). */
+  assists?: string[];
 }
 
 export const FEED_MAX = 5;
@@ -70,7 +72,12 @@ const MELEE_EMOJI: Record<MeleeKind, string> = {
   [MELEE_PICKAXE]: '⛏️',
 };
 
-/** "Alice 🔫🎯 Bob · DOUBLE KILL" — plain-text form of a feed line (accessible name / tooltip). */
+/** "Alice + Carol" — the killer followed by everyone who assisted. */
+export function killerWithAssists(k: KillLineInput): string {
+  return [k.killer, ...(k.assists ?? [])].join(' + ');
+}
+
+/** "Alice + Carol 🔫🎯 Bob · DOUBLE KILL" — plain-text form of a feed line (accessible name / tooltip). */
 export function killFeedLine(k: KillLineInput): string {
   const base =
     k.weapon === WEAPON_MELEE
@@ -81,5 +88,5 @@ export function killFeedLine(k: KillLineInput): string {
           ? '⚡'
           : (GUN_EMOJI[k.gun ?? GUN_PISTOL] ?? '🔫');
   const icon = base + (k.headshot ? '🎯' : '');
-  return [`${k.killer} ${icon} ${k.victim}`, ...killTags(k)].join(' · ');
+  return [`${killerWithAssists(k)} ${icon} ${k.victim}`, ...killTags(k)].join(' · ');
 }

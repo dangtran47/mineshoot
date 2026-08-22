@@ -46,12 +46,12 @@ export function formatTime(ms: number): string {
 function scoreTable(rows: RankRow[], meId: string | undefined, ctf: boolean): HTMLTableElement {
   const table = el('table');
   const head = el('tr');
-  for (const h of ctf ? ['#', 'Player', 'C', 'K', 'D', 'K/D'] : ['#', 'Player', 'K', 'D', 'K/D']) head.append(el('th', undefined, h));
+  for (const h of ctf ? ['#', 'Player', 'C', 'K', 'A', 'D', 'K/D'] : ['#', 'Player', 'K', 'A', 'D', 'K/D']) head.append(el('th', undefined, h));
   table.append(head);
   if (!rows.length) {
     const tr = el('tr');
     const td = el('td', 'empty', 'Nobody');
-    td.colSpan = ctf ? 6 : 5;
+    td.colSpan = ctf ? 7 : 6;
     tr.append(td);
     table.append(tr);
   }
@@ -63,6 +63,7 @@ function scoreTable(rows: RankRow[], meId: string | undefined, ctf: boolean): HT
       el('td', undefined, r.isBot ? `\u{1F916} ${r.name}` : r.name),
       ...(ctf ? [el('td', undefined, String(r.captures ?? 0))] : []),
       el('td', undefined, String(r.kills)),
+      el('td', undefined, String(r.assists ?? 0)),
       el('td', undefined, String(r.deaths)),
       el('td', undefined, kdRatio(r.kills, r.deaths).toFixed(2)),
     );
@@ -267,8 +268,8 @@ export class Hud {
     this.timer.classList.toggle('low', ms <= 30_000);
   }
 
-  setStats(kills: number, deaths: number): void {
-    this.stats.textContent = `K ${kills}  ·  D ${deaths}`;
+  setStats(kills: number, assists: number, deaths: number): void {
+    this.stats.textContent = `K ${kills}  ·  A ${assists}  ·  D ${deaths}`;
   }
 
   setHealth(hp: number): void {
@@ -509,6 +510,7 @@ export class Hud {
         row.title = killFeedLine(e.line);
         row.append(
           el('span', 'name', e.line.killer),
+          ...(e.line.assists?.length ? [el('span', 'assist', `+ ${e.line.assists.join(' + ')}`)] : []),
           svgSpan('icons', weaponIcon(e.line.weapon, e.line.melee ?? MELEE_SWORD) + (e.line.headshot ? iconSvg('headshot', 'red') : '')),
           el('span', 'name', e.line.victim),
           ...awardBadges(e.line).map((b) => badgeEl(b)),

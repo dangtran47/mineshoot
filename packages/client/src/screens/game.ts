@@ -337,7 +337,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
 
   const rankingRows = (): RankRow[] => {
     const rows: RankRow[] = [];
-    room?.state.players.forEach((p, id) => rows.push({ id, name: p.name, kills: p.kills, deaths: p.deaths, isBot: p.isBot, team: p.team, captures: p.captures, alive: p.alive }));
+    room?.state.players.forEach((p, id) => rows.push({ id, name: p.name, kills: p.kills, deaths: p.deaths, assists: p.assists, isBot: p.isBot, team: p.team, captures: p.captures, alive: p.alive }));
     // rankCtf with all-zero captures (td) sorts by kills, which is what we want.
     return teamMode ? rankCtf(rows) : rankPlayers(rows);
   };
@@ -400,7 +400,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
       weapons.setGun(me.gun as GunKind);
       weapons.setTaser(me.taser as GunKind);
       weapons.setGrenades(me.grenades);
-      hud.setStats(me.kills, me.deaths);
+      hud.setStats(me.kills, me.assists, me.deaths);
       hud.setHealth(me.hp);
       hud.setShield(me.alive && me.shielded);
       if (teamMode) {
@@ -564,9 +564,15 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
       displayName(fallback, room?.state.players.get(id)?.isBot ?? false);
     const killerName = nameOf(m.killerId, m.killerName);
     const badges = awardBadges(m);
+    const assisted = (m.assistIds ?? []).includes(meId);
     hud.pushFeed(
-      { ...m, killer: killerName, victim: nameOf(m.victimId, m.victimName) },
-      mine ? 'good' : m.victimId === meId ? 'bad' : 'neutral',
+      {
+        ...m,
+        killer: killerName,
+        victim: nameOf(m.victimId, m.victimName),
+        assists: (m.assistIds ?? []).map((id, i) => nameOf(id, m.assistNames?.[i] ?? '?')),
+      },
+      mine || assisted ? 'good' : m.victimId === meId ? 'bad' : 'neutral',
     );
     if (mine) hud.announce(badges);
     if (m.victimId === meId) {

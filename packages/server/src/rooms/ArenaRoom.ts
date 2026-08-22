@@ -942,8 +942,11 @@ export class ArenaRoom extends Room<RoomState> {
   /** Subtract HP from a living victim; a drop to 0 is a kill credited to the attacker. */
   private damage(attackerId: string, victimId: string, amount: number, weapon: Weapon, headshot: boolean, melee: MeleeKind = MELEE_SWORD, gun: GunKind = GUN_NONE): void {
     const victim = this.state.players.get(victimId);
-    if (!victim || !this.targetable(victimId, victim, Date.now())) return;
-    victim.hp = Math.max(0, victim.hp - amount);
+    const now = Date.now();
+    if (!victim || !this.targetable(victimId, victim, now)) return;
+    const dealt = Math.min(amount, victim.hp);
+    victim.hp -= dealt;
+    this.killTracker.recordDamage(attackerId, victimId, dealt, now);
     if (victim.hp === 0) this.kill(attackerId, victimId, weapon, headshot, melee, gun);
   }
 
@@ -959,7 +962,16 @@ export class ArenaRoom extends Room<RoomState> {
     const meta = this.meta.get(victimId);
     if (meta) meta.respawnAt = now + this.respawnMs;
     this.dropCarriedFlag(victimId, victim, now);
-    const awards = this.killTracker.recordKill(killerId, victimId, now);
+    const { assists, ...awards } = this.killTracker.recordKill(killerId, victimId, now);
+    const assistIds: string[] = [];
+    const assistNames: string[] = [];
+    for (const id of assists) {
+      const helper = this.state.players.get(id);
+      if (!helper) continue; // left the room since their hit
+      helper.assists++;
+      assistIds.push(id);
+      assistNames.push(helper.name);
+    }
     const msg: KillMsg = {
       ...awards,
       killerId,
@@ -970,6 +982,8 @@ export class ArenaRoom extends Room<RoomState> {
       melee,
       gun,
       headshot,
+      assistIds,
+      assistNames,
     };
     this.broadcast(MSG.kill, msg);
   }

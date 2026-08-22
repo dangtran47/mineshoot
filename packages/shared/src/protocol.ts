@@ -301,6 +301,9 @@ export interface KillMsg extends KillAwards {
   gun: GunKind;
   /** The killing blow landed on the head. */
   headshot: boolean;
+  /** Players credited with an assist (see `KillTracker`), in order of first damage; names line up with ids. */
+  assistIds: string[];
+  assistNames: string[];
 }
 
 export const MSG = {

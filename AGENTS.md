@@ -262,7 +262,11 @@ docs/plans/        design plans behind bigger features (e.g. the CTF mode)
 
 - The server runs TypeScript directly via `tsx`; `tsconfig.base.json` must be
   present at runtime (the Dockerfile copies it) or Colyseus `@type` decorators
-  break silently.
+  break silently. Same trap when starting it by hand: run `npx tsx src/index.ts`
+  from `packages/server` (tsx reads the tsconfig from the cwd) — from the repo
+  root the decorators throw `Cannot read properties of undefined (reading
+  'constructor')`. `PORT=` / `VITE_SERVER_URL=` + `SMOKE_URL=` let you run an
+  isolated server + client + smoke on spare ports when :2567/:5173 are taken.
 - Server vitest uses `pool: 'threads'` because the default forks pool chokes on
   Colyseus IPC noise. Don't "fix" that.
 - Bots and humans share `MAX_PLAYERS = 16`; the room sets `maxClients = 16 -

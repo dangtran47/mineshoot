@@ -61,7 +61,7 @@ Pure TypeScript, `"exports": "./src/index.ts"` (consumed as source by Vite and
 | Physics | `aabb.ts`, `collision.ts`, `playerPhysics.ts` | `moveAABB` (axis-separated swept AABB vs voxels), `stepPlayer(world, state, input, dt)`, `forwardVector` |
 | Hitscan | `raycast.ts`, `hitbox.ts`, `gun.ts` | `raycastVoxels` (DDA), `segmentVsAABB`, `playerHitboxes(feet)` (legs/torso/head boxes), `resolveShot(world, shooter, targets, range)` |
 | Melee | `sword.ts`, `melee.ts`, `drops.ts` | `MELEE_STATS` per `MeleeKind` → `attacks[AttackKind]` (`AttackSpec`: cone, reach, damage, sweep, cooldown, anim), `meleeStats()`, `attackSpec()`, `swordVictims(world, pose, targets, attack, kind)`, `swordDamage()`, `pickDropKind()`, `pickDropSpot()`, `canPickUp()`, drop cadence constants |
-| Match | `spawn.ts`, `ranking.ts`, `kills.ts` | `pickSpawn(points, enemies, rng)` (farthest-from-enemies with randomness), `unoccupiedSpawns()` (drops points someone already stands on, so simultaneous spawns never stack), `rankPlayers`, `rankCtf`, `kdRatio`, `KillTracker` (multi-kill / streak / shutdown awards) |
+| Match | `spawn.ts`, `ranking.ts`, `kills.ts` | `pickSpawn(points, enemies, rng)` (farthest-from-enemies with randomness), `unoccupiedSpawns()` (drops points someone already stands on, so simultaneous spawns never stack), `rankPlayers`, `rankCtf`, `kdRatio`, `KillTracker` (multi-kill / streak / shutdown awards; `recordDamage()` feeds assists — ≥ `ASSIST_MIN_DAMAGE` inside `ASSIST_WINDOW_MS`, never the killer, cleared on death / `resetStreaks`) |
 | CTF | `ctf.ts` | `FlagState`, `flagTouch()`, `canScore()`, `canReturn()`, `carriedFlag()`, `teamSpawns()`, `pickTeam()`, `botRebalance()`, `matchWinner()`, `botCtfGoal()` (offence-first bot goal); teams (`TEAM_RED/BLUE`, `Team`, `otherTeam`, `teamName`) live in `protocol.ts` |
 | TD | `td.ts` | team elimination: `roundWinner(red, blue)` (per-team `{alive, inRound, ready}` → round outcome), `tdWeaponLoadout(weapons)` (the fixed ground-weapon row per side), `tdTeamSpawns(spawns, base, sz)` (a team's half of the map), `botTdGoal()` (gun → enemy → crossroads) |
 | Bots | `bot.ts` | `createBot(rng, waypoints, { weapons, passive, skill })` → `{ compute(world, view, dt), reset() }`; `passive` = training dummy (faces the nearest enemy, never moves or attacks); `skill` (`BotSkill` in `protocol.ts`, profiles via `botSkillProfile()`) scales sight / turn rate / reaction / aim error / attack interval; `view.goal` / `view.carrying` drive CTF behaviour. Movement toward any destination goes through `nav.ts` |
@@ -81,7 +81,7 @@ three.js, no Colyseus, plain objects in and out, a test file per module.
 - `rooms/schema.ts` — `@colyseus/schema` classes: `RoomState { phase, name,
   seed, durationMin, weapons, timeLeftMs, players: Map<PlayerSchema>, drops:
   Map<DropSchema> }`; `PlayerSchema { name, x,y,z, yaw,pitch, alive, hp,
-  kills, deaths, spawnEpoch, weapon, melee, color, isBot, shielded, charging,
+  kills, deaths, assists, spawnEpoch, weapon, melee, color, isBot, shielded, charging,
   reloading }`; `DropSchema { kind, x,y,z }`. This is the *only* continuously
   synced data.
 - `rooms/validate.ts` — `parsePose/parseShoot/parseSwing/parseCharge/
@@ -164,7 +164,7 @@ can play a one-shot effect exactly once.
 | S→C | `explode` | `ExplodeMsg {ownerId, x, y, z, victims}` | A grenade burst (blast fx + damage feedback) |
 | S→C | `swung` | `SwungMsg {attackerId, attack, melee}` | Animate the attacker on other clients |
 | S→C | `hit` | `HitMsg {attackerId, victimId, part, damage, attack, melee}` | Melee connected |
-| S→C | `kill` | `KillMsg {killer*, victim*, weapon, melee, gun, headshot, awards…}` | Kill feed, awards |
+| S→C | `kill` | `KillMsg {killer*, victim*, weapon, melee, gun, headshot, assistIds, assistNames, awards…}` | Kill feed, awards |
 | S→C | `pickup` | `PickupMsg {playerId, slot, kind}` | Someone took a drop |
 
 Room creation options (`CreateOptions`): `name`, `durationMin` (3/5/10/15),
@@ -209,8 +209,10 @@ protected). Then:
   The attack comes from `SwingMsg.attack`; a heavy is only honoured if a
   `charge` message arrived ≥ `chargeMs` earlier for the same epoch (else it
   lands as light). The previous attack's `serverMinIntervalMs` gates the next.
-- **Result** — `damage()` lowers HP; at 0 → `kill()` marks the victim dead,
-  updates kills/deaths, records awards via `KillTracker`, schedules respawn,
+- **Result** — `damage()` lowers HP and logs the hit in `KillTracker`
+  (`recordDamage`, capped at the HP actually taken); at 0 → `kill()` marks the
+  victim dead, updates kills/deaths, records awards + assists via `KillTracker`
+  (`assists++` on each helper still in the room), schedules respawn,
   broadcasts `kill`. Every attack (hit or miss) also broadcasts `shot` or
   `swung` so other clients animate.
 

@@ -36,6 +36,11 @@ describe('killFeedLine', () => {
   it('appends award tags', () => {
     expect(killFeedLine({ ...base, weapon: WEAPON_PISTOL, multi: 2, revenge: true })).toBe('Alice 🔫 Bob · DOUBLE KILL · REVENGE');
   });
+  it('names the assisters after the killer', () => {
+    expect(killFeedLine({ ...base, weapon: WEAPON_PISTOL, assists: ['Carol'] })).toBe('Alice + Carol 🔫 Bob');
+    expect(killFeedLine({ ...base, weapon: WEAPON_PISTOL, assists: ['Carol', 'Dave'], headshot: true })).toBe('Alice + Carol + Dave 🔫🎯 Bob');
+    expect(killFeedLine({ ...base, weapon: WEAPON_PISTOL, assists: [] })).toBe('Alice 🔫 Bob');
+  });
 });
 
 describe('killFeedLine melee kinds', () => {

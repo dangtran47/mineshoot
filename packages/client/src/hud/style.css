@@ -147,6 +147,7 @@ input, select {
 .hud .feed div.bad { background: rgba(224, 64, 64, 0.45); }
 .hud .feed div { display: flex; align-items: center; gap: 6px; }
 .hud .feed .icons { display: inline-flex; gap: 2px; }
+.hud .feed .assist { color: var(--muted); font-size: 12px; }
 .hud .feed .badge { display: inline-flex; align-items: center; gap: 2px; margin-left: 4px; padding-left: 6px; border-left: 1px solid rgba(255,255,255,0.25); }
 /* Pixel-art icons (icons.ts): scale with font size, tint via color. */
 .icon { display: inline-block; width: 1.25em; height: 1.25em; vertical-align: -0.28em; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.6)); }

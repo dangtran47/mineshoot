@@ -15,6 +15,8 @@ export interface NetPlayer {
   hp: number;
   kills: number;
   deaths: number;
+  /** Kills helped along (damage on the victim shortly before someone else finished them). */
+  assists: number;
   spawnEpoch: number;
   weapon: number;
   /** Melee weapon in slot 3 (MeleeKind). */

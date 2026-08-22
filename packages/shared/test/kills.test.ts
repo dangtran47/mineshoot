@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ASSIST_MIN_DAMAGE,
+  ASSIST_WINDOW_MS,
   KillTracker,
   MULTI_KILL_WINDOW_MS,
   SHUTDOWN_STREAK,
@@ -89,6 +91,52 @@ describe('KillTracker', () => {
     t.remove('a');
     expect(t.recordKill('a', 'b', 0).multi).toBe(1);
     expect(t.recordKill('a', 'b', 0).streak).toBe(2);
+  });
+
+  describe('assists', () => {
+    it('credits everyone but the killer who dealt >= ASSIST_MIN_DAMAGE inside the window', () => {
+      const t = new KillTracker();
+      t.recordDamage('b', 'v', ASSIST_MIN_DAMAGE, 1000);
+      t.recordDamage('c', 'v', ASSIST_MIN_DAMAGE - 1, 1000);
+      t.recordDamage('a', 'v', 50, 1500);
+      const r = t.recordKill('a', 'v', 2000);
+      expect(r.assists).toEqual(['b']);
+    });
+
+    it('sums several small hits from the same attacker', () => {
+      const t = new KillTracker();
+      t.recordDamage('b', 'v', 10, 1000);
+      t.recordDamage('b', 'v', 10, 1200);
+      t.recordDamage('b', 'v', 5, 1400);
+      expect(t.recordKill('a', 'v', 2000).assists).toEqual(['b']);
+    });
+
+    it('ignores damage older than ASSIST_WINDOW_MS and self damage', () => {
+      const t = new KillTracker();
+      t.recordDamage('b', 'v', 50, 1000);
+      t.recordDamage('v', 'v', 50, 1000 + ASSIST_WINDOW_MS);
+      t.recordDamage('c', 'v', 50, 1000 + ASSIST_WINDOW_MS);
+      expect(t.recordKill('a', 'v', 1000 + ASSIST_WINDOW_MS + 1).assists).toEqual(['c']);
+    });
+
+    it('lists assists in order of first damage and clears the log on death', () => {
+      const t = new KillTracker();
+      t.recordDamage('c', 'v', 30, 1000);
+      t.recordDamage('b', 'v', 30, 1100);
+      expect(t.recordKill('a', 'v', 2000).assists).toEqual(['c', 'b']);
+      // Fresh life: old damage does not carry into the next death.
+      expect(t.recordKill('a', 'v', 2500).assists).toEqual([]);
+    });
+
+    it('resetStreaks and remove drop pending damage', () => {
+      const t = new KillTracker();
+      t.recordDamage('b', 'v', 50, 1000);
+      t.resetStreaks();
+      expect(t.recordKill('a', 'v', 1100).assists).toEqual([]);
+      t.recordDamage('b', 'v', 50, 2000);
+      t.remove('v');
+      expect(t.recordKill('a', 'v', 2100).assists).toEqual([]);
+    });
   });
 
   it('resetStreaks (td round change) clears streaks and multi chains but keeps the revenge grudge', () => {

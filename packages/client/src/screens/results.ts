@@ -35,13 +35,13 @@ function teamBody(ranking: RankRow[], meId: string, summary: TeamSummary): { tit
   const side = (team: Team, rows: RankRow[], score: number): string => {
     const cls = [TEAM_CLASS[team], winner === team ? 'won' : ''].filter(Boolean).join(' ');
     const trs = rows
-      .map((r) => `<tr class="${r.id === meId ? 'me' : ''}"><td>${r.isBot ? '\u{1F916} ' : ''}${escapeHtml(r.name)}</td>${caps ? `<td>${r.captures ?? 0}</td>` : ''}<td>${r.kills}</td><td>${r.deaths}</td><td>${kdRatio(r.kills, r.deaths).toFixed(2)}</td></tr>`)
+      .map((r) => `<tr class="${r.id === meId ? 'me' : ''}"><td>${r.isBot ? '\u{1F916} ' : ''}${escapeHtml(r.name)}</td>${caps ? `<td>${r.captures ?? 0}</td>` : ''}<td>${r.kills}</td><td>${r.assists ?? 0}</td><td>${r.deaths}</td><td>${kdRatio(r.kills, r.deaths).toFixed(2)}</td></tr>`)
       .join('');
     return `<div class="side ${cls}">
       <div class="teamhead"><span class="name">${teamName(team)}</span><span class="score">${score}</span></div>
       <table>
-        <tr><th>Player</th>${caps ? '<th>Caps</th>' : ''}<th>Kills</th><th>Deaths</th><th>K/D</th></tr>
-        ${trs || `<tr><td colspan="${caps ? 5 : 4}" class="empty">Nobody</td></tr>`}
+        <tr><th>Player</th>${caps ? '<th>Caps</th>' : ''}<th>Kills</th><th>Assists</th><th>Deaths</th><th>K/D</th></tr>
+        ${trs || `<tr><td colspan="${caps ? 6 : 5}" class="empty">Nobody</td></tr>`}
       </table>
     </div>`;
   };
@@ -74,12 +74,12 @@ export function showResults(
   } else {
     const medals = ['🥇', '🥈', '🥉'];
     const rows = ranking
-      .map((r, i) => `<tr class="${r.id === meId ? 'me' : ''}"><td><span class="medal">${medals[i] ?? i + 1}</span></td><td>${r.isBot ? '\u{1F916} ' : ''}${escapeHtml(r.name)}</td><td>${r.kills}</td><td>${r.deaths}</td><td>${kdRatio(r.kills, r.deaths).toFixed(2)}</td></tr>`)
+      .map((r, i) => `<tr class="${r.id === meId ? 'me' : ''}"><td><span class="medal">${medals[i] ?? i + 1}</span></td><td>${r.isBot ? '\u{1F916} ' : ''}${escapeHtml(r.name)}</td><td>${r.kills}</td><td>${r.assists ?? 0}</td><td>${r.deaths}</td><td>${kdRatio(r.kills, r.deaths).toFixed(2)}</td></tr>`)
       .join('');
     const winner = ranking[0];
     sub = winner ? `Winner: <b>${escapeHtml(winner.name)}</b>` : 'No players';
     body = `<table>
-        <tr><th>#</th><th>Player</th><th>Kills</th><th>Deaths</th><th>K/D</th></tr>
+        <tr><th>#</th><th>Player</th><th>Kills</th><th>Assists</th><th>Deaths</th><th>K/D</th></tr>
         ${rows}
       </table>`;
   }

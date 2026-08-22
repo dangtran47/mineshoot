@@ -56,7 +56,7 @@ around, and shoot each other for 3–15 minutes. Then argue about the K/D table.
    Elimination) offer **Red / Blue / Auto** buttons so you can pick a side.
 3. **Click to play.** You are not in the arena until you click; nobody can
    hit you while you are still reading the overlay.
-4. Fight until the timer runs out. Rankings (kills, deaths, K/D) are shown at
+4. Fight until the timer runs out. Rankings (kills, assists, deaths, K/D) are shown at
    the end; the room closes shortly after.
 
 | Input | Action |
@@ -173,6 +173,12 @@ somewhere and pays for it somewhere else:
 The kill feed calls out headshots, multi-kills (DOUBLE KILL … MEGA KILL),
 streak milestones (KILLING SPREE / RAMPAGE / UNSTOPPABLE / GODLIKE), revenge,
 and "shutdown" when you end someone's streak.
+
+**Assists.** Deal at least **25 damage** to someone within the **5 s** before
+another player finishes them and you get an assist: the feed shows
+"Alice + Carol 🔫 Bob", the HUD counter and the Tab scoreboard / results add an
+**A** column. The killer never assists their own kill, self-damage never counts,
+and a respawn (or a new TD round) wipes the pending damage.
 
 ### Bots
 

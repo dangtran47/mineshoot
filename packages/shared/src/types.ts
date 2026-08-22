@@ -76,6 +76,8 @@ export interface RankRow {
   name: string;
   kills: number;
   deaths: number;
+  /** Kills helped along (see `KillTracker` assists); absent = 0. */
+  assists?: number;
   isBot?: boolean;
   /** CTF: TEAM_RED / TEAM_BLUE (absent or 0 elsewhere). */
   team?: number;
