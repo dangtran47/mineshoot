@@ -1,5 +1,6 @@
 import { GUN_MACHINEGUN, GUN_NONE, GUN_PISTOL, GUN_RIFLE, GUN_SHOTGUN, GUN_SMG, GUN_SNIPER, GUN_TASER, MELEE_AXE, MELEE_KATANA, MELEE_PICKAXE, MELEE_SCYTHE, MELEE_SWORD, WEAPON_GRENADE, WEAPON_MELEE, WEAPON_TASER, killTags } from '@mineshoot/shared';
 import type { GunKind, KillAwards, MeleeKind, Weapon } from '@mineshoot/shared';
+import { iconSvg, weaponIcon } from './icons';
 
 /** How a feed line relates to the local player: their kill, their death, or neither. */
 export type FeedKind = 'neutral' | 'good' | 'bad';
@@ -75,6 +76,11 @@ const MELEE_EMOJI: Record<MeleeKind, string> = {
 /** "Alice + Carol" — the killer followed by everyone who assisted. */
 export function killerWithAssists(k: KillLineInput): string {
   return [k.killer, ...(k.assists ?? [])].join(' + ');
+}
+
+/** Icon markup for a feed line: the exact weapon that killed (gun kind, not just "a gun"), plus the headshot mark. */
+export function killFeedIcons(k: KillLineInput): string {
+  return weaponIcon(k.weapon, k.melee ?? MELEE_SWORD, k.gun ?? GUN_NONE) + (k.headshot ? iconSvg('headshot', 'red') : '');
 }
 
 /** "Alice + Carol 🔫🎯 Bob · DOUBLE KILL" — plain-text form of a feed line (accessible name / tooltip). */

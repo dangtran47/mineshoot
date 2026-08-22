@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { FEED_MAX, FEED_TTL_MS, KillFeedModel, killFeedLine } from '../src/hud/killFeed';
+import { FEED_MAX, FEED_TTL_MS, KillFeedModel, killFeedIcons, killFeedLine } from '../src/hud/killFeed';
 import type { KillLineInput } from '../src/hud/killFeed';
-import { GUN_NONE, GUN_SHOTGUN, GUN_TASER, MELEE_AXE, MELEE_PICKAXE, WEAPON_GRENADE, WEAPON_MELEE, WEAPON_PISTOL, WEAPON_PRIMARY } from '@mineshoot/shared';
+import { GUN_NONE, GUN_PISTOL, GUN_RIFLE, GUN_SHOTGUN, GUN_SNIPER, GUN_TASER, MELEE_AXE, MELEE_PICKAXE, WEAPON_GRENADE, WEAPON_MELEE, WEAPON_PISTOL, WEAPON_PRIMARY } from '@mineshoot/shared';
 
 const line = (killer: string): KillLineInput => ({ killer, victim: 'v', weapon: WEAPON_PISTOL, multi: 1, streak: 1, revenge: false, shutdown: false, headshot: false });
 
@@ -53,6 +53,18 @@ describe('killFeedLine melee kinds', () => {
     expect(killFeedLine({ ...base, weapon: WEAPON_GRENADE, gun: GUN_NONE })).toContain('💣');
     expect(killFeedLine({ ...base, weapon: WEAPON_PRIMARY, gun: GUN_TASER })).toContain('⚡');
     expect(killFeedLine({ ...base, weapon: WEAPON_PRIMARY, gun: GUN_SHOTGUN })).toContain('💥');
+  });
+
+  it('killFeedIcons draws the exact gun that killed, not just "a gun"', () => {
+    const base = line('a');
+    expect(killFeedIcons({ ...base, weapon: WEAPON_PRIMARY, gun: GUN_RIFLE })).toContain('icon-rifle');
+    expect(killFeedIcons({ ...base, weapon: WEAPON_PRIMARY, gun: GUN_SNIPER })).toContain('icon-sniper');
+    expect(killFeedIcons({ ...base, weapon: WEAPON_PRIMARY, gun: GUN_SHOTGUN })).toContain('icon-shotgun');
+    expect(killFeedIcons({ ...base, weapon: WEAPON_PISTOL, gun: GUN_PISTOL })).toContain('icon-gun');
+    expect(killFeedIcons({ ...base, weapon: WEAPON_MELEE, melee: MELEE_AXE })).toContain('icon-axe');
+    expect(killFeedIcons({ ...base, weapon: WEAPON_GRENADE })).toContain('icon-grenade');
+    expect(killFeedIcons({ ...base, weapon: WEAPON_PRIMARY, gun: GUN_RIFLE, headshot: true })).toContain('icon-headshot');
+    expect(killFeedIcons({ ...base, weapon: WEAPON_PRIMARY, gun: GUN_RIFLE })).not.toContain('icon-headshot');
   });
 
   it('pushText adds plain lines that share the cap and TTL', () => {

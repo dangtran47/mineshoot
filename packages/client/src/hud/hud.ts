@@ -1,6 +1,6 @@
 import { ATTACK_HEAVY, GRENADE_START, GUN_MAG_SIZE, GUN_NONE, MAX_HP, MELEE_KINDS, MELEE_SWORD, PRIMARY_KINDS, TEAM_BLUE, TEAM_RED, WEAPONS, WEAPON_GRENADE, WEAPON_MELEE, WEAPON_PISTOL, WEAPON_PRIMARY, WEAPON_TASER, gunSpec, isGunSlot, meleeSelectable, meleeStats, splitTeams, teamName, weaponAllowed } from '@mineshoot/shared';
 import type { FlagStatus, GunKind, MeleeKind, RankRow, RoomMode, Team, Weapon, WeaponMode } from '@mineshoot/shared';
-import { KillFeedModel, killFeedLine } from './killFeed';
+import { KillFeedModel, killFeedIcons, killFeedLine } from './killFeed';
 import type { FeedKind, KillLineInput } from './killFeed';
 import { awardBadges, iconSvg, weaponIcon } from './icons';
 import type { AwardBadge } from './icons';
@@ -511,7 +511,7 @@ export class Hud {
         row.append(
           el('span', 'name', e.line.killer),
           ...(e.line.assists?.length ? [el('span', 'assist', `+ ${e.line.assists.join(' + ')}`)] : []),
-          svgSpan('icons', weaponIcon(e.line.weapon, e.line.melee ?? MELEE_SWORD) + (e.line.headshot ? iconSvg('headshot', 'red') : '')),
+          svgSpan('icons', killFeedIcons(e.line)),
           el('span', 'name', e.line.victim),
           ...awardBadges(e.line).map((b) => badgeEl(b)),
         );
