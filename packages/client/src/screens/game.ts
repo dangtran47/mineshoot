@@ -639,7 +639,10 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
         }
       }
     }
-    crouching = inputEnabled && local.alive && !frozen && (keys.isDown('ControlLeft') || keys.isDown('KeyC'));
+    // Shift as well as Ctrl: Ctrl+W closes the tab in Chrome (unpreventable), and C is
+    // taken by the training range's gun picker (Z X C V N).
+    crouching =
+      inputEnabled && local.alive && !frozen && (keys.isDown('ShiftLeft') || keys.isDown('ShiftRight') || keys.isDown('ControlLeft') || keys.isDown('ControlRight'));
     const speedScale = Math.min(
       weapons.charging ? weapons.chargeSpeedScale : 1,
       carrying !== null ? FLAG_CARRY_SPEED_SCALE : 1,
