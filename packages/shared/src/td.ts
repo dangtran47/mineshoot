@@ -53,18 +53,19 @@ export function tdTeamSpawns(spawns: readonly SpawnPoint[], base: { x: number; z
 }
 
 /**
- * The weapons laid on the ground, in weapon-spot order (worldgen's 8 north
- * spots west→east, then their 8 south mirrors): the fixed north row is
- * sniper, shotgun, SMG, rifle, M249, shotgun, rifle, sniper, and the south
- * row is its exact reverse, so each team reads the same order left-to-right
- * from its own side. Sword-only rooms lay two of each blade instead. No taser
- * and no grenade packs.
+ * The weapons laid on the ground, in weapon-spot order (worldgen's 10 north
+ * spots west→east, then their 10 south mirrors): the fixed north row runs
+ * sniper, shotgun, SMG, rifle, M249 twice over — one full set per spawn
+ * strip, two of every gun — and the south row is its exact reverse, so each
+ * team reads the same order left-to-right from its own side. Sword-only
+ * rooms cycle the four blades across the row instead. No taser and no
+ * grenade packs.
  */
 export function tdWeaponLoadout(weapons: WeaponMode): DropKind[] {
+  const set = [GUN_SNIPER, GUN_SHOTGUN, GUN_SMG, GUN_RIFLE, GUN_MACHINEGUN];
+  const guns = [...set, ...set];
   const row: readonly number[] =
-    weapons === 'sword'
-      ? [...DROP_KINDS, ...DROP_KINDS]
-      : [GUN_SNIPER, GUN_SHOTGUN, GUN_SMG, GUN_RIFLE, GUN_MACHINEGUN, GUN_SHOTGUN, GUN_RIFLE, GUN_SNIPER];
+    weapons === 'sword' ? guns.map((_, i) => DROP_KINDS[i % DROP_KINDS.length]) : guns;
   const slot = weapons === 'sword' ? WEAPON_MELEE : WEAPON_PRIMARY;
   return [...row, ...[...row].reverse()].map((kind) => ({ slot, kind }));
 }

@@ -292,11 +292,12 @@ never stack — everyone gets their own spawn point.
   the round (a big banner announces the result); a simultaneous wipe is a
   drawn round (no point). Rounds have **no time limit**, and there is no
   match clock.
-- **Weapons on the ground.** Every gun lies at a **fixed spot**: two rows of 4
-  in front of each spawn zone — west to east **sniper, shotgun, SMG, rifle |
-  M249, shotgun, rifle, sniper**, and the far side's rows are the exact
-  reverse, so both teams read the same order left-to-right from their own end
-  (blades ×2 per side in a sword-only room). Four **pistols** hover at the
+- **Weapons on the ground.** Every gun lies at a **fixed spot**: two rows of 5
+  in front of each spawn zone — 10 guns per side, **two of every gun** — west
+  to east **sniper, shotgun, SMG, rifle, M249 | sniper, shotgun, SMG, rifle,
+  M249** (one full set per spawn strip), and the far side's rows are the
+  exact reverse, so both teams read the same order left-to-right from their
+  own end (the four blades cycle across the row in a sword-only room). Four **pistols** hover at the
   east/west arm mouths, beside the border stubs. The **same spots and kinds
   every round**, so you learn where your favourite gun waits. Walk over
   one with an empty slot `1` to take it (`G` throws the one you hold away);

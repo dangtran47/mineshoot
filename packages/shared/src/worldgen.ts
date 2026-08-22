@@ -292,8 +292,8 @@ const TD_SPAWN_STRIPS: readonly [number, number][] = [
 ];
 const TD_TARGET_SPAWNS_PER_SIDE = 16;
 const TD_MIN_SPAWN_DIST = 4;
-/** Fixed weapon spots: two rows of 4 (one per spawn strip) at TD_WEAPON_Z (red) and their mirrors (blue). */
-const TD_WEAPON_XS: readonly number[] = [15, 21, 27, 33, 45, 51, 57, 63];
+/** Fixed weapon spots: two rows of 5 (one per spawn strip) at TD_WEAPON_Z (red) and their mirrors (blue). */
+const TD_WEAPON_XS: readonly number[] = [13, 18, 23, 28, 33, 45, 50, 55, 60, 65];
 const TD_WEAPON_Z = 8;
 /** Fixed pistol drops: one on each side of the west and east arm-mouth stubs. */
 const TD_PISTOL_SPOTS: readonly [number, number][] = [

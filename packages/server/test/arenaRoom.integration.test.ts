@@ -1336,10 +1336,10 @@ describe('arena room', () => {
         expect(me(alice).gun).toBe(GUN_NONE); // blade-only spawn: every gun comes off the ground
         expect(me(alice).pistol).toBe(GUN_NONE);
         expect(me(alice).grenades).toBe(0);
-        // The fixed ground weapons: 8 primaries per side plus the 4 arm-mouth pistols, none of them expiring.
-        expect(alice.state.drops.size).toBe(20);
+        // The fixed ground weapons: 10 primaries per side plus the 4 arm-mouth pistols, none of them expiring.
+        expect(alice.state.drops.size).toBe(24);
         const bySlot = (slot: number): number => [...alice.state.drops.values()].filter((d: any) => d.slot === slot).length;
-        expect(bySlot(WEAPON_PRIMARY)).toBe(16);
+        expect(bySlot(WEAPON_PRIMARY)).toBe(20);
         expect(bySlot(WEAPON_PISTOL)).toBe(4);
 
         bob = await new Client(wsUrl).joinById(alice.roomId, { nickname: 'Bob', team: TEAM_BLUE });
@@ -1353,14 +1353,14 @@ describe('arena room', () => {
         const spot = [...alice.state.drops.values()].find((d: any) => d.slot === WEAPON_PRIMARY && d.z < TD_WORLD_SZ / 2);
         alice.send(MSG.pose, { x: spot.x, y: spot.y, z: spot.z, yaw: 0, pitch: 0, epoch: me(alice).spawnEpoch, weapon: WEAPON_MELEE });
         await until(() => me(alice).gun !== GUN_NONE, 3000, 'alice armed off the ground');
-        expect(alice.state.drops.size).toBe(19);
+        expect(alice.state.drops.size).toBe(23);
 
         // G works mid-round: the gun lands at her feet, the grace holds her off, then her empty slot takes it back.
         alice.send(MSG.dropWeapon, { epoch: me(alice).spawnEpoch, slot: WEAPON_PRIMARY });
         await until(() => me(alice).gun === GUN_NONE, 3000, 'gun thrown');
-        expect(alice.state.drops.size).toBe(20);
+        expect(alice.state.drops.size).toBe(24);
         await until(() => me(alice).gun !== GUN_NONE, 4000, 'picked back up after the grace');
-        expect(alice.state.drops.size).toBe(19);
+        expect(alice.state.drops.size).toBe(23);
 
         // Alice wipes blue (Bob) → red takes the round. Shots repeat past the server's rate limit.
         const wipe = async (round: number): Promise<void> => {
@@ -1393,7 +1393,7 @@ describe('arena room', () => {
         await until(() => me(carol!).alive === true && alice.state.players.get(bob!.sessionId).alive === true, 3000, 'all spawned');
         expect(alice.state.players.get(bob.sessionId).spawnEpoch).not.toBe(bobEpoch);
         expect(me(alice).gun).toBe(GUN_NONE); // the picked-up gun died with the round
-        expect(alice.state.drops.size).toBe(20);
+        expect(alice.state.drops.size).toBe(24);
         expect(rounds.at(-1)).toMatchObject({ kind: 'start', round: 2 });
 
         // Blade-only spawns: re-arm off the ground each round before shooting.

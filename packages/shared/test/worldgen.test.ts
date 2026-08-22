@@ -285,14 +285,14 @@ describe('generateTdWorld', () => {
     }
   });
 
-  it('lays 8 mirrored standable weapon spots per side, in matching order', () => {
+  it('lays 10 mirrored standable weapon spots per side, in matching order', () => {
     for (const seed of [1, 2, 3, 12345]) {
       const { world, weaponSpots } = generateTdWorld(seed);
-      expect(weaponSpots).toHaveLength(16);
-      const red = weaponSpots!.slice(0, 8);
-      const blue = weaponSpots!.slice(8);
+      expect(weaponSpots).toHaveLength(20);
+      const red = weaponSpots!.slice(0, 10);
+      const blue = weaponSpots!.slice(10);
       for (const s of weaponSpots!) expect(isStandable(world, Math.floor(s.x), s.y, Math.floor(s.z))).toBe(true);
-      for (let i = 0; i < 8; i++) {
+      for (let i = 0; i < 10; i++) {
         expect(red[i].z).toBeLessThan(world.sz / 2);
         expect(blue[i].x).toBe(red[i].x);
         expect(blue[i].z).toBeCloseTo(world.sz - red[i].z);

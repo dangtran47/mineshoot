@@ -29,22 +29,27 @@ describe('roundWinner', () => {
 });
 
 describe('tdWeaponLoadout', () => {
-  it('lays the fixed gun row north and its exact reverse south (M249 replaces the second SMG)', () => {
+  it('lays the fixed gun row north and its exact reverse south (two of every gun)', () => {
     const loadout = tdWeaponLoadout('all');
-    expect(loadout).toHaveLength(16);
+    expect(loadout).toHaveLength(20);
     expect(loadout.every((d) => d.slot === WEAPON_PRIMARY)).toBe(true);
-    const row = [GUN_SNIPER, GUN_SHOTGUN, GUN_SMG, GUN_RIFLE, GUN_MACHINEGUN, GUN_SHOTGUN, GUN_RIFLE, GUN_SNIPER];
-    expect(loadout.slice(0, 8).map((d) => d.kind)).toEqual(row);
+    const row = [GUN_SNIPER, GUN_SHOTGUN, GUN_SMG, GUN_RIFLE, GUN_MACHINEGUN, GUN_SNIPER, GUN_SHOTGUN, GUN_SMG, GUN_RIFLE, GUN_MACHINEGUN];
+    expect(loadout.slice(0, 10).map((d) => d.kind)).toEqual(row);
     // The south row reverses, so each team reads the same order left-to-right from its own side.
-    expect(loadout.slice(8).map((d) => d.kind)).toEqual([...row].reverse());
+    expect(loadout.slice(10).map((d) => d.kind)).toEqual([...row].reverse());
+    // Every gun kind spawns exactly twice per side.
+    for (const kind of [GUN_SNIPER, GUN_SHOTGUN, GUN_SMG, GUN_RIFLE, GUN_MACHINEGUN]) {
+      expect(loadout.slice(0, 10).filter((d) => d.kind === kind)).toHaveLength(2);
+      expect(loadout.slice(10).filter((d) => d.kind === kind)).toHaveLength(2);
+    }
   });
-  it('lays two of each blade per side in a sword-only room', () => {
+  it('cycles the blades across the row in a sword-only room (at least two of each per side)', () => {
     const loadout = tdWeaponLoadout('sword');
-    expect(loadout).toHaveLength(16);
+    expect(loadout).toHaveLength(20);
     expect(loadout.every((d) => d.slot === WEAPON_MELEE)).toBe(true);
     for (const kind of [MELEE_AXE, MELEE_KATANA, MELEE_SCYTHE, MELEE_PICKAXE]) {
-      expect(loadout.slice(0, 8).filter((d) => d.kind === kind)).toHaveLength(2);
-      expect(loadout.slice(8).filter((d) => d.kind === kind)).toHaveLength(2);
+      expect(loadout.slice(0, 10).filter((d) => d.kind === kind).length).toBeGreaterThanOrEqual(2);
+      expect(loadout.slice(10).filter((d) => d.kind === kind).length).toBeGreaterThanOrEqual(2);
     }
   });
 });
