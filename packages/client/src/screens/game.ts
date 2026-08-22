@@ -62,7 +62,7 @@ import { PointerLook } from '../input/pointerLock';
 import { LocalPlayer } from '../game/localPlayer';
 import { RecoilController } from '../game/recoil';
 import { RemotePlayers } from '../game/remotePlayers';
-import { cycleTarget, eligibleTargets, retainTarget, spectateReady } from '../game/spectateModel';
+import { cycleTarget, eligibleTargets, retainTarget, spectateLoadout, spectateReady } from '../game/spectateModel';
 import type { SpectateCandidate } from '../game/spectateModel';
 import { Weapons } from '../game/weapons';
 import { Hud } from '../hud/hud';
@@ -147,6 +147,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
   let freezeCount = 0;
   /** CTF: the flag we carry (its owning team), or null. */
   let carrying: Team | null = null;
+  const allowed = allowedWeapons(weaponMode);
   const canPickMelee = meleeSelectable(roomMode, weaponMode);
   const canPickPrimary = roomMode === 'training' && weaponAllowed(weaponMode, WEAPON_PRIMARY);
   hud.setRoomName(room ? (roomMode === 'training' ? `\u{1F3AF} ${room.state.name}` : ctf ? `\u{1F6A9} ${room.state.name}` : td ? `⚔️ ${room.state.name}` : room.state.name) : 'Offline sandbox');
@@ -175,6 +176,10 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
       .addScaledVector(right, 0.25)
       .add(new THREE.Vector3(0, -0.18, 0))
       .addScaledVector(new THREE.Vector3(f.x, f.y, f.z), 0.5);
+  };
+  /** Weapon panel writer that yields to the spectate view: while watching somebody, their loadout owns the HUD. */
+  const setHudWeapon = (w: Weapon, melee: MeleeKind, gun: GunKind): void => {
+    if (spectateTarget === null) hud.setWeapon(w, melee, gun);
   };
   const weapons = new Weapons({
     onFire(slot: Weapon) {
@@ -218,32 +223,41 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     },
     onSwitch(w: Weapon) {
       viewModel.setWeapon(w);
-      hud.setWeapon(w, weapons.melee, weapons.gun);
+      setHudWeapon(w, weapons.melee, weapons.gun);
     },
     onReload(slot: Weapon) {
       room?.send(MSG.reload, { epoch, weapon: slot });
     },
     onMeleeChange(kind: MeleeKind) {
       viewModel.setMelee(kind);
-      hud.setWeapon(weapons.current, kind, weapons.gun);
+      setHudWeapon(weapons.current, kind, weapons.gun);
     },
     onGunChange(kind: GunKind) {
       viewModel.setGun(kind);
-      hud.setWeapon(weapons.current, weapons.melee, kind);
+      setHudWeapon(weapons.current, weapons.melee, kind);
     },
     onTaserChange() {
-      hud.setWeapon(weapons.current, weapons.melee, weapons.gun);
+      setHudWeapon(weapons.current, weapons.melee, weapons.gun);
     },
     onPistolChange() {
-      hud.setWeapon(weapons.current, weapons.melee, weapons.gun);
+      setHudWeapon(weapons.current, weapons.melee, weapons.gun);
     },
     onGrenadesChange(n: number) {
-      hud.setGrenades(n);
+      if (spectateTarget === null) hud.setGrenades(n);
     },
-  }, allowedWeapons(weaponMode));
+  }, allowed);
+  /** Put our own loadout back on the HUD; the spectate view overwrites these panels while we watch somebody. */
+  const showOwnLoadout = (): void => {
+    hud.setWeapon(weapons.current, weapons.melee, weapons.gun);
+    hud.setGrenades(weapons.grenades);
+    const me = meNet();
+    if (me) {
+      hud.setHealth(me.hp);
+      hud.setShield(me.alive && me.shielded);
+    }
+  };
   viewModel.setWeapon(weapons.current);
-  hud.setWeapon(weapons.current, weapons.melee, weapons.gun);
-  hud.setGrenades(weapons.grenades);
+  showOwnLoadout();
   /** Training range / sandbox: arm `kind` in the melee slot and bring it out (the server confirms via the state patch). */
   const pickMelee = (kind: MeleeKind): void => {
     if (!canPickMelee || !local.alive) return;
@@ -286,6 +300,8 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     if (next) remotes.setHidden(next, true);
     spectateTarget = next;
     viewModel.setHidden(next !== null);
+    // Back on our own death cam: the frame loop stops writing somebody else's health/weapon, so restore ours.
+    if (next === null) showOwnLoadout();
     const p = next ? room?.state.players.get(next) : undefined;
     hud.setSpectating(p ? displayName(p.name, p.isBot) : null);
     // Spectating is a live view: full colors, no death banner — only the name label above.
@@ -414,8 +430,10 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
       weapons.setTaser(me.taser as GunKind);
       weapons.setGrenades(me.grenades);
       hud.setStats(me.kills, me.assists, me.deaths);
-      hud.setHealth(me.hp);
-      hud.setShield(me.alive && me.shielded);
+      if (spectateTarget === null) {
+        hud.setHealth(me.hp);
+        hud.setShield(me.alive && me.shielded);
+      }
       if (teamMode) {
         // Team buttons on the overlay (also lets an unspawned player pick a side; the camera follows the new side).
         const counts: Record<Team, number> = { [TEAM_RED]: 0, [TEAM_BLUE]: 0 };
@@ -698,10 +716,22 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     hud.setCharge(charge ?? weapons.throwChargeFraction(now));
     const reload = weapons.reloadFraction(now);
     viewModel.setReload(reload);
-    hud.setAmmo(weapons.ammo, weapons.magOf(weapons.current), reload !== null, weapons.perShell);
-    const usable: Record<number, boolean> = {};
-    for (const w of WEAPONS) usable[w] = weapons.canUse(w);
-    hud.setSlots(usable, weapons.current);
+    // Watching a team-mate: the health, weapon, ammo and slot panels show theirs — our own corpse's are useless.
+    const watched = spectateTarget !== null ? room?.state.players.get(spectateTarget) : undefined;
+    if (watched) {
+      const loadout = spectateLoadout(watched, allowed);
+      hud.setWeapon(loadout.weapon, loadout.melee, loadout.gun);
+      hud.setGrenades(loadout.grenades);
+      hud.setHealth(loadout.hp);
+      hud.setShield(loadout.shielded);
+      hud.setAmmo(loadout.ammo, loadout.mag, loadout.reloading, loadout.perShell);
+      hud.setSlots(loadout.usable, loadout.weapon);
+    } else {
+      hud.setAmmo(weapons.ammo, weapons.magOf(weapons.current), reload !== null, weapons.perShell);
+      const usable: Record<number, boolean> = {};
+      for (const w of WEAPONS) usable[w] = weapons.canUse(w);
+      hud.setSlots(usable, weapons.current);
+    }
     // Sniper zoom: narrow the FOV while RMB is held (dead, RMB is spectate-previous instead).
     const zoom = local.alive ? weapons.zoomFactor : 1;
     if (camera.fov !== baseFov / zoom) {

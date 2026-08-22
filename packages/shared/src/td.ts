@@ -53,6 +53,21 @@ export function tdTeamSpawns(spawns: readonly SpawnPoint[], base: { x: number; z
 }
 
 /**
+ * Which way a td spawn looks. The spawn strips sit at either end of the map
+ * with the team's weapon row a few blocks in front of them, so the random yaw
+ * the other modes use leaves half the squad staring at the back wall with the
+ * guns behind them: face the middle of the map instead. yaw 0 looks toward
+ * -Z (see `forwardVector`), so the yaw pointing at `center` is
+ * `atan2(-dx, -dz)`.
+ */
+export function tdSpawnYaw(spawn: { x: number; z: number }, center: { x: number; z: number }): number {
+  const dx = center.x - spawn.x;
+  const dz = center.z - spawn.z;
+  if (dx === 0 && dz === 0) return 0;
+  return Math.atan2(-dx, -dz);
+}
+
+/**
  * The weapons laid on the ground, in weapon-spot order (worldgen's 10 north
  * spots west→east, then their 10 south mirrors): the fixed north row runs
  * sniper, shotgun, SMG, rifle, M249 twice over — one full set per spawn

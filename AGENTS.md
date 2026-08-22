@@ -173,7 +173,8 @@ packages/shared/src/
   ctf.ts           FlagState, flagTouch(), canScore(), canReturn(), teamSpawns(), pickTeam(),
                    botRebalance(), matchWinner(), botCtfGoal()
   td.ts            team elimination: roundWinner(), tdWeaponLoadout(), tdTeamSpawns() (a team's
-                   half of the map, never nearest-N), botTdGoal()
+                   half of the map, never nearest-N), tdSpawnYaw() (spawns face the map centre,
+                   so the weapon row is in front), botTdGoal()
   bot.ts           createBot(rng, spawns, opts).compute(world, view, dt);
                    view.goal / view.carrying for CTF (td sets view.goal too); skill profiles
   nav.ts           standable()/nearestStandable()/findPath() grid A* the bots walk by
@@ -197,7 +198,8 @@ packages/client/src/
                    (client-side weapon state machine: cooldowns, charge, mag),
                    recoil.ts (RecoilController: camera kick + settle-back),
                    minimapModel.ts (minimap line-of-sight/last-seen/coord rules),
-                   spectateModel.ts (who a dead player may watch + cycling)
+                   spectateModel.ts (who a dead player may watch + cycling +
+                   spectateLoadout(): the watched player's HUD panels)
   render/          scene, atlas, mesher/worldMesh (per-chunk face culling meshes),
                    humanoid + humanoidAnim, viewmodel, meleeProps, gunProps,
                    dropsView, grenadesView, flagsView, tracers, bloodFx, nametag,

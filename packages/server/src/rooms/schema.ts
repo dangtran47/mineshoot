@@ -27,6 +27,13 @@ export class PlayerSchema extends Schema {
   @type('uint8') taser = GUN_NONE;
   /** Grenades in slot 4. */
   @type('uint8') grenades = GRENADE_START;
+  /**
+   * Rounds left in the held slot (0 for melee / grenades), mirrored from the
+   * server's private ammo book once a tick. The owning client predicts its own
+   * count locally; this is what lets a dead player's HUD read the ammo of the
+   * team-mate they are spectating.
+   */
+  @type('uint8') ammo = 0;
   @type('uint8') color = 0;
   @type('boolean') isBot = false;
   /** Spawn protection: cannot be targeted or damaged (ends after SPAWN_PROTECT_MS or on the first attack). */

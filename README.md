@@ -82,7 +82,9 @@ Everyone has **100 HP** and respawns **3 s** after dying with **2 s of spawn
 protection** (you cannot be targeted or damaged; attacking ends it early).
 While you wait, the camera moves into another player's head after **1.5 s** —
 a teammate in Capture the Flag and Team Elimination, anyone alive in a
-deathmatch — and `LMB` / `RMB` cycle through them.
+deathmatch — and `LMB` / `RMB` cycle through them. The HUD follows the camera:
+while you watch someone, the health bar, weapon and ammo are **theirs**, not
+your own.
 
 Holding `Shift` or `Ctrl` **crouches**: you move at **half speed**, your eye drops
 from 1.62 m to **1.02 m** and your whole hitbox squashes from 1.8 m to
@@ -293,7 +295,8 @@ north/south end mirror the other team's exactly, and respawning teammates
 never stack — everyone gets their own spawn point.
 
 - **Rounds.** Everyone spawns at their own end **blade-only** — no pistol, no
-  grenades; every gun comes off the ground — frozen behind a **3-2-1 countdown** (3 s: no moving or attacking —
+  grenades; every gun comes off the ground, and you spawn **looking at your
+  weapon row**, not away from it — frozen behind a **3-2-1 countdown** (3 s: no moving or attacking —
   the server drops attacks too, and bots hold still). **Dying takes you out
   for the round** — you spectate until it ends. Wiping the enemy team wins
   the round (a big banner announces the result); a simultaneous wipe is a

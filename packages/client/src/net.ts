@@ -29,6 +29,8 @@ export interface NetPlayer {
   taser: number;
   /** Grenades in slot 4. */
   grenades: number;
+  /** Rounds left in the held gun slot (0 for melee / grenades); read by the spectate HUD. */
+  ammo: number;
   color: number;
   isBot: boolean;
   shielded: boolean;

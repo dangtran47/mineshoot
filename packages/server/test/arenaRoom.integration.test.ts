@@ -19,7 +19,7 @@ import {
   WEAPON_MELEE,
 } from '@mineshoot/shared';
 import type { ExplodeMsg, FlagEventMsg, HitMsg, KillMsg, PickupMsg, RoundEventMsg, ShotMsg, SwungMsg } from '@mineshoot/shared';
-import { CTF_WORLD_SX, DROP_MAX_ACTIVE, DROP_THROWN_LIFETIME_MS, GRENADE_FUSE_MS, GRENADE_SERVER_MIN_INTERVAL_MS, GRENADE_START, GUN_NONE, GUN_PISTOL, GUN_SHOTGUN, GUN_SNIPER, GUN_TASER, MAX_PLAYERS, MELEE_KATANA, MELEE_STATS, MELEE_SWORD, PLATEAU_MAX, PLATEAU_MIN, SPAWN_PRIMARY_KINDS, TD_WORLD_SZ, TEAM_BLUE, TEAM_RED, WEAPON_GRENADE, WEAPON_PRIMARY, WEAPON_TASER, gunSpec } from '@mineshoot/shared';
+import { CTF_WORLD_SX, DROP_MAX_ACTIVE, DROP_THROWN_LIFETIME_MS, GRENADE_FUSE_MS, GRENADE_SERVER_MIN_INTERVAL_MS, GRENADE_START, GUN_NONE, GUN_PISTOL, GUN_SHOTGUN, GUN_SNIPER, GUN_TASER, MAX_PLAYERS, MELEE_KATANA, MELEE_STATS, MELEE_SWORD, PLATEAU_MAX, PLATEAU_MIN, SPAWN_PRIMARY_KINDS, TD_WORLD_SZ, TEAM_BLUE, TEAM_RED, WEAPON_GRENADE, WEAPON_PRIMARY, WEAPON_TASER, flatForward, gunSpec } from '@mineshoot/shared';
 import { createApp } from '../src/app';
 import type { RoomListEntry } from '../src/app';
 
@@ -866,6 +866,7 @@ describe('arena room', () => {
       for (let i = 0; i < GUN_MAG_SIZE + 2; i++) await fireOnce();
       await sleep(100);
       expect(shots).toHaveLength(GUN_MAG_SIZE); // the two extra trigger pulls on an empty magazine were dropped
+      expect(me(alice).ammo).toBe(0); // the held slot's magazine is mirrored into the state (spectators read it there)
 
       // Reload: shots during the reload are dropped; after it, the magazine is full again.
       alice.send(MSG.reload, me(alice).spawnEpoch);
@@ -875,6 +876,7 @@ describe('arena room', () => {
       await sleep(GUN_RELOAD_SERVER_MIN_MS);
       await fireOnce();
       expect(shots).toHaveLength(GUN_MAG_SIZE + 1);
+      expect(me(alice).ammo).toBe(GUN_MAG_SIZE - 1);
 
       // A shot sent mid-reload with rounds left counts as cancelling the reload (weapon switch on the client).
       alice.send(MSG.reload, me(alice).spawnEpoch);
@@ -1386,6 +1388,7 @@ describe('arena room', () => {
         expect(alice.state.timeLeftMs).toBe(0); // no clock in td
         expect(me(alice).team).toBe(TEAM_RED);
         expect(me(alice).z).toBeLessThan(TD_WORLD_SZ / 2); // spawned in the red zone
+        expect(flatForward(me(alice).yaw).z).toBeGreaterThan(0); // …looking up the map at its weapon row, not at the back wall
         expect(me(alice).gun).toBe(GUN_NONE); // blade-only spawn: every gun comes off the ground
         expect(me(alice).pistol).toBe(GUN_NONE);
         expect(me(alice).grenades).toBe(0);
@@ -1399,6 +1402,7 @@ describe('arena room', () => {
         listen(bob);
         await ready(bob);
         expect(me(bob).z).toBeGreaterThan(TD_WORLD_SZ / 2);
+        expect(flatForward(me(bob).yaw).z).toBeLessThan(0); // the blue end faces the other way, still toward the middle
         const rooms = (await (await fetch(`${httpUrl}/rooms`)).json()) as RoomListEntry[];
         expect(rooms.find((r) => r.roomId === alice.roomId)!.metadata).toMatchObject({ mode: 'td', roundLimit: 3, teams: [1, 1] });
 

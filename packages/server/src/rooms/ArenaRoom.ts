@@ -30,6 +30,7 @@ import {
   isTeamMode,
   pickTeam,
   roundWinner,
+  tdSpawnYaw,
   tdTeamSpawns,
   tdWeaponLoadout,
   teamSpawns,
@@ -1016,7 +1017,8 @@ export class ArenaRoom extends Room<RoomState> {
     p.x = s.x;
     p.y = s.y;
     p.z = s.z;
-    p.yaw = this.rng() * Math.PI * 2;
+    // TD squads spawn behind their own weapon row: look up the map at it instead of at a random wall.
+    p.yaw = this.td ? tdSpawnYaw(s, this.tdCenter) : this.rng() * Math.PI * 2;
     p.pitch = 0;
     p.alive = true;
     p.hp = MAX_HP;
@@ -1065,6 +1067,8 @@ export class ArenaRoom extends Room<RoomState> {
       } else if (p.shielded && now >= meta.protectedUntil) {
         p.shielded = false;
       }
+      // Publish the held slot's magazine so spectators can read it (the owner predicts its own).
+      p.ammo = meta.ammo[p.weapon] ?? 0;
       this.syncFlags(id, p, now);
     }
     this.tickDrops(now);

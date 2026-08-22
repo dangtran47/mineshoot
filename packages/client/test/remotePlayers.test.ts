@@ -30,6 +30,7 @@ const player = (over: Partial<NetPlayer> = {}): NetPlayer => ({
   gun: 0,
   taser: 0,
   grenades: 0,
+  ammo: 0,
   color: 0,
   isBot: false,
   shielded: false,

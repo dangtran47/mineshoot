@@ -81,7 +81,7 @@ three.js, no Colyseus, plain objects in and out, a test file per module.
 - `rooms/schema.ts` — `@colyseus/schema` classes: `RoomState { phase, name,
   seed, durationMin, weapons, timeLeftMs, players: Map<PlayerSchema>, drops:
   Map<DropSchema> }`; `PlayerSchema { name, x,y,z, yaw,pitch, alive, hp,
-  kills, deaths, assists, spawnEpoch, weapon, melee, color, isBot, shielded, charging,
+  kills, deaths, assists, spawnEpoch, weapon, melee, ammo, color, isBot, shielded, charging,
   reloading }`; `DropSchema { kind, x,y,z }`. This is the *only* continuously
   synced data.
 - `rooms/validate.ts` — `parsePose/parseShoot/parseSwing/parseCharge/
@@ -394,6 +394,10 @@ roundsBlue / roundLimit`:
   streaks/multi chains (`KillTracker.resetStreaks`; the revenge grudge
   survives), re-lays the weapons and respawns every ready player at their
   own end.
+- Spawn facing is not random in td (it is everywhere else): `tdSpawnYaw`
+  points every spawn at the middle of the map, so the team's weapon row —
+  which lies between the spawn strips and the crossroads — is straight ahead
+  instead of behind you.
 - Every td spawn starts **frozen** for `TD_FREEZE_MS` (the 3-2-1 countdown):
   the client blocks movement and attacks and shows the countdown banner, the
   server drops shoot/swing/throw from frozen players (`meta.frozenUntil`) and
@@ -423,8 +427,12 @@ crossroads centre.
    who is watchable — team-mates only in ctf/td, anyone alive otherwise) the
    camera moves to the watched player's interpolated pose
    (`RemotePlayers.pose`) at their eye height, their body and our own view
-   model are hidden, and LMB/RMB cycle targets. All client-side: a spectator
-   sends nothing and sees nothing the nametags and minimap don't already show.
+   model are hidden, and LMB/RMB cycle targets. The HUD follows the camera:
+   `spectateLoadout()` turns the watched player's schema fields into the
+   health / weapon / ammo / slot panels (`PlayerSchema.ammo` exists for this —
+   nobody can predict somebody else's magazine), and our own panels come back
+   when the target clears. All client-side: a spectator sends nothing and sees
+   nothing the nametags and minimap don't already show.
 2. `Weapons.update(now)` — auto-fire, charge auto-release, reload completion;
    fires the `WeaponEvents` callbacks that send `shoot/charge/swing/reload`.
 3. `RemotePlayers.update(now)` — sample each buffer at `now - 100 ms`, pose

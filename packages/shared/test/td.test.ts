@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { GUN_MACHINEGUN, GUN_NONE, GUN_RIFLE, GUN_SHOTGUN, GUN_SMG, GUN_SNIPER, spawnPrimary } from '../src/guns';
 import { MELEE_AXE, MELEE_KATANA, MELEE_PICKAXE, MELEE_SCYTHE } from '../src/melee';
 import { TEAM_BLUE, TEAM_NONE, TEAM_RED, WEAPON_MELEE, WEAPON_PRIMARY } from '../src/protocol';
-import { botTdGoal, roundWinner, tdTeamSpawns, tdWeaponLoadout } from '../src/td';
+import { flatForward } from '../src/playerPhysics';
+import { botTdGoal, roundWinner, tdSpawnYaw, tdTeamSpawns, tdWeaponLoadout } from '../src/td';
 import { generateTdWorld } from '../src/worldgen';
 
 describe('roundWinner', () => {
@@ -95,6 +96,29 @@ describe('tdTeamSpawns', () => {
       expect(blue.length).toBe(red.length);
       for (const s of red) expect(s.z).toBeLessThan(world.sz / 2);
       for (const s of blue) expect(s.z).toBeGreaterThan(world.sz / 2);
+    }
+  });
+});
+
+describe('tdSpawnYaw', () => {
+  it('looks down the map from either end', () => {
+    const center = { x: 38, z: 38 };
+    expect(Math.abs(tdSpawnYaw({ x: 38, z: 4 }, center))).toBeCloseTo(Math.PI); // north end faces +Z (±π is the same heading)
+    expect(tdSpawnYaw({ x: 38, z: 72 }, center)).toBeCloseTo(0); // south end faces -Z
+    expect(tdSpawnYaw(center, center)).toBe(0); // degenerate: standing on the centre
+  });
+  it('leaves the team weapon row in front of every generated spawn, never behind it (regression)', () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const { world, spawnPoints, bases, weaponSpots } = generateTdWorld(seed);
+      const center = { x: world.sx / 2, z: world.sz / 2 };
+      for (const team of [TEAM_RED, TEAM_BLUE] as const) {
+        for (const s of tdTeamSpawns(spawnPoints, bases[team], world.sz)) {
+          const f = flatForward(tdSpawnYaw(s, center));
+          const ownRow = (weaponSpots ?? []).filter((w) => w.z < world.sz / 2 === s.z < world.sz / 2);
+          expect(ownRow.length).toBeGreaterThan(0);
+          expect(ownRow.some((w) => (w.x - s.x) * f.x + (w.z - s.z) * f.z > 0)).toBe(true);
+        }
+      }
     }
   });
 });

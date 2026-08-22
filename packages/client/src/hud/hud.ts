@@ -83,6 +83,8 @@ export class Hud {
   private readonly weaponName = el('div', 'name');
   private readonly weaponLabel = el('div', 'label');
   private readonly weaponHint = el('div', 'hint');
+  /** Last slot/melee/gun rendered into the weapon panel; skips the redraw when nothing moved. */
+  private weaponKey = '';
   private readonly toastEl = el('div', 'toast hidden');
   private toastTimer = 0;
   private readonly ammo = el('div', 'ammo');
@@ -297,8 +299,16 @@ export class Hud {
     this.charge.classList.toggle('ready', fraction >= 1);
   }
 
-  /** Current slot and what sits in it (melee kind / primary gun kind); drop weapons get their name shown. */
+  /**
+   * Current slot and what sits in it (melee kind / primary gun kind); drop
+   * weapons get their name shown. Cheap to call every frame: an unchanged
+   * loadout returns before touching the DOM (the spectate view re-asserts the
+   * watched player's weapon each frame).
+   */
   setWeapon(w: Weapon, melee: MeleeKind = MELEE_SWORD, gun: GunKind = GUN_NONE): void {
+    const key = `${w}/${melee}/${gun}`;
+    if (key === this.weaponKey) return;
+    this.weaponKey = key;
     this.weaponName.innerHTML = weaponIcon(w, melee, gun);
     const label = w === WEAPON_MELEE ? meleeStats(melee).name : w === WEAPON_GRENADE ? 'Grenade' : w === WEAPON_TASER ? 'Taser' : w === WEAPON_PRIMARY ? gunSpec(gun).name : 'Pistol';
     this.weaponName.title = label;
