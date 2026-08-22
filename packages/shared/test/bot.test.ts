@@ -9,7 +9,7 @@ import { createWorld, setBlock } from '../src/world';
 import { createPhysState, stepPlayer } from '../src/playerPhysics';
 import { WEAPON_PISTOL, WEAPON_MELEE, WEAPON_PRIMARY } from '../src/protocol';
 import { GUN_NONE, GUN_RIFLE, GUN_TASER } from '../src/guns';
-import { PHYSICS_DT, SERVER_TICK_MS } from '../src/constants';
+import { CROUCH_HEIGHT, EYE_HEIGHT, PHYSICS_DT, PLAYER_HEIGHT, SERVER_TICK_MS } from '../src/constants';
 import { generateWorld, PLATEAU_MAX, PLATEAU_MIN } from '../src/worldgen';
 
 function flat(): ReturnType<typeof createWorld> {
@@ -45,6 +45,27 @@ describe('bot', () => {
     // Facing the enemy from wherever the strafing left it.
     const wantYaw = Math.atan2(-(enemies[0].x - self.x), -(enemies[0].z - self.z));
     expect(Math.abs(Math.atan2(Math.sin(self.yaw - wantYaw), Math.cos(self.yaw - wantYaw)))).toBeLessThan(0.15);
+  });
+
+  it('aims lower at a crouching enemy, so it stops landing free headshots', () => {
+    const w = flat();
+    const aimPitch = (crouch: boolean): number => {
+      const bot = createBot(createRng(7), waypoints);
+      let self = createPhysState(32, 1, 40, Math.PI); // facing +Z, enemy at -Z
+      const enemies = [{ id: 'e', x: 32, y: 1, z: 25, crouch }];
+      let pitch = 0;
+      for (let i = 0; i < 80; i++) {
+        const d = bot.compute(w, { self, enemies, now: i * 50 }, 0.05);
+        self = stepPlayer(w, { ...self, yaw: d.yaw, pitch: d.pitch }, d.input, 0.05);
+        pitch = d.pitch;
+      }
+      return pitch;
+    };
+    // Both aim below the eye (the chest is lower than EYE_HEIGHT at this range), the
+    // crouched one more steeply.
+    expect(aimPitch(true)).toBeLessThan(aimPitch(false));
+    expect(CROUCH_HEIGHT * 0.6).toBeLessThan(PLAYER_HEIGHT * 0.6);
+    expect(EYE_HEIGHT).toBeGreaterThan(CROUCH_HEIGHT * 0.6);
   });
 
   it('does not see enemies through walls and wanders instead', () => {

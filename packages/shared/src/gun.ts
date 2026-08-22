@@ -1,4 +1,4 @@
-import { EYE_HEIGHT, GUN_DAMAGE } from './constants';
+import { CROUCH_EYE_HEIGHT, EYE_HEIGHT, GUN_DAMAGE } from './constants';
 import { playerHitboxes } from './hitbox';
 import type { HitPart } from './hitbox';
 import { forwardVector } from './playerPhysics';
@@ -8,6 +8,8 @@ import type { PlayerPose, Vec3, World } from './types';
 export interface ShotTarget {
   id: string;
   pose: { x: number; y: number; z: number };
+  /** Crouching shrinks this target's hitbox bands (see playerHitboxes). */
+  crouch?: boolean;
 }
 
 export interface ShotResult {
@@ -20,8 +22,8 @@ export interface ShotResult {
   damage: number;
 }
 
-export function eyePosition(pose: { x: number; y: number; z: number }): Vec3 {
-  return { x: pose.x, y: pose.y + EYE_HEIGHT, z: pose.z };
+export function eyePosition(pose: { x: number; y: number; z: number; crouch?: boolean }): Vec3 {
+  return { x: pose.x, y: pose.y + (pose.crouch ? CROUCH_EYE_HEIGHT : EYE_HEIGHT), z: pose.z };
 }
 
 /** One hitscan ray from `from` along unit `dir`: nearest of voxels vs. body-part boxes; damage from `damage` by part. */
@@ -32,7 +34,7 @@ export function resolveRay(world: World, from: Vec3, dir: Vec3, targets: ShotTar
   let hitPlayerId: string | null = null;
   let part: HitPart | null = null;
   for (const target of targets) {
-    for (const hb of playerHitboxes(target.pose)) {
+    for (const hb of playerHitboxes(target.pose, target.crouch === true)) {
       const t01 = segmentVsAABB(from, far, hb.box);
       if (t01 === null) continue;
       const t = t01 * range;

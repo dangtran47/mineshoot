@@ -95,6 +95,7 @@ export class Hud {
   private readonly roundEl = el('div', 'round-banner hidden');
   private roundTimer = 0;
   private readonly centerMsg = el('div', 'center-msg hidden');
+  private readonly spectateEl = el('div', 'spectate hidden');
   private readonly overlay = el('div', 'overlay');
   private readonly teamRow = el('div', 'teams hidden');
   private readonly teamButtons = new Map<Team, HTMLButtonElement>();
@@ -134,7 +135,7 @@ export class Hud {
     this.charge.append(this.chargeFill);
 
     const title = el('h2', undefined, 'Click to play');
-    const help = el('p', undefined, 'WASD move · Space jump · Mouse aim · LMB attack (hold to keep slashing) · hold RMB to charge the heavy melee blow · walk over a glowing weapon drop to take it · Tab scoreboard · Esc unlock');
+    const help = el('p', undefined, 'WASD move · Space jump · Mouse aim · LMB attack (hold to keep slashing) · hold RMB to charge the heavy melee blow · walk over a glowing weapon drop to take it · dead: LMB/RMB watch another player · Tab scoreboard · Esc unlock');
     const leaveBtn = el('button', undefined, 'Leave match');
     leaveBtn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -169,6 +170,7 @@ export class Hud {
       this.roundEl,
       this.toastEl,
       this.carryEl,
+      this.spectateEl,
       this.centerMsg,
       this.scoreboard,
       this.overlay,
@@ -184,7 +186,7 @@ export class Hud {
   /** Controls hint under the weapon name, tailored to what the room allows (and to the training range's free weapon choice). */
   setWeaponRules(mode: WeaponMode, roomMode: RoomMode = 'match'): void {
     const picks: string[] = [];
-    if (roomMode === 'training' && weaponAllowed(mode, WEAPON_PRIMARY)) picks.push(`Z X C V pick ${PRIMARY_KINDS.map((k) => gunSpec(k).name).join(' / ')} · B Taser`);
+    if (roomMode === 'training' && weaponAllowed(mode, WEAPON_PRIMARY)) picks.push(`Z X C V N pick ${PRIMARY_KINDS.map((k) => gunSpec(k).name).join(' / ')} · B Taser`);
     if (meleeSelectable(roomMode, mode)) picks.push(`6–0 pick melee: ${MELEE_KINDS.map((k) => meleeStats(k).name).join(' / ')}`);
     const pick = picks.length > 0 ? picks.join(' · ') : 'grab weapon drops mid-arena';
     this.weaponHint.textContent =
@@ -394,6 +396,13 @@ export class Hud {
 
   hideDeath(): void {
     this.centerMsg.classList.add('hidden');
+  }
+
+  /** Whose eyes we are watching through while dead; null leaves the death cam label off. */
+  setSpectating(name: string | null): void {
+    this.spectateEl.classList.toggle('hidden', name === null);
+    if (name === null) return;
+    this.spectateEl.replaceChildren('Spectating ', el('b', undefined, name), el('span', 'hint', 'LMB next · RMB previous'));
   }
 
   /** Crosshair hit marker; headshots get the accented variant. */

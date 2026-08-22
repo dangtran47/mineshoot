@@ -33,6 +33,8 @@ export class PlayerSchema extends Schema {
   @type('boolean') charging = false;
   /** Reloading the gun. */
   @type('boolean') reloading = false;
+  /** Crouching (hold Ctrl/C): shorter hitbox, lower eye, half speed. Bots never crouch. */
+  @type('boolean') crouching = false;
   /** CTF: TEAM_RED / TEAM_BLUE; TEAM_NONE in other modes. */
   @type('uint8') team = TEAM_NONE;
   /** CTF: flags captured. */

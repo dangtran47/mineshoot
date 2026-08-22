@@ -171,6 +171,9 @@ input, select {
 .hud .center-msg .tags .badge { display: inline-flex; align-items: center; gap: 3px; }
 .hud .center-msg { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); text-align: center; font-size: 22px; text-shadow: 0 2px 4px #000; }
 .hud .center-msg .big { font-size: 40px; font-weight: 800; color: var(--danger); }
+/* Spectate label: who the dead player is watching, plus the cycling keys. */
+.hud .spectate { position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%); text-align: center; font-size: 17px; color: var(--text); text-shadow: 0 2px 4px #000; pointer-events: none; }
+.hud .spectate .hint { display: block; margin-top: 2px; font-size: 13px; color: var(--muted); }
 .hud .overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; pointer-events: auto; cursor: pointer; }
 .hud .overlay h2 { margin: 0; font-size: 28px; }
 .hud .overlay p { margin: 0; color: var(--muted); }

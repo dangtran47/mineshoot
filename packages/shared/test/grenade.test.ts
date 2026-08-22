@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EYE_HEIGHT } from '../src/constants';
+import { CROUCH_EYE_HEIGHT, EYE_HEIGHT } from '../src/constants';
 import { GRENADE_BLAST_RADIUS, GRENADE_DAMAGE_CENTER, GRENADE_DAMAGE_EDGE, GRENADE_FUSE_MS, GRENADE_RADIUS, GRENADE_THROW_MAX_SPEED, GRENADE_THROW_MIN_SPEED, blastDamage, explosionVictims, grenadeFuseDone, stepGrenade, throwGrenade, throwSpeed } from '../src/grenade';
 import { Block } from '../src/types';
 import { createWorld, setBlock } from '../src/world';
@@ -68,5 +68,24 @@ describe('grenade', () => {
     const v = explosionVictims(w, at, [near, far, behind]);
     expect(v.map((x) => x.id)).toEqual(['near']);
     expect(v[0].damage).toBeGreaterThan(70);
+  });
+});
+
+describe('throwGrenade while crouching', () => {
+  it('leaves from the crouched eye', () => {
+    const pose = { x: 5, y: 2, z: 5, yaw: 0, pitch: 0 };
+    const standing = throwGrenade(pose, 0);
+    const crouched = throwGrenade({ ...pose, crouch: true }, 0);
+    expect(standing.y).toBeCloseTo(2 + EYE_HEIGHT - 0.1);
+    expect(crouched.y).toBeCloseTo(2 + CROUCH_EYE_HEIGHT - 0.1);
+    expect(standing.y - crouched.y).toBeCloseTo(EYE_HEIGHT - CROUCH_EYE_HEIGHT);
+  });
+  it('does not change the throw direction or speed', () => {
+    const pose = { x: 5, y: 2, z: 5, yaw: 0.4, pitch: 0.2 };
+    const standing = throwGrenade(pose, 0);
+    const crouched = throwGrenade({ ...pose, crouch: true }, 0);
+    expect(crouched.vx).toBeCloseTo(standing.vx);
+    expect(crouched.vy).toBeCloseTo(standing.vy);
+    expect(crouched.vz).toBeCloseTo(standing.vz);
   });
 });

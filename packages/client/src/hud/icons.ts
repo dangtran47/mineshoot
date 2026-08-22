@@ -2,7 +2,7 @@
  * Pixel-art HUD icons rendered as inline SVG (16×16 grid → <rect> runs). No shipped assets,
  * crisp at any size, and '#' pixels use currentColor so CSS can tint them.
  */
-import { GUN_NONE, GUN_PISTOL, GUN_RIFLE, GUN_SHOTGUN, GUN_SMG, GUN_SNIPER, GUN_TASER, MELEE_AXE, MELEE_KATANA, MELEE_PICKAXE, MELEE_SCYTHE, MELEE_SWORD, WEAPON_GRENADE, WEAPON_MELEE, WEAPON_TASER, multiKillLabel, streakLabel } from '@mineshoot/shared';
+import { GUN_MACHINEGUN, GUN_NONE, GUN_PISTOL, GUN_RIFLE, GUN_SHOTGUN, GUN_SMG, GUN_SNIPER, GUN_TASER, MELEE_AXE, MELEE_KATANA, MELEE_PICKAXE, MELEE_SCYTHE, MELEE_SWORD, WEAPON_GRENADE, WEAPON_MELEE, WEAPON_TASER, multiKillLabel, streakLabel } from '@mineshoot/shared';
 import type { GunKind, KillAwards, MeleeKind } from '@mineshoot/shared';
 
 export const ICON_SIZE = 16;
@@ -16,7 +16,7 @@ const PALETTE: Record<string, string> = {
   y: '#ffd23f', // flame core
 };
 
-export type IconName = 'gun' | 'rifle' | 'smg' | 'shotgun' | 'sniper' | 'taser' | 'grenade' | 'sword' | 'axe' | 'katana' | 'scythe' | 'pickaxe' | 'headshot' | 'skull' | 'flame' | 'revenge' | 'shutdown';
+export type IconName = 'gun' | 'rifle' | 'smg' | 'shotgun' | 'sniper' | 'm249' | 'taser' | 'grenade' | 'sword' | 'axe' | 'katana' | 'scythe' | 'pickaxe' | 'headshot' | 'skull' | 'flame' | 'revenge' | 'shutdown';
 
 // prettier-ignore
 export const BITMAPS: Record<IconName, string[]> = {
@@ -104,6 +104,24 @@ export const BITMAPS: Record<IconName, string[]> = {
     '..bbb.####..#...',
     '....b.####..#...',
     '......####......',
+    '................',
+    '................',
+    '................',
+    '................',
+    '................',
+  ],
+  m249: [
+    '................',
+    '................',
+    '................',
+    '................',
+    '......###.......',
+    '#..#############',
+    '################',
+    'bb##############',
+    '.bb##.kkkkk.#.#.',
+    '....#.kkkkk.#.#.',
+    '......kkkkk.....',
     '................',
     '................',
     '................',
@@ -372,6 +390,7 @@ const GUN_ICONS: Record<GunKind, IconName> = {
   [GUN_SHOTGUN]: 'shotgun',
   [GUN_SNIPER]: 'sniper',
   [GUN_TASER]: 'taser',
+  [GUN_MACHINEGUN]: 'm249',
 };
 
 /** Icon name for a gun kind. */

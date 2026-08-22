@@ -72,6 +72,7 @@ interface PoseLike {
   yaw: number;
   pitch: number;
   epoch: number;
+  crouch: boolean;
 }
 
 function parsePoseLike(msg: unknown, b: Bounds): PoseLike | null {
@@ -86,6 +87,7 @@ function parsePoseLike(msg: unknown, b: Bounds): PoseLike | null {
     yaw: m.yaw,
     pitch: clamp(m.pitch, -Math.PI / 2, Math.PI / 2),
     epoch: m.epoch as number,
+    crouch: m.crouch === true, // absent (old clients) or anything else = standing
   };
 }
 

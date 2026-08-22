@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GUN_COOLDOWN_MS, GUN_DAMAGE, GUN_MAG_SIZE, GUN_RANGE, GUN_RELOAD_MS } from '../src/constants';
-import { GUN_KINDS, GUN_NONE, GUN_PISTOL, GUN_SHOTGUN, GUN_SNIPER, GUN_TASER, PRIMARY_KINDS, SPAWN_PRIMARY_KINDS, gunSpec, interruptedReloadAmmo, isGunKind, isPrimaryKind, pelletDirections, serverReloadMs, spawnPrimary } from '../src/guns';
+import { GUN_KINDS, GUN_MACHINEGUN, GUN_NONE, GUN_PISTOL, GUN_SHOTGUN, GUN_SNIPER, GUN_TASER, PRIMARY_KINDS, SPAWN_PRIMARY_KINDS, gunSpec, interruptedReloadAmmo, isGunKind, isPrimaryKind, pelletDirections, serverReloadMs, spawnPrimary } from '../src/guns';
 import { forwardVector } from '../src/playerPhysics';
 import { createRng } from '../src/rng';
 
@@ -17,14 +17,16 @@ describe('guns', () => {
       if (s.reloadMs > 0) expect(s.serverReloadMinMs).toBeLessThan(s.reloadMs);
     }
   });
-  it('primaries are rifle/smg/shotgun/sniper; the taser (own slot) is consumable and cannot reload', () => {
+  it('primaries are rifle/smg/shotgun/sniper/m249; the taser (own slot) is consumable and cannot reload', () => {
     expect(PRIMARY_KINDS).not.toContain(GUN_NONE);
     expect(PRIMARY_KINDS).not.toContain(GUN_PISTOL);
     expect(PRIMARY_KINDS).not.toContain(GUN_TASER);
     expect(isPrimaryKind(GUN_SNIPER)).toBe(true);
+    expect(isPrimaryKind(GUN_MACHINEGUN)).toBe(true);
     expect(isPrimaryKind(GUN_PISTOL)).toBe(false);
     expect(isPrimaryKind(GUN_TASER)).toBe(false);
-    expect(isGunKind(7)).toBe(false);
+    expect(isGunKind(GUN_MACHINEGUN)).toBe(true);
+    expect(isGunKind(8)).toBe(false);
     const t = gunSpec(GUN_TASER);
     expect(t.consumable).toBe(true);
     expect(t.magSize).toBe(2);
@@ -32,6 +34,16 @@ describe('guns', () => {
     expect(t.damage).toEqual({ head: 100, torso: 100, legs: 100 });
     expect(gunSpec(GUN_SNIPER).damage.torso).toBe(100);
     expect(gunSpec(GUN_SNIPER).zoom).toBeGreaterThan(1);
+  });
+  it('m249: full-auto machine gun — huge magazine, sustained fire, long punishing reload', () => {
+    const m = gunSpec(GUN_MACHINEGUN);
+    expect(m.name).toBe('M249');
+    expect(m.magSize).toBe(75);
+    expect(m.cooldownMs).toBe(100);
+    expect(m.reloadMs).toBe(4500);
+    expect(m.range).toBe(55);
+    expect(m.damage).toEqual({ head: 45, torso: 18, legs: 9 });
+    expect(m).toMatchObject({ pellets: 1, spreadDeg: 2.5, auto: true, zoom: 1, consumable: false, perShell: false });
   });
   it('unknown kinds fall back to the pistol spec', () => {
     expect(gunSpec(42 as never)).toBe(gunSpec(GUN_PISTOL));

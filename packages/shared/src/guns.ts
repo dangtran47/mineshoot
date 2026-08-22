@@ -16,10 +16,11 @@ export const GUN_SMG = 3;
 export const GUN_SHOTGUN = 4;
 export const GUN_SNIPER = 5;
 export const GUN_TASER = 6;
-export type GunKind = typeof GUN_NONE | typeof GUN_PISTOL | typeof GUN_RIFLE | typeof GUN_SMG | typeof GUN_SHOTGUN | typeof GUN_SNIPER | typeof GUN_TASER;
-export const GUN_KINDS: readonly GunKind[] = [GUN_PISTOL, GUN_RIFLE, GUN_SMG, GUN_SHOTGUN, GUN_SNIPER, GUN_TASER];
+export const GUN_MACHINEGUN = 7;
+export type GunKind = typeof GUN_NONE | typeof GUN_PISTOL | typeof GUN_RIFLE | typeof GUN_SMG | typeof GUN_SHOTGUN | typeof GUN_SNIPER | typeof GUN_TASER | typeof GUN_MACHINEGUN;
+export const GUN_KINDS: readonly GunKind[] = [GUN_PISTOL, GUN_RIFLE, GUN_SMG, GUN_SHOTGUN, GUN_SNIPER, GUN_TASER, GUN_MACHINEGUN];
 /** Kinds that can sit in the primary slot (drops / training keys); the taser has its own slot. */
-export const PRIMARY_KINDS: readonly GunKind[] = [GUN_RIFLE, GUN_SMG, GUN_SHOTGUN, GUN_SNIPER];
+export const PRIMARY_KINDS: readonly GunKind[] = [GUN_RIFLE, GUN_SMG, GUN_SHOTGUN, GUN_SNIPER, GUN_MACHINEGUN];
 
 export interface GunSpec {
   name: string;
@@ -60,6 +61,8 @@ export const GUN_STATS: Record<GunKind, GunSpec> = {
   [GUN_SNIPER]: spec({ name: 'Sniper', magSize: 4, cooldownMs: 1200, reloadMs: 2800, range: 60, damage: { head: 100, torso: 100, legs: 60 }, pellets: 1, spreadDeg: 0, auto: false, zoom: 3, consumable: false }),
   // Two charges, then it's gone.
   [GUN_TASER]: spec({ name: 'Taser', magSize: 2, cooldownMs: 1000, reloadMs: 0, range: 5, damage: { head: 100, torso: 100, legs: 100 }, pellets: 1, spreadDeg: 0, auto: false, zoom: 1, consumable: true }),
+  // Suppression LMG: huge belt, sustained full-auto, long punishing reload.
+  [GUN_MACHINEGUN]: spec({ name: 'M249', magSize: 75, cooldownMs: 100, reloadMs: 4500, range: 55, damage: { head: 45, torso: 18, legs: 9 }, pellets: 1, spreadDeg: 2.5, auto: true, zoom: 1, consumable: false }),
 };
 
 export function isGunKind(v: unknown): v is GunKind {

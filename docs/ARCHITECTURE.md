@@ -63,7 +63,7 @@ Pure TypeScript, `"exports": "./src/index.ts"` (consumed as source by Vite and
 | Melee | `sword.ts`, `melee.ts`, `drops.ts` | `MELEE_STATS` per `MeleeKind` → `attacks[AttackKind]` (`AttackSpec`: cone, reach, damage, sweep, cooldown, anim), `meleeStats()`, `attackSpec()`, `swordVictims(world, pose, targets, attack, kind)`, `swordDamage()`, `pickDropKind()`, `pickDropSpot()`, `canPickUp()`, drop cadence constants |
 | Match | `spawn.ts`, `ranking.ts`, `kills.ts` | `pickSpawn(points, enemies, rng)` (farthest-from-enemies with randomness), `unoccupiedSpawns()` (drops points someone already stands on, so simultaneous spawns never stack), `rankPlayers`, `rankCtf`, `kdRatio`, `KillTracker` (multi-kill / streak / shutdown awards) |
 | CTF | `ctf.ts` | `FlagState`, `flagTouch()`, `canScore()`, `canReturn()`, `carriedFlag()`, `teamSpawns()`, `pickTeam()`, `botRebalance()`, `matchWinner()`, `botCtfGoal()` (offence-first bot goal); teams (`TEAM_RED/BLUE`, `Team`, `otherTeam`, `teamName`) live in `protocol.ts` |
-| TD | `td.ts` | team elimination: `roundWinner(red, blue)` (per-team `{alive, inRound, ready}` → round outcome), `tdWeaponLoadout(weapons)` (the fixed ground-weapon row per side), `botTdGoal()` (gun → enemy → crossroads) |
+| TD | `td.ts` | team elimination: `roundWinner(red, blue)` (per-team `{alive, inRound, ready}` → round outcome), `tdWeaponLoadout(weapons)` (the fixed ground-weapon row per side), `tdTeamSpawns(spawns, base, sz)` (a team's half of the map), `botTdGoal()` (gun → enemy → crossroads) |
 | Bots | `bot.ts` | `createBot(rng, waypoints, { weapons, passive, skill })` → `{ compute(world, view, dt), reset() }`; `passive` = training dummy (faces the nearest enemy, never moves or attacks); `skill` (`BotSkill` in `protocol.ts`, profiles via `botSkillProfile()`) scales sight / turn rate / reaction / aim error / attack interval; `view.goal` / `view.carrying` drive CTF behaviour. Movement toward any destination goes through `nav.ts` |
 | Navigation | `nav.ts` | `standable()`, `nearestStandable(world, x, y, z)`, `findPath(world, from, to)` (A* over standable cells: step up 1 with a jump, drop ≤ `MAX_DROP`, diagonals only with both orthogonal cells free), `cellCentre()`; the bot re-plans every 1.5 s, when its destination moves 2 blocks or when it strays 3 blocks off the route |
 
@@ -364,7 +364,10 @@ corridor is base-to-base walkable for the bots). Td spawns are blade-only
 like the others) and grenades are 0 — every gun comes off the ground
 (`tdWeaponLoadout` lays the north row sniper/shotgun/SMG/rifle/SMG/shotgun/
 rifle/sniper and its exact reverse south). It shares all the CTF *team* machinery —
-`isTeamMode` gates team pick/switch, `teamSpawns`, no friendly fire, team
+`isTeamMode` gates team pick/switch, team spawns (td uses `tdTeamSpawns`: the
+team's whole half of the map, z-split — not the nearest-N `teamSpawns` of ctf,
+which with N above the ~10 points a side actually has spilled into the enemy
+end), no friendly fire, team
 colours, lobby team buttons, split scoreboard and team results — but has no
 flags and **no clocks**: `tickTimer` is skipped, `endsAt`/`timeLeftMs` stay 0,
 and rounds have no time limit.
@@ -413,7 +416,13 @@ crossroads centre.
 `screens/game.ts` per animation frame:
 
 1. `LocalPlayer.update(dt)` — accumulate, run `stepPlayer` substeps, place
-   camera (skipped while dead / not yet ready).
+   camera (skipped while dead / not yet ready). While dead, a spectate camera
+   then overwrites it: 1.5 s after the death (`game/spectateModel.ts` decides
+   who is watchable — team-mates only in ctf/td, anyone alive otherwise) the
+   camera moves to the watched player's interpolated pose
+   (`RemotePlayers.pose`) at their eye height, their body and our own view
+   model are hidden, and LMB/RMB cycle targets. All client-side: a spectator
+   sends nothing and sees nothing the nametags and minimap don't already show.
 2. `Weapons.update(now)` — auto-fire, charge auto-release, reload completion;
    fires the `WeaponEvents` callbacks that send `shoot/charge/swing/reload`.
 3. `RemotePlayers.update(now)` — sample each buffer at `now - 100 ms`, pose

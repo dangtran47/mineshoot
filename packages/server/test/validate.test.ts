@@ -48,7 +48,7 @@ describe('parseDurationMin', () => {
 });
 
 describe('parsePose / parseShoot', () => {
-  const good = { x: 10, y: 5, z: 10, yaw: 1, pitch: 0.2, epoch: 1, weapon: 1 };
+  const good = { x: 10, y: 5, z: 10, yaw: 1, pitch: 0.2, epoch: 1, weapon: 1, crouch: false };
   it('accepts a valid pose', () => {
     expect(parsePose(good)).toEqual(good);
   });
@@ -57,6 +57,15 @@ describe('parsePose / parseShoot', () => {
     expect(parsePose({ ...good, x: 'a' })).toBeNull();
     expect(parsePose({ ...good, y: NaN })).toBeNull();
     expect(parsePose({ ...good, epoch: 1.5 })).toBeNull();
+  });
+  it('carries the crouch stance through, coercing anything non-true to false', () => {
+    expect(parsePose({ ...good, crouch: true })!.crouch).toBe(true);
+    expect(parsePose({ ...good, crouch: 1 })!.crouch).toBe(false);
+    expect(parsePose({ ...good, crouch: 'yes' })!.crouch).toBe(false);
+    const { crouch: _omitted, ...noCrouch } = good;
+    expect(parsePose(noCrouch)!.crouch).toBe(false); // old clients
+    expect(parseShoot({ ...good, crouch: true })!.crouch).toBe(true);
+    expect(parseSwing({ ...good, crouch: true, attack: ATTACK_LIGHT })!.crouch).toBe(true);
   });
   it('clamps position/pitch and normalises weapon', () => {
     const p = parsePose({ ...good, x: -50, z: 999, pitch: 9, weapon: 'sword' })!;

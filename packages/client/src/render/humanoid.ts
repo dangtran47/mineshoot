@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { GUN_NONE, GUN_PISTOL, GUN_TASER, MELEE_SWORD, PLAYER_COLOR_COUNT, WEAPON_GRENADE, WEAPON_MELEE, WEAPON_PISTOL, WEAPON_PRIMARY, WEAPON_TASER } from '@mineshoot/shared';
+import { CROUCH_HEIGHT, GUN_NONE, GUN_PISTOL, GUN_TASER, MELEE_SWORD, PLAYER_COLOR_COUNT, PLAYER_HEIGHT, WEAPON_GRENADE, WEAPON_MELEE, WEAPON_PISTOL, WEAPON_PRIMARY, WEAPON_TASER } from '@mineshoot/shared';
 import type { GunKind, MeleeKind, SwingAnim, Weapon } from '@mineshoot/shared';
 import { HumanoidAnim } from './humanoidAnim';
 import { buildGrenadeProp, buildGunProp } from './gunProps';
@@ -21,8 +21,21 @@ const box = (w: number, h: number, d: number, color: number): THREE.Mesh => {
  * Blocky player: legs, torso, arms, head + a held-weapon prop. Group origin
  * is at the feet; rotate the group for yaw and the head for pitch.
  */
+/** Crouch squashes the body to this fraction of standing — the same factor playerHitboxes uses, so the model matches the boxes shots are tested against. */
+const CROUCH_SQUASH = CROUCH_HEIGHT / PLAYER_HEIGHT;
+/** Seconds-ish rate of the crouch ease (exponential approach). */
+const CROUCH_RATE = 14;
+
 export class Humanoid {
   readonly group = new THREE.Group();
+  /**
+   * All body parts live under this, so crouching is one scale.y on the group.
+   * The nametag hangs off `group` instead and stays unsquashed.
+   */
+  private readonly body = new THREE.Group();
+  private crouchTarget = 0;
+  private crouchT = 0;
+  private lastCrouchUpdate = 0;
   private readonly head: THREE.Mesh;
   private readonly legL: THREE.Mesh;
   private readonly legR: THREE.Mesh;
@@ -110,7 +123,8 @@ export class Humanoid {
     eyeR.position.x = 0.1;
     this.head.add(hair, eyeL, eyeR);
 
-    this.group.add(this.legL, this.legR, torso, this.armL, this.armR, this.head);
+    this.body.add(this.legL, this.legR, torso, this.armL, this.armR, this.head);
+    this.group.add(this.body);
     for (const m of [torso, this.armL, armMesh]) this.bodyMats.push(m.material as THREE.MeshLambertMaterial);
     for (const m of [this.legL, this.legR, hair]) this.trimMats.push(m.material as THREE.MeshLambertMaterial);
     this.setWeapon(0);
@@ -190,8 +204,17 @@ export class Humanoid {
     this.anim.shot(now);
   }
 
+  /** Server-synced `crouching`: eased in `update`, not snapped. */
+  setCrouching(on: boolean): void {
+    this.crouchTarget = on ? 1 : 0;
+  }
+
   /** Apply the time-driven weapon-arm animation; call once per frame. */
   update(now: number): void {
+    const dt = this.lastCrouchUpdate === 0 ? 0 : Math.min(0.1, (now - this.lastCrouchUpdate) / 1000);
+    this.lastCrouchUpdate = now;
+    this.crouchT += (this.crouchTarget - this.crouchT) * (1 - Math.exp(-CROUCH_RATE * dt));
+    this.body.scale.y = 1 - this.crouchT * (1 - CROUCH_SQUASH);
     const p = this.anim.pose(now);
     this.armR.rotation.x = p.armPitch;
     this.armR.rotation.z = p.armRoll;

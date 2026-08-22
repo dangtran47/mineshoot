@@ -1,4 +1,4 @@
-import { PLAYER_HEIGHT } from './constants';
+import { CROUCH_HEIGHT, PLAYER_HEIGHT } from './constants';
 import { eyePosition } from './gun';
 import { playerHitboxes } from './hitbox';
 import { ATTACK_HEAVY, ATTACK_LIGHT, MELEE_SWORD, attackSpec } from './melee';
@@ -56,7 +56,8 @@ export function swordVictims(
   let nearest: SwordHit | null = null;
   let nearestDist = Infinity;
   for (const target of targets) {
-    const chest = { x: target.pose.x, y: target.pose.y + PLAYER_HEIGHT * 0.6, z: target.pose.z };
+    const height = target.crouch ? CROUCH_HEIGHT : PLAYER_HEIGHT;
+    const chest = { x: target.pose.x, y: target.pose.y + height * 0.6, z: target.pose.z };
     const dx = chest.x - eye.x;
     const dy = chest.y - eye.y;
     const dz = chest.z - eye.z;
@@ -68,7 +69,7 @@ export function swordVictims(
       const los = raycastVoxels(world, eye, { x: dx / dist, y: dy / dist, z: dz / dist }, dist);
       if (los.hit) continue;
     }
-    const hit: SwordHit = { id: target.id, part: aimedPart(eye, reach, target.pose) };
+    const hit: SwordHit = { id: target.id, part: aimedPart(eye, reach, target.pose, target.crouch === true) };
     if (sweep) out.push(hit);
     else if (dist < nearestDist) {
       nearestDist = dist;
@@ -79,10 +80,10 @@ export function swordVictims(
 }
 
 /** 'head' if the aim segment first enters the head box, else 'body'. */
-function aimedPart(eye: Vec3, reach: Vec3, feet: Vec3): SwordPart {
+function aimedPart(eye: Vec3, reach: Vec3, feet: Vec3, crouch: boolean): SwordPart {
   let bestT = Infinity;
   let part: SwordPart = 'body';
-  for (const hb of playerHitboxes(feet)) {
+  for (const hb of playerHitboxes(feet, crouch)) {
     const t = segmentVsAABB(eye, reach, hb.box);
     if (t !== null && t < bestT) {
       bestT = t;

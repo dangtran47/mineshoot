@@ -1,4 +1,4 @@
-import { EYE_HEIGHT, GUN_RANGE, PLAYER_HEIGHT, SWORD_RANGE, WALK_SPEED } from './constants';
+import { CROUCH_HEIGHT, EYE_HEIGHT, GUN_RANGE, PLAYER_HEIGHT, SWORD_RANGE, WALK_SPEED } from './constants';
 import { DEFAULT_BOT_SKILL, DEFAULT_WEAPON_MODE, WEAPON_MELEE, WEAPON_PISTOL, WEAPON_PRIMARY, weaponAllowed } from './protocol';
 import { GUN_NONE, GUN_PISTOL, gunSpec } from './guns';
 import type { GunKind } from './guns';
@@ -9,11 +9,14 @@ import { flatForward, flatRight } from './playerPhysics';
 import { raycastVoxels } from './raycast';
 import type { MoveInput, PlayerPhysState, SpawnPoint, Vec3, World } from './types';
 
+/** Where a bot aims: 60 % of the target's height, so it tracks a crouching player down instead of shooting where the head used to be. */
+const chestHeight = (crouch?: boolean): number => (crouch ? CROUCH_HEIGHT : PLAYER_HEIGHT) * 0.6;
+
 /** What the bot can see this tick. */
 export interface BotView {
   self: PlayerPhysState;
   /** Other alive players (never includes the bot itself, nor teammates in CTF). */
-  enemies: { id: string; x: number; y: number; z: number }[];
+  enemies: { id: string; x: number; y: number; z: number; crouch?: boolean }[];
   now: number;
   /** CTF: where to head when nothing else is going on (a flag, the base); null/absent = wander. */
   goal?: Vec3 | null;
@@ -274,9 +277,9 @@ export function createBot(rng: () => number, waypoints: SpawnPoint[], options: B
 
       const eye = { x: self.x, y: self.y + EYE_HEIGHT, z: self.z };
       // Acquire: nearest enemy with line of sight.
-      let best: { id: string; x: number; y: number; z: number; d: number } | null = null;
+      let best: { id: string; x: number; y: number; z: number; crouch?: boolean; d: number } | null = null;
       for (const e of enemies) {
-        const chest = { x: e.x, y: e.y + PLAYER_HEIGHT * 0.6, z: e.z };
+        const chest = { x: e.x, y: e.y + chestHeight(e.crouch), z: e.z };
         const dx = chest.x - eye.x;
         const dy = chest.y - eye.y;
         const dz = chest.z - eye.z;
@@ -322,7 +325,7 @@ export function createBot(rng: () => number, waypoints: SpawnPoint[], options: B
           navigate(world, self, goal, input, dt, now, true);
         }
       } else if (best) {
-        const chest = { x: best.x, y: best.y + PLAYER_HEIGHT * 0.6, z: best.z };
+        const chest = { x: best.x, y: best.y + chestHeight(best.crouch), z: best.z };
         const dx = chest.x - eye.x;
         const dy = chest.y - eye.y;
         const dz = chest.z - eye.z;

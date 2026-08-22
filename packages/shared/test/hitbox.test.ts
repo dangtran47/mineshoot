@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GUN_DAMAGE, HEAD_HALF_W, LEGS_TOP, PLAYER_HALF_W, PLAYER_HEIGHT, TORSO_TOP } from '../src/constants';
+import { CROUCH_HEIGHT, GUN_DAMAGE, HEAD_HALF_W, LEGS_TOP, PLAYER_HALF_W, PLAYER_HEIGHT, TORSO_TOP } from '../src/constants';
 import { damageForPart, playerHitboxes } from '../src/hitbox';
 
 describe('playerHitboxes', () => {
@@ -21,6 +21,28 @@ describe('playerHitboxes', () => {
     expect(byPart.torso.min.z).toBeCloseTo(feet.z - PLAYER_HALF_W);
     expect(byPart.head.max.x - feet.x).toBeCloseTo(HEAD_HALF_W);
     expect(HEAD_HALF_W).toBeLessThan(PLAYER_HALF_W);
+  });
+});
+
+describe('playerHitboxes crouched', () => {
+  const feet = { x: 10, y: 5, z: 20 };
+  const s = CROUCH_HEIGHT / PLAYER_HEIGHT;
+  const byPart = Object.fromEntries(playerHitboxes(feet, true).map((h) => [h.part, h.box]));
+
+  it('scales every band by CROUCH_HEIGHT / PLAYER_HEIGHT, still gapless', () => {
+    expect(byPart.legs.min.y).toBe(5);
+    expect(byPart.legs.max.y).toBeCloseTo(5 + LEGS_TOP * s);
+    expect(byPart.torso.min.y).toBeCloseTo(5 + LEGS_TOP * s);
+    expect(byPart.torso.max.y).toBeCloseTo(5 + TORSO_TOP * s);
+    expect(byPart.head.min.y).toBeCloseTo(5 + TORSO_TOP * s);
+    expect(byPart.head.max.y).toBeCloseTo(5 + CROUCH_HEIGHT);
+  });
+  it('keeps the standing widths', () => {
+    expect(byPart.legs.max.x - feet.x).toBeCloseTo(PLAYER_HALF_W);
+    expect(byPart.head.max.x - feet.x).toBeCloseTo(HEAD_HALF_W);
+  });
+  it('puts the crouched head below the standing torso top', () => {
+    expect(byPart.head.max.y).toBeLessThan(5 + TORSO_TOP);
   });
 });
 

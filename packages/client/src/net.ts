@@ -32,6 +32,8 @@ export interface NetPlayer {
   shielded: boolean;
   charging: boolean;
   reloading: boolean;
+  /** Crouching (hold Ctrl/C): shorter hitbox, lower eye, half speed. */
+  crouching: boolean;
   /** CTF: TEAM_RED / TEAM_BLUE (TEAM_NONE elsewhere). */
   team: number;
   /** CTF: flags captured. */

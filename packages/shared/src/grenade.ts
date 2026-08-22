@@ -1,6 +1,7 @@
-import { EYE_HEIGHT, GRAVITY, LEGS_TOP, TORSO_TOP } from './constants';
+import { GRAVITY, LEGS_TOP, TORSO_TOP } from './constants';
 import { aabbCenter } from './aabb';
 import { moveAABB } from './collision';
+import { eyePosition } from './gun';
 import type { ShotTarget } from './gun';
 import { forwardVector } from './playerPhysics';
 import { raycastVoxels } from './raycast';
@@ -54,9 +55,10 @@ export function throwSpeed(charge: number): number {
 export function throwGrenade(pose: PlayerPose, now: number, charge = 1): GrenadeState {
   const d = forwardVector(pose.yaw, pose.pitch);
   const v = throwSpeed(charge);
+  const eye = eyePosition(pose);
   return {
     x: pose.x + d.x * 0.4,
-    y: pose.y + EYE_HEIGHT - 0.1 + d.y * 0.4,
+    y: eye.y - 0.1 + d.y * 0.4,
     z: pose.z + d.z * 0.4,
     vx: d.x * v,
     vy: d.y * v,

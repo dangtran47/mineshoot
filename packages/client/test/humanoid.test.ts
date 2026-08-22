@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { MELEE_KATANA, MELEE_SWORD, WEAPON_PISTOL, WEAPON_MELEE } from '@mineshoot/shared';
+import { CROUCH_HEIGHT, MELEE_KATANA, MELEE_SWORD, PLAYER_HEIGHT, WEAPON_PISTOL, WEAPON_MELEE } from '@mineshoot/shared';
 import type { MeleeKind } from '@mineshoot/shared';
 import { Humanoid, PLAYER_COLORS } from '../src/render/humanoid';
 
@@ -82,5 +82,65 @@ describe('Humanoid.setColor', () => {
     expect(colors).toContain(dark(2));
     expect(colors).not.toContain(PLAYER_COLORS[0]);
     expect(colors).not.toContain(dark(0));
+  });
+});
+
+/** World-space top of the tallest visible body mesh (the head, at PLAYER_HEIGHT standing). */
+function topY(h: Humanoid): number {
+  h.group.updateMatrixWorld(true);
+  let maxY = -Infinity;
+  h.group.traverse((o) => {
+    if (!(o instanceof THREE.Mesh) || !o.visible) return;
+    const g = o.geometry as THREE.BoxGeometry;
+    for (const yEnd of [-g.parameters.height / 2, g.parameters.height / 2]) {
+      maxY = Math.max(maxY, new THREE.Vector3(0, yEnd, 0).applyMatrix4(o.matrixWorld).y);
+    }
+  });
+  return maxY;
+}
+
+describe('Humanoid crouch', () => {
+  const settle = (h: Humanoid, from = 0): void => {
+    // Walk the lerp well past its time constant.
+    for (let t = from; t <= from + 1000; t += 16) {
+      h.setPose(0, 0, 0, 0, 0, 0.016);
+      h.update(t);
+    }
+  };
+
+  const SQUASH = CROUCH_HEIGHT / PLAYER_HEIGHT;
+
+  it('squashes the whole body by CROUCH_HEIGHT / PLAYER_HEIGHT', () => {
+    const h = new Humanoid(0);
+    settle(h);
+    const standing = topY(h);
+    expect(standing).toBeGreaterThan(PLAYER_HEIGHT - 0.1); // head (plus hair) tops out at body height
+    h.setCrouching(true);
+    settle(h, 2000);
+    expect(topY(h)).toBeCloseTo(standing * SQUASH, 3);
+  });
+
+  it('stands back up when the flag clears', () => {
+    const h = new Humanoid(0);
+    settle(h);
+    const standing = topY(h);
+    h.setCrouching(true);
+    settle(h, 2000);
+    expect(topY(h)).toBeCloseTo(standing * SQUASH, 3);
+    h.setCrouching(false);
+    settle(h, 4000);
+    expect(topY(h)).toBeCloseTo(standing, 3);
+  });
+
+  it('eases rather than snapping', () => {
+    const h = new Humanoid(0);
+    settle(h);
+    const standing = topY(h);
+    h.setCrouching(true);
+    h.setPose(0, 0, 0, 0, 0, 0.016);
+    h.update(1016); // one frame in
+    const afterOneFrame = topY(h);
+    expect(afterOneFrame).toBeLessThan(standing);
+    expect(afterOneFrame).toBeGreaterThan(standing * SQUASH + 0.1);
   });
 });

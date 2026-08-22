@@ -125,6 +125,11 @@ export class ViewModel {
     return holder;
   }
 
+  /** Hide our own hands entirely (spectating: the camera sits in somebody else's head). */
+  setHidden(hidden: boolean): void {
+    this.group.visible = !hidden;
+  }
+
   setWeapon(w: Weapon): void {
     this.slot = w;
     this.pistol.visible = w === WEAPON_PISTOL;

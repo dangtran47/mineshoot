@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {
   EYE_HEIGHT,
+  CROUCH_SPEED_SCALE,
   FLAG_CARRY_SPEED_SCALE,
   GRENADE_MAX,
   GUN_NONE,
@@ -59,6 +60,8 @@ import { PointerLook } from '../input/pointerLock';
 import { LocalPlayer } from '../game/localPlayer';
 import { RecoilController } from '../game/recoil';
 import { RemotePlayers } from '../game/remotePlayers';
+import { cycleTarget, eligibleTargets, retainTarget, spectateReady } from '../game/spectateModel';
+import type { SpectateCandidate } from '../game/spectateModel';
 import { Weapons } from '../game/weapons';
 import { Hud } from '../hud/hud';
 import { Minimap } from '../hud/minimap';
@@ -67,8 +70,8 @@ import { awardBadges } from '../hud/icons';
 
 /** Keys 6–0 pick a melee weapon directly where the room allows it (training range, offline sandbox). */
 const MELEE_PICK_KEYS: readonly string[] = ['Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0'];
-/** Z X C V pick a primary gun, B the taser, directly (training range, offline sandbox). */
-const PRIMARY_PICK_KEYS: readonly string[] = ['KeyZ', 'KeyX', 'KeyC', 'KeyV'];
+/** Z X C V N pick a primary gun, B the taser, directly (training range, offline sandbox). */
+const PRIMARY_PICK_KEYS: readonly string[] = ['KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyN'];
 
 /** Team-mode outcome handed to the results screen: captures (ctf) or round wins (td). */
 export interface TeamSummary {
@@ -132,6 +135,8 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
   const local = new LocalPlayer(world, camera, keys, look, spawn.x, spawn.y, spawn.z, spawn.yaw);
   let epoch = initial?.spawnEpoch ?? 1;
   let diedAt = 0;
+  /** While dead: the player whose eyes we are watching through, or null (own death cam). */
+  let spectateTarget: string | null = null;
   let ended = false;
   /** TD: no moving or attacking until this time after a spawn (the 3-2-1 countdown). */
   let frozenUntil = 0;
@@ -145,6 +150,8 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
   if (td) hud.setTimerVisible(false);
 
   // --- weapons ---
+  /** Ctrl/C held this frame; read by the frame loop and sent on every pose-like message. */
+  let crouching = false;
   const currentPose = (): Omit<ThrowMsg, 'charge'> => ({
     x: local.state.x,
     y: local.state.y,
@@ -152,6 +159,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     yaw: look.yaw,
     pitch: look.pitch,
     epoch,
+    crouch: crouching,
   });
   const muzzle = (): THREE.Vector3 => {
     // The view model's actual barrel tip; the hand-tuned offset only covers slots with no gun out.
@@ -251,8 +259,31 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     hud.toast(gunSpec(kind).name);
   };
 
+  // --- spectate (dead players watch somebody else's first-person view) ---
+  const spectateCandidates = (): SpectateCandidate[] => {
+    const list: SpectateCandidate[] = [];
+    room?.state.players.forEach((p, id) => list.push({ id, alive: p.alive, team: p.team }));
+    return list;
+  };
+  const spectateEligible = (): string[] => eligibleTargets(spectateCandidates(), meId, teamMode, meNet()?.team ?? TEAM_NONE);
+  /** Move the spectate camera to `next` (null = back to our own death cam) and dress the view for it. */
+  const setSpectateTarget = (next: string | null): void => {
+    if (next === spectateTarget) return;
+    if (spectateTarget) remotes.setHidden(spectateTarget, false);
+    if (next) remotes.setHidden(next, true);
+    spectateTarget = next;
+    viewModel.setHidden(next !== null);
+    const p = next ? room?.state.players.get(next) : undefined;
+    hud.setSpectating(p ? displayName(p.name, p.isBot) : null);
+  };
+
   // --- input wiring ---
   look.onMouseDown = (b) => {
+    // Dead: the mouse cycles who we are watching instead of firing.
+    if (!local.alive && spectateTarget !== null) {
+      if (b === 0 || b === 2) setSpectateTarget(cycleTarget(spectateEligible(), spectateTarget, b === 0 ? 1 : -1));
+      return;
+    }
     if (!local.alive || (td && performance.now() < frozenUntil)) return;
     if (b === 0) weapons.mouseDown(performance.now());
     else if (b === 2) weapons.altDown(performance.now());
@@ -261,7 +292,9 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     if (b === 0) weapons.mouseUp(performance.now());
     else if (b === 2) weapons.altUp(performance.now());
   };
-  look.onWheel = (deltaY) => weapons.next(deltaY > 0 ? 1 : -1);
+  look.onWheel = (deltaY) => {
+    if (local.alive) weapons.next(deltaY > 0 ? 1 : -1);
+  };
   // "Click to play": the server spawns us only once we have locked the pointer for the first time,
   // so nobody can be hurt while still staring at the overlay. Later re-locks (after Esc) don't re-arm it.
   let readySent = false;
@@ -344,6 +377,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
         weapons.setGun(me.gun as GunKind);
         if (weapons.gun !== GUN_NONE) weapons.select(WEAPON_PRIMARY);
         hud.hideDeath();
+        setSpectateTarget(null); // back in our own body: unhide whoever we watched, hands back on
         renderer.domElement.classList.remove('dead');
       } else if (!me.alive && local.alive) {
         // Either killed, or (epoch 0) not yet spawned because we haven't clicked to play.
@@ -605,8 +639,24 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
         }
       }
     }
-    const speedScale = Math.min(weapons.charging ? weapons.chargeSpeedScale : 1, carrying !== null ? FLAG_CARRY_SPEED_SCALE : 1);
-    const moving = local.update(dt, inputEnabled, speedScale);
+    crouching = inputEnabled && local.alive && !frozen && (keys.isDown('ControlLeft') || keys.isDown('KeyC'));
+    const speedScale = Math.min(
+      weapons.charging ? weapons.chargeSpeedScale : 1,
+      carrying !== null ? FLAG_CARRY_SPEED_SCALE : 1,
+      crouching ? CROUCH_SPEED_SCALE : 1,
+    );
+    const moving = local.update(dt, inputEnabled, speedScale, crouching);
+    // Dead: after the death overlay has had its moment, sit in a team-mate's (or anyone's,
+    // in a free-for-all) head. `local.update` just wrote the camera, so we simply overwrite it.
+    if (!local.alive && epoch > 0) {
+      const eligible = spectateEligible();
+      if (spectateTarget !== null || spectateReady(diedAt, now)) setSpectateTarget(retainTarget(eligible, spectateTarget));
+    }
+    const specPose = spectateTarget !== null ? remotes.pose(spectateTarget, now) : null;
+    if (specPose) {
+      camera.position.set(specPose.x, specPose.y + EYE_HEIGHT, specPose.z);
+      camera.rotation.set(specPose.pitch, specPose.yaw, 0, 'YXZ');
+    }
     if (local.alive) weapons.update(now);
     recoil.update(dt, now);
     const charge = weapons.chargeFraction(now);
@@ -618,8 +668,8 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     const usable: Record<number, boolean> = {};
     for (const w of WEAPONS) usable[w] = weapons.canUse(w);
     hud.setSlots(usable, weapons.current);
-    // Sniper zoom: narrow the FOV while RMB is held.
-    const zoom = weapons.zoomFactor;
+    // Sniper zoom: narrow the FOV while RMB is held (dead, RMB is spectate-previous instead).
+    const zoom = local.alive ? weapons.zoomFactor : 1;
     if (camera.fov !== baseFov / zoom) {
       camera.fov = baseFov / zoom;
       camera.updateProjectionMatrix();
@@ -630,8 +680,11 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     viewModel.update(dt, moving && local.state.onGround);
     remotes.update(now, {
       world,
-      eye: { x: local.state.x, y: local.state.y + EYE_HEIGHT, z: local.state.z },
-      dir: forwardVector(look.yaw, look.pitch),
+      // Nametags are gated by what the rendered viewpoint sees — ours, or the spectated player's.
+      eye: specPose
+        ? { x: specPose.x, y: specPose.y + EYE_HEIGHT, z: specPose.z }
+        : { x: local.state.x, y: local.state.y + EYE_HEIGHT, z: local.state.z },
+      dir: specPose ? forwardVector(specPose.yaw, specPose.pitch) : forwardVector(look.yaw, look.pitch),
       team: meNet()?.team ?? TEAM_NONE,
     });
     drops.update(now);
@@ -732,7 +785,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
 
   if (import.meta.env.DEV) {
     // Dev-only hook for the headless smoke test (scripts/smoke.mjs); stripped from production builds.
-    (window as unknown as { __mineshoot?: unknown }).__mineshoot = { room, local, look, weapons, hud, ready: sendReady, pickMelee, pickPrimary };
+    (window as unknown as { __mineshoot?: unknown }).__mineshoot = { room, local, look, weapons, hud, camera, ready: sendReady, pickMelee, pickPrimary };
   }
 
   return { dispose: finish };

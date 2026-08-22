@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
-import { Block, TEAM_BLUE, TEAM_NONE, TEAM_RED, createWorld, setBlock } from '@mineshoot/shared';
+import { Block, INTERP_DELAY_MS, TEAM_BLUE, TEAM_NONE, TEAM_RED, createWorld, setBlock } from '@mineshoot/shared';
 import type { World } from '@mineshoot/shared';
 import type { NetPlayer } from '../src/net';
 import { PLAYER_COLORS } from '../src/render/humanoid';
@@ -34,6 +34,7 @@ const player = (over: Partial<NetPlayer> = {}): NetPlayer => ({
   shielded: false,
   charging: false,
   reloading: false,
+  crouching: false,
   team: TEAM_NONE,
   captures: 0,
   ...over,
@@ -91,6 +92,50 @@ describe('RemotePlayers.muzzleWorld', () => {
   });
 });
 
+describe('RemotePlayers.pose', () => {
+  it('gives the interpolated pose at the render time, null for a stranger', () => {
+    const rp = new RemotePlayers();
+    rp.add('a', player({ x: 0, y: 1, z: 0 }));
+    // add() seeds the buffer at performance.now(); stay ahead of it so the history is ordered.
+    const t0 = performance.now() + 1000;
+    rp.snapshot('a', player({ x: 0, y: 1, z: 0, yaw: 0, pitch: 0 }), t0);
+    rp.snapshot('a', player({ x: 4, y: 1, z: 0, yaw: 1, pitch: 0.5 }), t0 + 100);
+    // renderT = now - INTERP_DELAY_MS lands halfway between the two samples.
+    const p = rp.pose('a', t0 + 50 + INTERP_DELAY_MS);
+    expect(p).not.toBeNull();
+    expect(p!.x).toBeCloseTo(2);
+    expect(p!.yaw).toBeCloseTo(0.5);
+    expect(p!.pitch).toBeCloseTo(0.25);
+    expect(rp.pose('nobody', t0 + 50 + INTERP_DELAY_MS)).toBeNull();
+    rp.dispose();
+  });
+});
+
+describe('RemotePlayers.setHidden', () => {
+  it('hides a living player and keeps them hidden across snapshots, until unhidden', () => {
+    const rp = new RemotePlayers();
+    rp.add('a', player());
+    const body = (): boolean => rp.group.children[0].visible;
+    expect(body()).toBe(true);
+    rp.setHidden('a', true);
+    expect(body()).toBe(false);
+    rp.snapshot('a', player({ alive: true }), 1000);
+    expect(body()).toBe(false);
+    rp.setHidden('a', false);
+    expect(body()).toBe(true);
+    rp.dispose();
+  });
+
+  it('leaves a dead player hidden after unhiding', () => {
+    const rp = new RemotePlayers();
+    rp.add('a', player({ alive: false }));
+    rp.setHidden('a', true);
+    rp.setHidden('a', false);
+    expect(rp.group.children[0].visible).toBe(false);
+    rp.dispose();
+  });
+});
+
 describe('RemotePlayers nametag gating', () => {
   it('shows the tag only while the crosshair rests on that player', () => {
     const rp = new RemotePlayers();
@@ -130,6 +175,28 @@ describe('RemotePlayers nametag gating', () => {
     const w = flatWorld();
     rp.update(0, { world: w, eye, dir: { x: 0, y: 0, z: 1 }, team: TEAM_RED });
     expect(tagSprite(rp).visible).toBe(false);
+    rp.dispose();
+  });
+});
+
+describe('RemotePlayers crouch', () => {
+  it('drops the nametag when a player crouches and raises it again', () => {
+    const rp = new RemotePlayers();
+    rp.add('a', player());
+    const standingY = tagSprite(rp).position.y;
+    rp.snapshot('a', player({ crouching: true }), 1000);
+    expect(tagSprite(rp).position.y).toBeLessThan(standingY);
+    rp.snapshot('a', player({ crouching: false }), 1100);
+    expect(tagSprite(rp).position.y).toBe(standingY);
+    rp.dispose();
+  });
+
+  it('starts an already-crouching player crouched', () => {
+    const rp = new RemotePlayers();
+    rp.add('a', player({ crouching: true }));
+    const crouchedY = tagSprite(rp).position.y;
+    rp.snapshot('a', player({ crouching: false }), 1000);
+    expect(tagSprite(rp).position.y).toBeGreaterThan(crouchedY);
     rp.dispose();
   });
 });

@@ -30,6 +30,7 @@ import {
   isTeamMode,
   pickTeam,
   roundWinner,
+  tdTeamSpawns,
   tdWeaponLoadout,
   teamSpawns,
   PHYSICS_DT,
@@ -86,7 +87,6 @@ import {
   pelletDirections,
   pickSpawn,
   resolveRay,
-  TD_TEAM_SPAWN_COUNT,
   unoccupiedSpawns,
   serverReloadMs,
   spawnPrimary,
@@ -430,7 +430,7 @@ export class ArenaRoom extends Room<RoomState> {
       if (meta && this.frozen(meta, now)) continue;
       const enemies: BotView['enemies'] = [];
       for (const [sid, other] of this.state.players) {
-        if (sid !== id && this.targetable(sid, other, now) && !this.sameTeam(p, other)) enemies.push({ id: sid, x: other.x, y: other.y, z: other.z });
+        if (sid !== id && this.targetable(sid, other, now) && !this.sameTeam(p, other)) enemies.push({ id: sid, x: other.x, y: other.y, z: other.z, crouch: other.crouching });
       }
       const view: BotView = { self: rt.phys, enemies, now, gun: p.gun as GunKind, pistol: p.pistol !== GUN_NONE };
       if (this.ctf) {
@@ -504,12 +504,15 @@ export class ArenaRoom extends Room<RoomState> {
 
   // --- messages ---
 
-  private applyPose(p: PlayerSchema, m: { x: number; y: number; z: number; yaw: number; pitch: number }): void {
+  private applyPose(p: PlayerSchema, m: { x: number; y: number; z: number; yaw: number; pitch: number; crouch?: boolean }): void {
     if (p.x !== m.x) p.x = m.x;
     if (p.y !== m.y) p.y = m.y;
     if (p.z !== m.z) p.z = m.z;
     if (p.yaw !== m.yaw) p.yaw = m.yaw;
     if (p.pitch !== m.pitch) p.pitch = m.pitch;
+    // Bots pass a PlayerPhysState with no stance, so coerce rather than assign.
+    const crouch = m.crouch === true;
+    if (p.crouching !== crouch) p.crouching = crouch;
   }
 
   /** The player may act only while alive, in the current spawn epoch, during play. */
@@ -537,7 +540,7 @@ export class ArenaRoom extends Room<RoomState> {
     }
   }
 
-  /** Mirror transient meta timers into the synced schema (charging / reloading). */
+  /** Mirror transient meta timers into the synced schema (charging / reloading / crouching). */
   private syncFlags(id: string, p: PlayerSchema, now: number): void {
     const meta = this.meta.get(id);
     if (!meta) return;
@@ -545,6 +548,8 @@ export class ArenaRoom extends Room<RoomState> {
     const reloading = p.alive && Object.values(meta.reloadDoneAt).some((t) => t > 0 && now < t);
     if (p.charging !== charging) p.charging = charging;
     if (p.reloading !== reloading) p.reloading = reloading;
+    // The dead send no poses, so a stance held at death would stick until the next one.
+    if (!p.alive && p.crouching) p.crouching = false;
   }
 
   /** TD: still inside the post-spawn countdown — attacks are dropped, bots stand still. */
@@ -570,7 +575,7 @@ export class ArenaRoom extends Room<RoomState> {
     for (const [sid, other] of this.state.players) {
       if (sid === id || !this.targetable(sid, other, now)) continue;
       if (self && this.sameTeam(self, other)) continue;
-      out.push({ id: sid, pose: { x: other.x, y: other.y, z: other.z } });
+      out.push({ id: sid, pose: { x: other.x, y: other.y, z: other.z }, crouch: other.crouching });
     }
     return out;
   }
@@ -766,7 +771,7 @@ export class ArenaRoom extends Room<RoomState> {
     // Enemies (no friendly fire in CTF) plus the thrower: your own grenade hurts you.
     const targets = this.targetsExcluding(owner, now);
     const self = this.state.players.get(owner);
-    if (self && this.targetable(owner, self, now)) targets.push({ id: owner, pose: { x: self.x, y: self.y, z: self.z } });
+    if (self && this.targetable(owner, self, now)) targets.push({ id: owner, pose: { x: self.x, y: self.y, z: self.z }, crouch: self.crouching });
     const victims = explosionVictims(this.world, at, targets);
     const msg: ExplodeMsg = { ownerId: owner, ...at, victims };
     this.broadcast(MSG.explode, msg);
@@ -969,10 +974,11 @@ export class ArenaRoom extends Room<RoomState> {
     this.broadcast(MSG.kill, msg);
   }
 
-  /** Spawn points available to a player: teams (ctf/td) respawn near their own base (td squads respawn together, so they get a bigger pool). */
+  /** Spawn points available to a player: ctf respawns near the own base; td squads respawn together, so they get their whole half of the map. */
   private spawnsFor(p: PlayerSchema): SpawnPoint[] {
     if (!this.teams) return this.spawnPoints;
-    return teamSpawns(this.spawnPoints, this.bases[p.team as Team], this.td ? TD_TEAM_SPAWN_COUNT : undefined);
+    const base = this.bases[p.team as Team];
+    return this.td ? tdTeamSpawns(this.spawnPoints, base, this.world.sz) : teamSpawns(this.spawnPoints, base);
   }
 
   /** Training dummies stand on the central plateau, spaced out like drops; everyone else uses spawn points not already stood on. */

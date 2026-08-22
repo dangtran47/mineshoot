@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { EYE_HEIGHT, GUN_RANGE, HEAD_HALF_W } from '../src/constants';
-import { resolveShot } from '../src/gun';
+import { CROUCH_EYE_HEIGHT, CROUCH_HEIGHT, EYE_HEIGHT, GUN_RANGE, HEAD_HALF_W, PLAYER_HEIGHT } from '../src/constants';
+import { eyePosition, resolveShot } from '../src/gun';
 import { Block } from '../src/types';
 import { createWorld, setBlock } from '../src/world';
 
@@ -73,5 +73,38 @@ describe('resolveShot', () => {
   it('aims with pitch', () => {
     const up = { ...shooter, pitch: Math.PI / 4 };
     expect(resolveShot(w, up, [target], GUN_RANGE).hitPlayerId).toBeNull();
+  });
+});
+
+describe('resolveShot vs. a crouched target', () => {
+  const crouched = { ...target, crouch: true };
+
+  it('misses over the head at standing-head height', () => {
+    const r = resolveShot(w, { ...shooter, pitch: pitchFor(1.5) }, [crouched], GUN_RANGE);
+    expect(r.hitPlayerId).toBeNull();
+    // …and would have been a headshot on a standing target.
+    expect(resolveShot(w, { ...shooter, pitch: pitchFor(1.5) }, [target], GUN_RANGE).part).toBe('head');
+  });
+  it('hits the head at the crouched head band', () => {
+    const r = resolveShot(w, { ...shooter, pitch: pitchFor(1.05) }, [crouched], GUN_RANGE);
+    expect(r.hitPlayerId).toBe('a');
+    expect(r.part).toBe('head');
+  });
+  it('shifts the bands down: chest height is torso standing, head crouched', () => {
+    expect(resolveShot(w, { ...shooter, pitch: pitchFor(1.0) }, [target], GUN_RANGE).part).toBe('torso');
+    expect(resolveShot(w, { ...shooter, pitch: pitchFor(1.0) }, [crouched], GUN_RANGE).part).toBe('head');
+  });
+  it('leaves standing targets alone when the flag is absent or false', () => {
+    expect(resolveShot(w, { ...shooter, pitch: pitchFor(1.5) }, [{ ...target, crouch: false }], GUN_RANGE).part).toBe('head');
+  });
+});
+
+describe('eyePosition', () => {
+  it('sits at EYE_HEIGHT standing and CROUCH_EYE_HEIGHT crouched', () => {
+    expect(eyePosition({ x: 1, y: 5, z: 2 }).y).toBeCloseTo(5 + EYE_HEIGHT);
+    expect(eyePosition({ x: 1, y: 5, z: 2, crouch: true }).y).toBeCloseTo(5 + CROUCH_EYE_HEIGHT);
+  });
+  it('keeps the same head clearance in both stances', () => {
+    expect(PLAYER_HEIGHT - EYE_HEIGHT).toBeCloseTo(CROUCH_HEIGHT - CROUCH_EYE_HEIGHT);
   });
 });

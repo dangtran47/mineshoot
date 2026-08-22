@@ -6,6 +6,7 @@ import type { NetPlayer } from '../net';
 import { Humanoid } from '../render/humanoid';
 import { createNametag } from '../render/nametag';
 import { SnapshotBuffer } from './interpolation';
+import type { Pose } from './interpolation';
 import { nametagVisible } from './nametagVisibility';
 
 interface Remote {
@@ -17,11 +18,18 @@ interface Remote {
   melee: MeleeKind;
   gun: GunKind;
   visible: boolean;
+  /** Spectating this player: their own body must stay out of their own camera. */
+  hidden: boolean;
   charging: boolean;
   reloading: boolean;
+  crouching: boolean;
   color: number;
   team: number;
 }
+
+/** Nametag height above the feet: standing, and dropped with a crouching body. */
+const TAG_Y = 2.15;
+const TAG_Y_CROUCHED = 1.55;
 
 /** The local player's view for gating nametags: eye ray + own team. */
 export interface NametagAim {
@@ -52,6 +60,8 @@ export class RemotePlayers {
     humanoid.setGun(p.gun as GunKind);
     humanoid.setCharging(p.charging, performance.now());
     humanoid.setReloading(p.reloading);
+    humanoid.setCrouching(p.crouching);
+    tag.sprite.position.y = p.crouching ? TAG_Y_CROUCHED : TAG_Y;
     this.remotes.set(id, {
       humanoid,
       tag,
@@ -61,8 +71,10 @@ export class RemotePlayers {
       melee: p.melee as MeleeKind,
       gun: p.gun as GunKind,
       visible: p.alive,
+      hidden: false,
       charging: p.charging,
       reloading: p.reloading,
+      crouching: p.crouching,
       color: p.color,
       team: p.team,
     });
@@ -98,7 +110,7 @@ export class RemotePlayers {
     }
     if (p.alive !== r.visible) {
       r.visible = p.alive;
-      r.humanoid.group.visible = p.alive;
+      r.humanoid.group.visible = p.alive && !r.hidden;
     }
     if (p.charging !== r.charging) {
       r.charging = p.charging;
@@ -107,6 +119,12 @@ export class RemotePlayers {
     if (p.reloading !== r.reloading) {
       r.reloading = p.reloading;
       r.humanoid.setReloading(p.reloading);
+    }
+    if (p.crouching !== r.crouching) {
+      r.crouching = p.crouching;
+      r.humanoid.setCrouching(p.crouching);
+      // The tag hangs off the (unsquashed) group, so it needs moving itself.
+      r.tag.sprite.position.y = p.crouching ? TAG_Y_CROUCHED : TAG_Y;
     }
     if (p.color !== r.color) {
       // Team switches recolour a player mid-match; repaint or everyone keeps the stale colour.
@@ -129,6 +147,25 @@ export class RemotePlayers {
   muzzleWorld(id: string): Vec3 | null {
     const m = this.remotes.get(id)?.humanoid.muzzleWorld();
     return m ? { x: m.x, y: m.y, z: m.z } : null;
+  }
+
+  /**
+   * Interpolated pose (feet + yaw/pitch) at the same render time the humanoids are drawn
+   * at, or null if we don't know that player. Feeds the spectate camera.
+   */
+  pose(id: string, now: number): Pose | null {
+    return this.remotes.get(id)?.buffer.sample(now - INTERP_DELAY_MS) ?? null;
+  }
+
+  /**
+   * Keep a player's body (and their nametag, a child of it) out of the scene while alive —
+   * used for the player we are spectating, whose eyes the camera is sitting in.
+   */
+  setHidden(id: string, hidden: boolean): void {
+    const r = this.remotes.get(id);
+    if (!r || r.hidden === hidden) return;
+    r.hidden = hidden;
+    r.humanoid.group.visible = r.visible && !hidden;
   }
 
   /** Feet position as currently rendered (interpolated), or null if we don't know that player. */

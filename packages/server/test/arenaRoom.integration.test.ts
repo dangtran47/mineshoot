@@ -5,6 +5,7 @@ import type { Room } from 'colyseus.js';
 import {
   ATTACK_HEAVY,
   ATTACK_LIGHT,
+  CROUCH_EYE_HEIGHT,
   EYE_HEIGHT,
   GUN_MAG_SIZE,
   GUN_RELOAD_SERVER_MIN_MS,
@@ -58,8 +59,8 @@ const SKY_Y = 20; // above every structure: clean hitscan lines
 function me(room: AnyRoom): any {
   return room.state?.players?.get(room.sessionId);
 }
-function poseOf(room: AnyRoom, x: number, z: number, yaw: number, weapon = WEAPON_PISTOL, pitch = 0): Record<string, number> {
-  return { x, y: SKY_Y, z, yaw, pitch, epoch: me(room).spawnEpoch, weapon };
+function poseOf(room: AnyRoom, x: number, z: number, yaw: number, weapon = WEAPON_PISTOL, pitch = 0, crouch = false): Record<string, number | boolean> {
+  return { x, y: SKY_Y, z, yaw, pitch, epoch: me(room).spawnEpoch, weapon, crouch };
 }
 /** Pitch (yaw 0, shooting toward -Z) that lands the ray `height` above a target's feet `dz` blocks ahead. */
 const pitchToHeight = (height: number, dz: number): number => Math.atan2(height - EYE_HEIGHT, dz - PLAYER_HALF_W);
@@ -650,6 +651,71 @@ describe('arena room', () => {
       await until(() => room.state.players.get(k.killerId).kills >= 1, 3000, 'bot kill counted');
     } finally {
       await room.leave();
+    }
+  }, 20000);
+
+  it('crouching syncs to the room, shrinks the hitbox and lowers the shooter eye', async () => {
+    const alice: AnyRoom = await new Client(wsUrl).create(ROOM_NAME, {
+      nickname: 'Alice',
+      durationMin: 3,
+      testOverrides: { respawnMs: 200, spawnProtectMs: 0 },
+    });
+    const shots: ShotMsg[] = [];
+    alice.onMessage(MSG.shot, (m: ShotMsg) => shots.push(m));
+    alice.onMessage(MSG.hit, () => {});
+    alice.onMessage(MSG.kill, () => {});
+    let bob: AnyRoom | null = null;
+    try {
+      await ready(alice);
+      bob = await new Client(wsUrl).joinById(alice.roomId, { nickname: 'Bob' });
+      bob.onMessage(MSG.shot, () => {});
+      bob.onMessage(MSG.hit, () => {});
+      bob.onMessage(MSG.kill, () => {});
+      await until(() => me(bob!) !== undefined, 3000, 'bob in state');
+      await ready(bob);
+      const bobView = (): any => alice.state.players.get(bob!.sessionId);
+
+      // Bob crouches 10 blocks ahead of Alice; the stance reaches everyone through the schema.
+      bob.send(MSG.pose, poseOf(bob, 32, 30, 0, WEAPON_PISTOL, 0, true));
+      await until(() => bobView().crouching === true, 3000, 'bob crouching synced');
+
+      // A level shot — a headshot on a standing player — now passes over him.
+      alice.send(MSG.shoot, poseOf(alice, 32, 40, 0));
+      await until(() => shots.length === 1, 3000, 'shot over the crouched head');
+      expect(shots[0].rays[0].hitPlayerId).toBe('');
+      expect(bobView().hp).toBe(100);
+
+      // Aimed at the crouched head band instead, it connects for the full 100.
+      await sleep(GUN_SERVER_MIN_INTERVAL_MS + 50);
+      alice.send(MSG.shoot, poseOf(alice, 32, 40, 0, WEAPON_PISTOL, pitchToHeight(1.05, 10)));
+      await until(() => shots.length === 2, 3000, 'crouched headshot');
+      expect(shots[1].rays[0]).toMatchObject({ hitPlayerId: bob.sessionId, part: 'head', damage: 100 });
+
+      // Dying clears the stance — the dead send no poses, so it must not stick.
+      await until(() => bobView().alive === false, 3000, 'bob killed');
+      await until(() => bobView().crouching === false, 3000, 'stance cleared on death');
+
+      // Standing back up restores the standing hitbox.
+      await until(() => bobView().alive === true && bobView().hp === 100, 3000, 'bob respawned');
+      await until(() => me(bob!).spawnEpoch === 2, 3000, 'bob sees own epoch');
+      bob.send(MSG.pose, poseOf(bob, 32, 30, 0, WEAPON_PISTOL, 0, true));
+      await until(() => bobView().crouching === true, 3000, 'crouches again after respawn');
+      bob.send(MSG.pose, poseOf(bob, 32, 30, 0));
+      await until(() => bobView().crouching === false, 3000, 'bob standing again');
+      await sleep(GUN_SERVER_MIN_INTERVAL_MS + 50);
+      alice.send(MSG.shoot, poseOf(alice, 32, 40, 0));
+      await until(() => shots.length === 3, 3000, 'standing headshot');
+      expect(shots[2].rays[0]).toMatchObject({ hitPlayerId: bob.sessionId, part: 'head' });
+
+      // A crouching shooter fires from the lower eye.
+      await sleep(GUN_SERVER_MIN_INTERVAL_MS + 50);
+      alice.send(MSG.shoot, poseOf(alice, 32, 40, 0, WEAPON_PISTOL, 0, true));
+      await until(() => shots.length === 4, 3000, 'crouched shot');
+      expect(shots[3].from.y).toBeCloseTo(SKY_Y + CROUCH_EYE_HEIGHT, 3);
+      expect(shots[2].from.y).toBeCloseTo(SKY_Y + EYE_HEIGHT, 3);
+    } finally {
+      if (bob) await bob.leave();
+      await alice.leave();
     }
   }, 20000);
 

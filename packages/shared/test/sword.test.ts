@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EYE_HEIGHT, PLAYER_HALF_W, SWORD_DAMAGE } from '../src/constants';
+import { CROUCH_EYE_HEIGHT, EYE_HEIGHT, PLAYER_HALF_W, SWORD_DAMAGE } from '../src/constants';
 import { swordDamage, swordVictims } from '../src/sword';
 import { ATTACK_HEAVY, ATTACK_LIGHT, MELEE_AXE, MELEE_KATANA, MELEE_PICKAXE, MELEE_SCYTHE, MELEE_STATS, MELEE_SWORD } from '../src/melee';
 import { Block } from '../src/types';
@@ -101,5 +101,29 @@ describe('swordVictims with drop weapons', () => {
     expect(swordDamage('head', ATTACK_LIGHT)).toBe(SWORD_DAMAGE.normal.head);
     expect(swordDamage('head', ATTACK_LIGHT, MELEE_PICKAXE)).toBe(MELEE_STATS[MELEE_PICKAXE].attacks[ATTACK_LIGHT].damage.head);
     expect(swordDamage('body', ATTACK_HEAVY, MELEE_AXE)).toBe(100);
+  });
+});
+
+describe('swordVictims vs. crouching', () => {
+  it('a level swing lands on the body, not the head, when the target crouches', () => {
+    const t = [{ id: 'a', pose: { x: 16, y: 1, z: 18 }, crouch: true }];
+    expect(swordVictims(w, attacker, t)).toEqual([{ id: 'a', part: 'body' }]);
+    // The same swing headshots a standing target.
+    expect(swordVictims(w, attacker, [{ id: 'a', pose: { x: 16, y: 1, z: 18 } }])).toEqual([{ id: 'a', part: 'head' }]);
+  });
+  it('low cover the attacker can see a standing target over hides a crouched one', () => {
+    const w3 = createWorld(32, 16, 32);
+    // A one-block sill (y 1..2) just in front of a target 3.5 blocks away.
+    for (let x = 14; x < 19; x++) setBlock(w3, x, 1, 17, Block.Stone);
+    const far = { x: 16, y: 1, z: 16.5 };
+    expect(ids(swordVictims(w3, attacker, [{ id: 'a', pose: far }], ATTACK_LIGHT, MELEE_KATANA))).toEqual(['a']);
+    expect(swordVictims(w3, attacker, [{ id: 'a', pose: far, crouch: true }], ATTACK_LIGHT, MELEE_KATANA)).toEqual([]);
+  });
+  it('a crouching attacker swings from the lower eye', () => {
+    const t = [{ id: 'a', pose: { x: 16, y: 1, z: 18 } }];
+    // Level swing: the standing eye is head-high on the target, the crouched eye is not.
+    expect(swordVictims(w, attacker, t)).toEqual([{ id: 'a', part: 'head' }]);
+    expect(swordVictims(w, { ...attacker, crouch: true }, t)).toEqual([{ id: 'a', part: 'body' }]);
+    expect(CROUCH_EYE_HEIGHT).toBeLessThan(EYE_HEIGHT);
   });
 });

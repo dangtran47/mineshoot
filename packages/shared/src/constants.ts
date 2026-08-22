@@ -14,6 +14,15 @@ export const TD_WORLD_SZ = 76;
 export const PLAYER_HALF_W = 0.3;
 export const PLAYER_HEIGHT = 1.8;
 export const EYE_HEIGHT = 1.62;
+/**
+ * Crouch (hold Ctrl/C) shrinks the *combat* body only: hitbox bands and the eye.
+ * The movement collider stays PLAYER_HEIGHT tall, so there is no stand-up
+ * ceiling check and stepPlayer never sees the stance.
+ */
+export const CROUCH_HEIGHT = 1.2;
+export const CROUCH_EYE_HEIGHT = 1.02; // same 0.18 head clearance as standing
+/** Walk-speed multiplier while crouched (client-side, like the sword charge). */
+export const CROUCH_SPEED_SCALE = 0.5;
 
 // Movement
 export const WALK_SPEED = 5.5;
@@ -80,8 +89,7 @@ export const CTF_BASE_ZONE_RADIUS = 4;
 export const CTF_TEAM_SPAWN_COUNT = 8;
 
 // Team elimination (td)
-/** Team spawn pool in td: whole squads respawn at once, so they need more points than ctf to never stack. */
-export const TD_TEAM_SPAWN_COUNT = 12;
+// (Spawn pool: the team's whole half of the map — `tdTeamSpawns` in td.ts — not a point count.)
 export const TD_ROUND_LIMIT_OPTIONS = [3, 5, 7, 10] as const;
 export const TD_DEFAULT_ROUND_LIMIT = 5;
 /** Pause between a round ending and the next one starting (survivors keep walking, nobody respawns). */

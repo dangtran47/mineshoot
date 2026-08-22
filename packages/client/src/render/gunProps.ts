@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { GUN_NONE, GUN_PISTOL, GUN_RIFLE, GUN_SHOTGUN, GUN_SMG, GUN_SNIPER, GUN_TASER, WEAPON_GRENADE, WEAPON_PISTOL, WEAPON_PRIMARY } from '@mineshoot/shared';
+import { GUN_MACHINEGUN, GUN_NONE, GUN_PISTOL, GUN_RIFLE, GUN_SHOTGUN, GUN_SMG, GUN_SNIPER, GUN_TASER, WEAPON_GRENADE, WEAPON_PISTOL, WEAPON_PRIMARY } from '@mineshoot/shared';
 import type { GunKind, MeleeKind, Weapon } from '@mineshoot/shared';
 import { buildMeleeProp } from './meleeProps';
 import type { MeleeProp } from './meleeProps';
@@ -41,6 +41,7 @@ export const PROP_LENGTH: Record<GunKind, number> = {
   [GUN_SHOTGUN]: 1.0,
   [GUN_SNIPER]: 1.3,
   [GUN_TASER]: 0.45,
+  [GUN_MACHINEGUN]: 1.2,
 };
 
 export function buildGunProp(kind: GunKind): MeleeProp {
@@ -97,6 +98,19 @@ export function buildGunProp(kind: GunKind): MeleeProp {
         at(box(0.06, 0.16, 0.06, DARK), 0, -0.14, -0.05),
         at(box(0.04, 0.16, 0.04, DARK), 0, -0.15, -0.9),
         flash(-1.4),
+      );
+      break;
+    case GUN_MACHINEGUN:
+      // Thick dark body, carry handle on top, olive ammo box under the belly, twin bipod legs at the muzzle.
+      group.add(
+        at(box(0.13, 0.17, 0.75, DARK), 0, 0, -0.35),
+        at(box(0.06, 0.06, 0.45, GUNMETAL), 0, 0.03, -0.95),
+        at(box(0.04, 0.08, 0.2, GUNMETAL), 0, 0.15, -0.3),
+        at(box(0.1, 0.2, 0.2, DARK), 0, -0.03, 0.15),
+        at(box(0.16, 0.2, 0.22, OLIVE), 0, -0.18, -0.25),
+        at(box(0.03, 0.18, 0.03, STEEL), -0.05, -0.12, -0.95),
+        at(box(0.03, 0.18, 0.03, STEEL), 0.05, -0.12, -0.95),
+        flash(-1.25),
       );
       break;
     case GUN_TASER:

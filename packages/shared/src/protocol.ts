@@ -159,6 +159,8 @@ export interface PoseMsg {
   pitch: number;
   epoch: number;
   weapon: Weapon;
+  /** Crouching (hold Ctrl/C): shrinks the hitbox and lowers the eye. Attack messages carry it too, since the server attacks from the pose inside them. */
+  crouch: boolean;
 }
 export interface ShootMsg {
   x: number;
@@ -169,6 +171,7 @@ export interface ShootMsg {
   epoch: number;
   /** Which gun slot fired: WEAPON_PISTOL or WEAPON_PRIMARY. */
   weapon: Weapon;
+  crouch: boolean;
 }
 /** Grenade throw: the thrower's pose (the grenade leaves the eye along yaw/pitch) and how long LMB was held (0..1 of GRENADE_THROW_CHARGE_MS → throw speed). */
 export interface ThrowMsg {
@@ -179,6 +182,7 @@ export interface ThrowMsg {
   pitch: number;
   epoch: number;
   charge: number;
+  crouch: boolean;
 }
 export interface SwingMsg {
   x: number;
@@ -189,6 +193,7 @@ export interface SwingMsg {
   epoch: number;
   /** Which attack: light (LMB) or heavy (RMB held, released). A heavy claim is honoured only if a `charge` arrived ≥ MELEE_MIN_CHARGE_FRACTION × chargeMs earlier (damage scales with the hold, full at chargeMs), else it lands as light. */
   attack: AttackKind;
+  crouch: boolean;
 }
 /** Sent when the player starts holding RMB with melee (charge begins); payload is the spawn epoch. */
 export type ChargeMsg = number;

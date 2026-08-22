@@ -1,9 +1,9 @@
 import type { DropKind } from './drops';
-import { GUN_RIFLE, GUN_SHOTGUN, GUN_SMG, GUN_SNIPER } from './guns';
+import { GUN_MACHINEGUN, GUN_RIFLE, GUN_SHOTGUN, GUN_SMG, GUN_SNIPER } from './guns';
 import { DROP_KINDS } from './melee';
 import { TEAM_BLUE, TEAM_NONE, TEAM_RED, WEAPON_MELEE, WEAPON_PRIMARY } from './protocol';
 import type { Team, WeaponMode } from './protocol';
-import type { Vec3 } from './types';
+import type { SpawnPoint, Vec3 } from './types';
 
 /*
  * Team elimination ("td") rules, shared by server and client. Two teams on a
@@ -41,18 +41,30 @@ export function roundWinner(red: RoundSide, blue: RoundSide): Team | typeof TEAM
 }
 
 /**
+ * A team's spawn pool on the crossroads map: every spawn point on its own
+ * half (north/south of `sz / 2`, the side its base is on). A whole squad
+ * respawns at once, so the pool is the entire half rather than the N points
+ * nearest the base as in ctf — `teamSpawns(…, n)` with n above the per-side
+ * count would spill over into the enemy end.
+ */
+export function tdTeamSpawns(spawns: readonly SpawnPoint[], base: { x: number; z: number }, sz: number): SpawnPoint[] {
+  const north = base.z < sz / 2;
+  return spawns.filter((s) => s.z < sz / 2 === north);
+}
+
+/**
  * The weapons laid on the ground, in weapon-spot order (worldgen's 8 north
  * spots west→east, then their 8 south mirrors): the fixed north row is
- * sniper, shotgun, SMG, rifle, SMG, shotgun, rifle, sniper, and the south row
- * is its exact reverse, so each team reads the same order left-to-right from
- * its own side. Sword-only rooms lay two of each blade instead. No taser and
- * no grenade packs.
+ * sniper, shotgun, SMG, rifle, M249, shotgun, rifle, sniper, and the south
+ * row is its exact reverse, so each team reads the same order left-to-right
+ * from its own side. Sword-only rooms lay two of each blade instead. No taser
+ * and no grenade packs.
  */
 export function tdWeaponLoadout(weapons: WeaponMode): DropKind[] {
   const row: readonly number[] =
     weapons === 'sword'
       ? [...DROP_KINDS, ...DROP_KINDS]
-      : [GUN_SNIPER, GUN_SHOTGUN, GUN_SMG, GUN_RIFLE, GUN_SMG, GUN_SHOTGUN, GUN_RIFLE, GUN_SNIPER];
+      : [GUN_SNIPER, GUN_SHOTGUN, GUN_SMG, GUN_RIFLE, GUN_MACHINEGUN, GUN_SHOTGUN, GUN_RIFLE, GUN_SNIPER];
   const slot = weapons === 'sword' ? WEAPON_MELEE : WEAPON_PRIMARY;
   return [...row, ...[...row].reverse()].map((kind) => ({ slot, kind }));
 }

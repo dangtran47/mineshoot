@@ -44,6 +44,12 @@ export interface PlayerPose {
   z: number;
   yaw: number;
   pitch: number;
+  /**
+   * Combat stance (hold Ctrl/C): shrinks the hitbox bands and lowers the eye.
+   * Never reaches stepPlayer — the movement collider is always PLAYER_HEIGHT.
+   * Absent = standing, which is what bots send.
+   */
+  crouch?: boolean;
 }
 
 export interface PlayerPhysState extends PlayerPose {

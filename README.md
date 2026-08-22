@@ -63,12 +63,14 @@ around, and shoot each other for 3–15 minutes. Then argue about the K/D table.
 | --- | --- |
 | Mouse | Aim (click to lock the pointer, `Esc` to release) |
 | `W A S D` / `Space` | Move / jump |
-| `LMB` (tap or hold) | Shoot (pistol: one per click; rifle/SMG keep firing while held) · hold to wind up a grenade throw, release to throw · **light** melee slash — keeps swinging while held, alternating left / right |
+| `Ctrl` / `C` (hold) | Crouch: half speed, eye drops to 1.02 m and your hitbox shrinks to 1.2 m, so low cover actually covers you (`C` because Chrome eats `Ctrl`+`W`) |
+| `LMB` (tap or hold) | Shoot (pistol: one per click; rifle/SMG/M249 keep firing while held) · hold to wind up a grenade throw, release to throw · **light** melee slash — keeps swinging while held, alternating left / right |
 | `RMB` hold, release | **Heavy** melee blow — each weapon's own signature move (overhead, execute, iaido, reap, head-hunt); full damage once fully charged, proportional if you let go earlier · with the sniper: hold to look through the **scope** |
 | `R` | Reload the held gun (automatic when the magazine is empty) |
 | `1`–`5` / mouse wheel | Switch primary gun / pistol / melee / grenade / taser (empty slots are skipped) |
 | `G` | Throw the held weapon away (frees the slot so you can pick one up off the ground) · Capture the Flag: put the flag you carry down (hand it to a teammate) |
 | `Tab` (hold) | Scoreboard |
+| `LMB` / `RMB` while dead | Watch the next / previous player's own first-person view (team modes: teammates only) |
 
 Up to **16 players** per room (bots take player slots). Rooms are public and
 listed in the lobby; there is no password — it's meant to be casual.
@@ -77,6 +79,16 @@ listed in the lobby; there is no password — it's meant to be casual.
 
 Everyone has **100 HP** and respawns **3 s** after dying with **2 s of spawn
 protection** (you cannot be targeted or damaged; attacking ends it early).
+While you wait, the camera moves into another player's head after **1.5 s** —
+a teammate in Capture the Flag and Team Elimination, anyone alive in a
+deathmatch — and `LMB` / `RMB` cycle through them.
+
+Holding `Ctrl` or `C` **crouches**: you move at **half speed**, your eye drops
+from 1.62 m to **1.02 m** and your whole hitbox squashes from 1.8 m to
+**1.2 m** — head, torso and leg bands all shrink with it, so a shot lined up on
+a standing head sails over a crouching one. Your collision box stays full
+height, so crouching will not squeeze you through gaps.
+
 Damage depends on where you hit:
 
 Everyone carries **five weapon slots**: `1` a **primary gun**, `2` the
@@ -91,7 +103,7 @@ empty and is filled from drops.
   reload; picked up from drops into an **empty** slot `1` and lost on death
   (throw the one you hold away with `G` to take another). In a **deathmatch**
   every (re)spawn also rolls a **random
-  primary** (rifle / SMG / shotgun / sniper — never the taser) and you come
+  primary** (rifle / SMG / shotgun / sniper / M249 — never the taser) and you come
   back holding it; CTF keeps the pistol-only spawn, Team Elimination spawns
   blade-only (even the pistol comes off the ground), and the training range
   lets you pick your own.
@@ -102,6 +114,7 @@ empty and is filled from drops.
   | SMG | 35 | 80 ms | 1.8 s | 40 | 40 / 15 / 8 | full-auto, wide spread (3°); soft ~0.7°/shot climb with a gentle zigzag |
   | Shotgun | 6 | 400 ms | 450 ms **per shell** | 18 | 45 / 25 / 12 **per pellet** | 8 pellets in a 6° cone — one-shots up close, useless far; 3° kick per shot; reloads shell by shell (the ammo counter climbs as shells go in) and **fires straight out of the reload** once a shell is in |
   | Sniper | 4 | 1.2 s | 2.8 s | 60 | 100 / 100 / 60 | `RMB` opens the round scope (×3), even mid-reload; mouse sensitivity drops ×3 while scoped; no crosshair from the hip; body shots kill; 4° kick per shot |
+  | M249 | 75 | 100 ms | 4.5 s | 55 | 45 / 18 / 9 | full-auto belt-fed, wide spread (2.5°); harsh ~1.2°/shot climb that wanders left-right and never settles; the huge belt is paid for by the longest reload in the game |
 
   **Recoil** — every shot kicks the camera along a **fixed per-gun pattern**
   (the pistol nudges 1° up; the taser doesn't kick), so the spray is
@@ -139,7 +152,7 @@ empty and is filled from drops.
 **Weapon drops** land on the central plateau every 25–45 s (at most 3 on the
 ground, gone after 60 s if nobody takes them; a CTF room drops on its central
 plateau every 12–22 s, up to 5). What drops follows the room's weapon rule:
-**Guns + Sword** rooms draw from the full pool — the four **primaries**, the
+**Guns + Sword** rooms draw from the full pool — the five **primaries**, the
 **taser**, **grenade packs** (+2, skipped while you are full) and the four
 blades below; **Sword only** rooms drop blades alone. Walking over a drop only
 fills an **empty** slot: a gun arms an empty slot `1`, a blade replaces the
@@ -195,8 +208,8 @@ weapon in peace. Same arena and rules as a match, except:
   **1 s** instead of 3 s so the range refills at once. Pick 0–15 of them; the
   lobby fills in 3 when you leave the count at zero.
 - Keys **`6`–`0`** put any melee weapon straight into slot 3 — Sword, Battle
-  Axe, Katana, Scythe, Pickaxe — and keys **`Z X C V`** put any primary gun
-  straight into slot 1 (Rifle, SMG, Shotgun, Sniper) with **`B`** arming the
+  Axe, Katana, Scythe, Pickaxe — and keys **`Z X C V N`** put any primary gun
+  straight into slot 1 (Rifle, SMG, Shotgun, Sniper, M249) with **`B`** arming the
   taser in slot 5 — no drop needed (drops still fall too). Outside a training
   range those keys do nothing; drops remain the only way to a better weapon
   (except the deathmatch spawn roll).
@@ -281,7 +294,7 @@ never stack — everyone gets their own spawn point.
   match clock.
 - **Weapons on the ground.** Every gun lies at a **fixed spot**: two rows of 4
   in front of each spawn zone — west to east **sniper, shotgun, SMG, rifle |
-  SMG, shotgun, rifle, sniper**, and the far side's rows are the exact
+  M249, shotgun, rifle, sniper**, and the far side's rows are the exact
   reverse, so both teams read the same order left-to-right from their own end
   (blades ×2 per side in a sword-only room). Four **pistols** hover at the
   east/west arm mouths, beside the border stubs. The **same spots and kinds

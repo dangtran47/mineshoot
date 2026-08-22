@@ -1,4 +1,4 @@
-import { GUN_NONE, GUN_PISTOL, GUN_RIFLE, GUN_SHOTGUN, GUN_SMG, GUN_SNIPER, GUN_TASER } from './guns';
+import { GUN_MACHINEGUN, GUN_NONE, GUN_PISTOL, GUN_RIFLE, GUN_SHOTGUN, GUN_SMG, GUN_SNIPER, GUN_TASER } from './guns';
 import type { GunKind, GunSpec } from './guns';
 
 /**
@@ -53,6 +53,23 @@ export const RECOIL_PATTERNS: Record<GunKind, readonly RecoilKick[]> = {
   [GUN_SHOTGUN]: [{ pitchDeg: 3.0, yawDeg: 0 }],
   [GUN_SNIPER]: [{ pitchDeg: 4.0, yawDeg: 0 }],
   [GUN_TASER]: [NO_KICK],
+  // Belt-fed climb: harsh first shots, then a long left-right wander that never settles.
+  [GUN_MACHINEGUN]: [
+    { pitchDeg: 1.2, yawDeg: 0 },
+    { pitchDeg: 1.2, yawDeg: 0 },
+    { pitchDeg: 1.2, yawDeg: 0 },
+    { pitchDeg: 1.0, yawDeg: -0.3 },
+    { pitchDeg: 1.0, yawDeg: -0.45 },
+    { pitchDeg: 0.9, yawDeg: -0.55 },
+    { pitchDeg: 0.9, yawDeg: -0.3 },
+    { pitchDeg: 0.9, yawDeg: 0.3 },
+    { pitchDeg: 0.9, yawDeg: 0.55 },
+    { pitchDeg: 0.8, yawDeg: 0.65 },
+    { pitchDeg: 0.8, yawDeg: 0.3 },
+    { pitchDeg: 0.8, yawDeg: -0.35 },
+    { pitchDeg: 0.8, yawDeg: -0.65 },
+    { pitchDeg: 0.8, yawDeg: 0.65 },
+  ],
 };
 
 /** The kick for shot `shotIndex` (0-based) of a burst; unknown kinds don't kick. */
