@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { GUN_NONE, GUN_PISTOL, GUN_RIFLE, GUN_SHOTGUN, GUN_SMG, GUN_SNIPER, GUN_TASER, WEAPON_GRENADE, WEAPON_PRIMARY } from '@mineshoot/shared';
+import { GUN_NONE, GUN_PISTOL, GUN_RIFLE, GUN_SHOTGUN, GUN_SMG, GUN_SNIPER, GUN_TASER, WEAPON_GRENADE, WEAPON_PISTOL, WEAPON_PRIMARY } from '@mineshoot/shared';
 import type { GunKind, MeleeKind, Weapon } from '@mineshoot/shared';
 import { buildMeleeProp } from './meleeProps';
 import type { MeleeProp } from './meleeProps';
@@ -126,7 +126,7 @@ export function buildGrenadeProp(): MeleeProp {
 
 /** The prop for a ground drop, by slot. */
 export function buildDropProp(slot: Weapon, kind: number): MeleeProp {
-  if (slot === WEAPON_PRIMARY) return buildGunProp(kind as GunKind);
+  if (slot === WEAPON_PRIMARY || slot === WEAPON_PISTOL) return buildGunProp(kind as GunKind);
   if (slot === WEAPON_GRENADE) return buildGrenadeProp();
   return buildMeleeProp(kind as MeleeKind);
 }

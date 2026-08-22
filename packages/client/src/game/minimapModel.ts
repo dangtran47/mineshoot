@@ -117,6 +117,7 @@ const BLOCK_RGB: Record<number, [number, number, number]> = {
   [Block.Planks]: [162, 130, 78],
   [Block.Brick]: [150, 82, 70],
   [Block.Leaves]: [58, 112, 52],
+  [Block.Water]: [56, 128, 210],
 };
 
 /** Empty columns (and the sky) read as the void, so the map edge stays legible. */

@@ -11,8 +11,8 @@ import {
 } from '../game/minimapModel';
 import type { FlagPin, MapDot } from '../game/minimapModel';
 
-/** CSS pixels per block: 64×64 → 128 px square, 96×48 → 192×96. */
-const SCALE = 2;
+/** CSS pixels per block: 64×64 → 128 px square, 96×48 → 192×96; big worlds (128² td) drop to 1.5 so the map stays ≤192 px. */
+const scaleFor = (sx: number): number => (sx > 96 ? 1.5 : 2);
 /** Roughly the middle of a flag pole, for the line-of-sight test. */
 const FLAG_EYE = 0.9;
 
@@ -70,8 +70,8 @@ export class Minimap {
     private readonly world: World,
     private readonly bases: Record<Team, SpawnPoint> | null,
   ) {
-    this.w = world.sx * SCALE;
-    this.h = world.sz * SCALE;
+    this.w = world.sx * scaleFor(world.sx);
+    this.h = world.sz * scaleFor(world.sx);
     const dpr = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
     this.canvas.className = 'minimap';
     this.canvas.width = Math.round(this.w * dpr);

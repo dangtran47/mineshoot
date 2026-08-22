@@ -4,7 +4,7 @@ import { ATLAS_TILES, TILE_PX, Tile } from './mesher';
 interface TileSpec {
   base: [number, number, number];
   noise: number;
-  pattern?: 'brick' | 'planks' | 'grassSide' | 'leaves';
+  pattern?: 'brick' | 'planks' | 'grassSide' | 'leaves' | 'water';
 }
 
 const SPECS: Record<Tile, TileSpec> = {
@@ -16,6 +16,7 @@ const SPECS: Record<Tile, TileSpec> = {
   [Tile.Brick]: { base: [150, 84, 68], noise: 10, pattern: 'brick' },
   [Tile.Bedrock]: { base: [70, 70, 70], noise: 45 },
   [Tile.Leaves]: { base: [58, 122, 44], noise: 30, pattern: 'leaves' },
+  [Tile.Water]: { base: [52, 116, 200], noise: 14, pattern: 'water' },
 };
 
 /** Tiny deterministic hash → [0,1) so the atlas is identical on every client. */
@@ -66,6 +67,10 @@ export function createAtlasTexture(): THREE.Texture {
           }
           case 'leaves':
             if (h(x, y, t + 7) < 0.18) { r += 40; g += 40; b += 20; }
+            break;
+          case 'water':
+            // Faint horizontal ripple highlights.
+            if ((y + Math.floor(h(0, y, t + 11) * 3)) % 5 === 0 && h(x, y, t + 13) < 0.6) { r += 35; g += 45; b += 40; }
             break;
         }
         const i = (y * canvas.width + (t * TILE_PX + x)) * 4;

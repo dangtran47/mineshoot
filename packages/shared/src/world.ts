@@ -25,8 +25,10 @@ export function setBlock(w: World, x: number, y: number, z: number, b: Block): v
   w.blocks[(y * w.sz + z) * w.sx + x] = b;
 }
 
+/** Blocks movement and bullets. Water is NOT solid: you sink into it and shots pass through it. */
 export function isSolid(w: World, x: number, y: number, z: number): boolean {
-  return getBlock(w, x, y, z) !== Block.Air;
+  const b = getBlock(w, x, y, z);
+  return b !== Block.Air && b !== Block.Water;
 }
 
 /** Highest solid y in the column, or -1 if the column is empty. */

@@ -18,6 +18,8 @@ export enum Block {
   Planks = 5,
   Brick = 6,
   Leaves = 7,
+  /** Water (the TD lake): NOT solid — you sink in and wade through it, and bullets pass through. */
+  Water = 8,
 }
 
 /** Dense voxel grid; index = (y * sz + z) * sx + x. */

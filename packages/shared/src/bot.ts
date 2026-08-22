@@ -21,6 +21,8 @@ export interface BotView {
   carrying?: boolean;
   /** Primary gun held (slot 1); GUN_NONE / absent = empty, the bot uses the pistol. */
   gun?: GunKind;
+  /** Pistol slot filled (absent = true); false = blade-only until a gun is lifted (td spawns). */
+  pistol?: boolean;
 }
 
 /** What the bot wants to do this tick; the server applies it like client input. */
@@ -257,6 +259,8 @@ export function createBot(rng: () => number, waypoints: SpawnPoint[], options: B
       const gunKind: GunKind = view.gun || GUN_PISTOL;
       const gunSlot: Weapon = gunKind === GUN_PISTOL ? WEAPON_PISTOL : WEAPON_PRIMARY;
       const gun = gunSpec(gunKind);
+      // Whether any gun is actually in hand: a primary, or the pistol slot when it is filled.
+      const hasGun = gunOk && (!!view.gun || view.pistol !== false);
       // Short guns (shotgun, taser) want to be close; long ones keep the usual band.
       const shortGun = gun.range < PREFERRED_MAX * 2;
       const preferredMax = shortGun ? gun.range * 0.8 : PREFERRED_MAX;
@@ -291,7 +295,7 @@ export function createBot(rng: () => number, waypoints: SpawnPoint[], options: B
       if (!best) targetId = null;
 
       const input: MoveInput = { forward: 0, strafe: 0, jump: false };
-      let weapon: Weapon = gunOk ? gunSlot : WEAPON_MELEE;
+      let weapon: Weapon = hasGun ? gunSlot : WEAPON_MELEE;
       let shoot = false;
       let swing = false;
 
@@ -331,7 +335,7 @@ export function createBot(rng: () => number, waypoints: SpawnPoint[], options: B
         // Position: with a gun, close in / back off to the preferred band and strafe a bit;
         // sword-only, charge straight in. Closing in follows a route (the enemy may be
         // up on the plateau); the rest is relative to where we're aiming.
-        const closeIn = !gunOk || best.d > preferredMax || (swordOk && best.d <= SWORD_RANGE * 0.9);
+        const closeIn = !hasGun || best.d > preferredMax || (swordOk && best.d <= SWORD_RANGE * 0.9);
         if (closeIn) navigate(world, self, best, input, dt, now, false);
         else if (best.d < preferredMin && best.d > SWORD_RANGE) input.forward = -0.6;
         if (!closeIn) input.strafe = strafeDir * 0.8;
@@ -341,7 +345,7 @@ export function createBot(rng: () => number, waypoints: SpawnPoint[], options: B
         if (swordOk && best.d <= SWORD_RANGE * 0.9) {
           weapon = WEAPON_MELEE;
           swing = reacted;
-        } else if (gunOk) {
+        } else if (hasGun) {
           shoot = aligned && reacted && best.d <= gun.range;
         }
       } else if (goal && !goalReached(goal, self)) {

@@ -57,11 +57,11 @@ Pure TypeScript, `"exports": "./src/index.ts"` (consumed as source by Vite and
 | Tunables | `constants.ts` | every number: world size, movement, weapon timings, damage, hitbox bands, HP, respawn, spawn protection, durations, `MAX_PLAYERS`, `MAX_BOTS` |
 | Protocol | `protocol.ts` | `MSG` names, payload interfaces (`PoseMsg`, `ShootMsg`, `SwingMsg`, `ShotMsg`, `HitMsg`, `KillMsg`, `PickupMsg`, …), `CreateOptions`, `RoomMetadata`, `WeaponMode` + `weaponAllowed()/defaultWeapon()/allowedWeapons()`, `ROOM_NAME` |
 | Data | `types.ts`, `world.ts`, `rng.ts`, `noise.ts` | `World` (flat `Uint8Array` of `Block`), `PlayerPhysState`, `MoveInput`, `Vec3`; `createRng(seed)` (mulberry-style), 2D value noise |
-| World | `worldgen.ts` | `generateWorld(seed)` (arena), `generateCtfWorld(seed)` (96×48 CTF map) and `generateTdWorld(seed)` (64×64 crossroads) → `{ world, spawnPoints, dropZone, bases, weaponSpots? }`; `generateWorldFor(mode, seed)`; `PLATEAU_MIN/MAX` |
+| World | `worldgen.ts` | `generateWorld(seed)` (arena), `generateCtfWorld(seed)` (96×48 CTF map) and `generateTdWorld(seed)` (76×76 crossroads) → `{ world, spawnPoints, dropZone, bases, weaponSpots? }`; `generateWorldFor(mode, seed)`; `PLATEAU_MIN/MAX` |
 | Physics | `aabb.ts`, `collision.ts`, `playerPhysics.ts` | `moveAABB` (axis-separated swept AABB vs voxels), `stepPlayer(world, state, input, dt)`, `forwardVector` |
 | Hitscan | `raycast.ts`, `hitbox.ts`, `gun.ts` | `raycastVoxels` (DDA), `segmentVsAABB`, `playerHitboxes(feet)` (legs/torso/head boxes), `resolveShot(world, shooter, targets, range)` |
 | Melee | `sword.ts`, `melee.ts`, `drops.ts` | `MELEE_STATS` per `MeleeKind` → `attacks[AttackKind]` (`AttackSpec`: cone, reach, damage, sweep, cooldown, anim), `meleeStats()`, `attackSpec()`, `swordVictims(world, pose, targets, attack, kind)`, `swordDamage()`, `pickDropKind()`, `pickDropSpot()`, `canPickUp()`, drop cadence constants |
-| Match | `spawn.ts`, `ranking.ts`, `kills.ts` | `pickSpawn(points, enemies, rng)` (farthest-from-enemies with randomness), `rankPlayers`, `rankCtf`, `kdRatio`, `KillTracker` (multi-kill / streak / shutdown awards) |
+| Match | `spawn.ts`, `ranking.ts`, `kills.ts` | `pickSpawn(points, enemies, rng)` (farthest-from-enemies with randomness), `unoccupiedSpawns()` (drops points someone already stands on, so simultaneous spawns never stack), `rankPlayers`, `rankCtf`, `kdRatio`, `KillTracker` (multi-kill / streak / shutdown awards) |
 | CTF | `ctf.ts` | `FlagState`, `flagTouch()`, `canScore()`, `canReturn()`, `carriedFlag()`, `teamSpawns()`, `pickTeam()`, `botRebalance()`, `matchWinner()`, `botCtfGoal()` (offence-first bot goal); teams (`TEAM_RED/BLUE`, `Team`, `otherTeam`, `teamName`) live in `protocol.ts` |
 | TD | `td.ts` | team elimination: `roundWinner(red, blue)` (per-team `{alive, inRound, ready}` → round outcome), `tdWeaponLoadout(weapons)` (the fixed ground-weapon row per side), `botTdGoal()` (gun → enemy → crossroads) |
 | Bots | `bot.ts` | `createBot(rng, waypoints, { weapons, passive, skill })` → `{ compute(world, view, dt), reset() }`; `passive` = training dummy (faces the nearest enemy, never moves or attacks); `skill` (`BotSkill` in `protocol.ts`, profiles via `botSkillProfile()`) scales sight / turn rate / reaction / aim error / attack interval; `view.goal` / `view.carrying` drive CTF behaviour. Movement toward any destination goes through `nav.ts` |
@@ -348,11 +348,22 @@ nearby waypoints once there, and as a carrier runs for the goal melee-out,
 only swinging at enemies within reach. Teams alternate (bot1 red, bot2 blue, …).
 
 **Team elimination** (`mode: 'td'`, rules in `shared/td.ts`, numbers in
-`constants.ts`). Round-based elimination on `generateTdWorld` (64×64,
-mirrored across the z-middle: two flat brick roads crossing in the middle,
-four hollow corner buildings with doorways onto both roads, a team spawn zone
-at each z end behind a row of 8 fixed weapon spots; the north–south road is
-base-to-base walkable for the bots). It shares all the CTF *team* machinery —
+`constants.ts`). Round-based elimination on `generateTdWorld` (76×76, flat
+floor: four solid rounded cover blocks, deliberately offset — not mirrored —
+so the corridor corners are staggered into off-angle peeks; the ground they frame
+is a cross-shaped water channel, one block deep, water bank to bank with its
+surface flush with the flat ground, stopping short of the yards and border
+lanes (`Block.Water` is NOT solid — `isSolid`/`standable`/`isStandable` treat
+it as passable but never as support, so players and bots sink to the channel
+floor waist-deep, grenades drop through, and bullets pass through the
+surface) — and a border stub covers each corridor mouth. Spawn strips, weapon rows, the four arm-mouth
+pistol spots (`pistolSpots`) and bases mirror exactly across the z-middle,
+spawn points are computed north and mirrored south, and the north–south
+corridor is base-to-base walkable for the bots). Td spawns are blade-only
+(`spawnWeapon`): the pistol slot is empty (`PlayerSchema.pistol`, a drop slot
+like the others) and grenades are 0 — every gun comes off the ground
+(`tdWeaponLoadout` lays the north row sniper/shotgun/SMG/rifle/SMG/shotgun/
+rifle/sniper and its exact reverse south). It shares all the CTF *team* machinery —
 `isTeamMode` gates team pick/switch, `teamSpawns`, no friendly fire, team
 colours, lobby team buttons, split scoreboard and team results — but has no
 flags and **no clocks**: `tickTimer` is skipped, `endsAt`/`timeLeftMs` stay 0,

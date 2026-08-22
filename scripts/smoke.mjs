@@ -285,8 +285,8 @@ console.log('lobby rows (td):', (await b.textContent('.rooms')).replace(/\s+/g, 
 await b.click(`tr:has-text("Deathcross") button.join.${aTeam === 1 ? 't-blue' : 't-red'}`);
 await b.waitForSelector('canvas.game', { state: 'attached', timeout: 15000 });
 await ready(b);
-// A fixed weapon on Alice's half: walking over it arms the primary. (Red is the north half, z < 32.)
-const gunDrop = await a.evaluate((t) => { let d = null; window.__mineshoot.room.state.drops.forEach((v) => { if (!d && (v.z < 32) === (t === 1)) d = { kind: v.kind, x: v.x, y: v.y, z: v.z }; }); return d; }, aTeam);
+// A fixed primary on Alice's half: walking over it arms the empty slot. (Red is the north half, z < 38.)
+const gunDrop = await a.evaluate((t) => { let d = null; window.__mineshoot.room.state.drops.forEach((v) => { if (!d && v.slot === 2 && (v.z < 38) === (t === 1)) d = { kind: v.kind, x: v.x, y: v.y, z: v.z }; }); return d; }, aTeam);
 await a.evaluate(([x, y, z]) => window.__mineshoot.local.teleport(x, y, z, 0), [gunDrop.x, gunDrop.y, gunDrop.z]);
 await a.waitForFunction((k) => window.__mineshoot.weapons.gun === k, gunDrop.kind, { timeout: 4000 });
 console.log('alice grabbed fixed gun kind', gunDrop.kind, '| toast:', await a.textContent('.toast'));
@@ -298,11 +298,20 @@ const ourRounds = (n, timeout) => a.waitForFunction((args) => {
   return (args.t === 1 ? s.roundsRed : s.roundsBlue) === args.n;
 }, { t: aTeam, n }, { timeout });
 const wipeRound = async (n) => {
-  await tp(a, 32.5, 36.5, 0);
-  await tp(b, 32.5, 30.5, Math.PI);
+  // Blade-only spawns: lift a primary off Alice's own row first (auto pickup fills the empty slot).
+  const rowGun = await a.evaluate((t) => {
+    let d = null;
+    window.__mineshoot.room.state.drops.forEach((v) => { if (!d && v.slot === 2 && (v.z < 38) === (t === 1)) d = { x: v.x, y: v.y, z: v.z }; });
+    return d;
+  }, aTeam);
+  await tp(a, rowGun.x, rowGun.z, 0);
+  await a.waitForFunction(() => window.__mineshoot.weapons.gun !== 0, null, { timeout: 6000 });
+  // Then duel on open ground in the north spawn yard (the quadrant cover blocks start at z 10).
+  await tp(a, 24.5, 8.5, 0);
+  await tp(b, 24.5, 3.5, Math.PI);
   await a.waitForTimeout(900);
   for (let i = 0; i < 8; i++) {
-    await a.evaluate(() => { const g = window.__mineshoot; g.weapons.select(0); g.weapons.mouseDown(performance.now()); g.weapons.mouseUp(); });
+    await a.evaluate(() => { const g = window.__mineshoot; g.weapons.select(2); g.weapons.mouseDown(performance.now()); g.weapons.mouseUp(); });
     try {
       await ourRounds(n, 700);
       return;

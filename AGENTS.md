@@ -91,8 +91,9 @@ allowed, blades where melee is). Bots receive the mode too. Do not rely on
 the client hiding a button. Likewise the room mode (`'match'|'training'|'ctf'|'td'`):
 `meleeSelectable(mode, weapons)` gates `selectWeapon` on the server; a match
 never lets you pick a weapon at will — but a deathmatch (re)spawn with guns
-allowed rolls a random primary (`spawnPrimary`, taser excluded); team modes
-(`isTeamMode`: ctf + td) always spawn pistol-only. Walking over a drop only
+allowed rolls a random primary (`spawnPrimary`, taser excluded); ctf spawns
+pistol-only; td spawns blade-only (empty pistol slot too — `spawnWeapon`; the
+fixed ground pistols and gun rows fill the slots). Walking over a drop only
 fills an **empty** slot (`autoPickUpAllowed`; the plain sword counts as empty
 melee): to swap, `MSG.dropWeapon` (G) throws the held weapon down as a drop
 that expires after `DROP_THROWN_LIFETIME_MS` (5 s, even in td) with a
@@ -116,8 +117,8 @@ helpers in `shared/ctf.ts`: no friendly fire (`targetsExcluding`), a carrier's
 are validated in `validate.ts`. The client only mirrors: melee lock, carry
 speed, flag meshes, HUD. Never trust the client for any of it.
 
-**World size comes from the world.** The CTF map is 96×48, the arena and the
-TD crossroads map 64×64.
+**World size comes from the world.** The CTF map is 96×48, the arena 64×64
+and the TD crossroads map 76×76.
 Read `world.sx/sz` (or the `GeneratedWorld`'s `dropZone`/`bases`), never
 `WORLD_SX/SZ`, outside `worldgen.ts`; poses are clamped to the room's world.
 

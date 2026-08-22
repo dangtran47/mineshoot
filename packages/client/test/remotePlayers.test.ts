@@ -25,6 +25,7 @@ const player = (over: Partial<NetPlayer> = {}): NetPlayer => ({
   spawnEpoch: 1,
   weapon: 0,
   melee: 0,
+  pistol: 1,
   gun: 0,
   taser: 0,
   grenades: 0,

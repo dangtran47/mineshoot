@@ -42,6 +42,8 @@ export interface WeaponEvents {
   onGunChange(kind: GunKind): void;
   /** The taser slot now holds `kind` (GUN_NONE = empty / spent). */
   onTaserChange(kind: GunKind): void;
+  /** The pistol slot now holds `kind` (GUN_NONE = empty: td spawns blade-only until a ground pistol is lifted). */
+  onPistolChange(kind: GunKind): void;
   onGrenadesChange(n: number): void;
 }
 
@@ -112,6 +114,11 @@ export class Weapons {
     return this.guns[WEAPON_TASER].kind;
   }
 
+  /** Pistol slot (GUN_PISTOL, or GUN_NONE while empty). */
+  get pistol(): GunKind {
+    return this.guns[WEAPON_PISTOL].kind;
+  }
+
   /** False when the room allows a single weapon (switch keys / wheel do nothing). */
   get canSwitch(): boolean {
     return this.allowed.length > 1;
@@ -149,13 +156,18 @@ export class Weapons {
     return gunSpec(this.guns[slot].kind);
   }
 
-  /** RMB held on a zooming gun — but never while that gun is reloading (the scope waits for the reload). */
+  /** RMB held on a zooming gun — a running reload does not close the scope (the sniper bolt cycle would otherwise kick you out every shot). */
   get zooming(): boolean {
-    return this.zoomHeld && isGunSlot(this.current) && this.specOf(this.current).zoom > 1 && this.guns[this.current].reloadStartAt === null;
+    return this.zoomHeld && isGunSlot(this.current) && this.specOf(this.current).zoom > 1;
   }
 
   get zoomFactor(): number {
     return this.zooming ? this.specOf(this.current).zoom : 1;
+  }
+
+  /** The held gun reloads shell by shell (shotgun): the HUD keeps the climbing count instead of "RELOADING…". */
+  get perShell(): boolean {
+    return isGunSlot(this.current) && this.specOf(this.current).perShell;
   }
 
   /** The held slot is a gun that zooms (sniper): the crosshair hides until RMB brings the scope up. */
@@ -166,6 +178,7 @@ export class Weapons {
   /** Allowed by the room, loaded (primary needs a gun, grenade slot needs stock) and not blocked by the flag lock. */
   canUse(w: Weapon): boolean {
     if (!this.allowed.includes(w)) return false;
+    if (w === WEAPON_PISTOL && this.pistol === GUN_NONE) return false;
     if (w === WEAPON_PRIMARY && this.gun === GUN_NONE) return false;
     if (w === WEAPON_TASER && this.taser === GUN_NONE) return false;
     if (w === WEAPON_GRENADE && this.grenades <= 0) return false;
@@ -239,6 +252,11 @@ export class Weapons {
   /** Server-driven taser slot: a pickup arms it (2 charges), death / the last charge empties it. */
   setTaser(kind: GunKind): void {
     this.setGunSlot(WEAPON_TASER, kind, () => this.events.onTaserChange(kind));
+  }
+
+  /** Server-driven pistol slot: filled everywhere except td spawns, where a ground pistol arms it. */
+  setPistol(kind: GunKind): void {
+    this.setGunSlot(WEAPON_PISTOL, kind, () => this.events.onPistolChange(kind));
   }
 
   private setGunSlot(slot: Weapon, kind: GunKind, notify: () => void): void {

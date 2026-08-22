@@ -86,8 +86,11 @@ import {
   pelletDirections,
   pickSpawn,
   resolveRay,
+  TD_TEAM_SPAWN_COUNT,
+  unoccupiedSpawns,
   serverReloadMs,
   spawnPrimary,
+  spawnWeapon,
   stepGrenade,
   swordDamage,
   swordVictims,
@@ -212,6 +215,8 @@ export class ArenaRoom extends Room<RoomState> {
   private bases!: Record<Team, SpawnPoint>;
   /** TD: the fixed weapon spots (8 per side, mirrored). */
   private weaponSpots: SpawnPoint[] = [];
+  /** TD: the fixed pistol drops at the east-west arm mouths. */
+  private pistolSpots: SpawnPoint[] = [];
   /** TD: where the roads cross (the bots' fallback goal). */
   private tdCenter: Vec3 = { x: 0, y: 0, z: 0 };
   /** TD: when the running round started / when the intermission ends. */
@@ -292,6 +297,7 @@ export class ArenaRoom extends Room<RoomState> {
     this.dropZone = gen.dropZone;
     this.bases = gen.bases;
     this.weaponSpots = gen.weaponSpots ?? [];
+    this.pistolSpots = gen.pistolSpots ?? [];
     this.rng = createRng(seed ^ 0xabcdef);
     if (this.ctf) {
       this.state.captureLimit = parseCaptureLimit(options.captureLimit);
@@ -426,7 +432,7 @@ export class ArenaRoom extends Room<RoomState> {
       for (const [sid, other] of this.state.players) {
         if (sid !== id && this.targetable(sid, other, now) && !this.sameTeam(p, other)) enemies.push({ id: sid, x: other.x, y: other.y, z: other.z });
       }
-      const view: BotView = { self: rt.phys, enemies, now, gun: p.gun as GunKind };
+      const view: BotView = { self: rt.phys, enemies, now, gun: p.gun as GunKind, pistol: p.pistol !== GUN_NONE };
       if (this.ctf) {
         const flags = this.flagStates();
         view.goal = botCtfGoal(p.team as Team, id, rt.phys, flags, this.bases);
@@ -520,7 +526,7 @@ export class ArenaRoom extends Room<RoomState> {
     const p = this.actor(client, m.epoch);
     if (!p) return;
     this.applyPose(p, m);
-    if (weaponAllowed(this.weaponMode, m.weapon) && p.weapon !== m.weapon) {
+    if (weaponAllowed(this.weaponMode, m.weapon) && p.weapon !== m.weapon && this.slotFilled(p, m.weapon)) {
       p.weapon = m.weapon;
       // Putting the sword away drops a pending charge. (A charge may legitimately arrive
       // before the pose that switches to the sword, so only the gun cancels it.)
@@ -576,8 +582,17 @@ export class ArenaRoom extends Room<RoomState> {
   }
 
   /** The gun kind in a gun slot: the pistol, the picked-up primary, or the taser (GUN_NONE = empty). */
+  /** The slot actually holds something usable (a pose may not bring out an empty slot). */
+  private slotFilled(p: PlayerSchema, slot: Weapon): boolean {
+    if (slot === WEAPON_PISTOL) return p.pistol !== GUN_NONE;
+    if (slot === WEAPON_PRIMARY) return p.gun !== GUN_NONE;
+    if (slot === WEAPON_TASER) return p.taser !== GUN_NONE;
+    if (slot === WEAPON_GRENADE) return p.grenades > 0;
+    return true;
+  }
+
   private gunKindFor(p: PlayerSchema, slot: Weapon): GunKind {
-    if (slot === WEAPON_PISTOL) return GUN_PISTOL;
+    if (slot === WEAPON_PISTOL) return p.pistol as GunKind;
     return (slot === WEAPON_TASER ? p.taser : p.gun) as GunKind;
   }
 
@@ -672,18 +687,19 @@ export class ArenaRoom extends Room<RoomState> {
     if (spec.consumable && meta.ammo[slot] <= 0) this.clearSlot(p, meta, slot);
   }
 
-  /** Empty the primary or taser slot (taser spent, death) and fall back to the default slot if it was out. */
+  /** Empty the primary or taser slot (taser spent, death) and fall back to a slot that still works. */
   private clearSlot(p: PlayerSchema, meta: PlayerMeta, slot: Weapon): void {
     if (slot === WEAPON_TASER) p.taser = GUN_NONE;
     else p.gun = GUN_NONE;
     meta.ammo[slot] = 0;
     meta.reloadDoneAt[slot] = 0;
-    if (p.weapon === slot) p.weapon = defaultWeapon(this.weaponMode);
+    if (p.weapon === slot) p.weapon = p.pistol === GUN_NONE ? WEAPON_MELEE : defaultWeapon(this.weaponMode);
   }
 
-  /** Put `kind` in the primary or taser slot with a full magazine. */
+  /** Put `kind` in the pistol, primary or taser slot with a full magazine. */
   private armGun(p: PlayerSchema, meta: PlayerMeta, slot: Weapon, kind: GunKind): void {
     if (slot === WEAPON_TASER) p.taser = kind;
+    else if (slot === WEAPON_PISTOL) p.pistol = kind;
     else p.gun = kind;
     meta.ammo[slot] = gunSpec(kind).magSize;
     meta.reloadDoneAt[slot] = 0;
@@ -908,7 +924,7 @@ export class ArenaRoom extends Room<RoomState> {
     if (d.slot === WEAPON_GRENADE) {
       if (p.grenades >= GRENADE_MAX) return false;
       p.grenades = Math.min(GRENADE_MAX, p.grenades + d.kind);
-    } else if (d.slot === WEAPON_PRIMARY || d.slot === WEAPON_TASER) {
+    } else if (d.slot === WEAPON_PISTOL || d.slot === WEAPON_PRIMARY || d.slot === WEAPON_TASER) {
       this.armGun(p, meta, d.slot as Weapon, d.kind as GunKind);
     } else {
       p.melee = d.kind;
@@ -953,26 +969,30 @@ export class ArenaRoom extends Room<RoomState> {
     this.broadcast(MSG.kill, msg);
   }
 
-  /** Spawn points available to a player: teams (ctf/td) respawn near their own base. */
+  /** Spawn points available to a player: teams (ctf/td) respawn near their own base (td squads respawn together, so they get a bigger pool). */
   private spawnsFor(p: PlayerSchema): SpawnPoint[] {
-    return this.teams ? teamSpawns(this.spawnPoints, this.bases[p.team as Team]) : this.spawnPoints;
+    if (!this.teams) return this.spawnPoints;
+    return teamSpawns(this.spawnPoints, this.bases[p.team as Team], this.td ? TD_TEAM_SPAWN_COUNT : undefined);
   }
 
-  /** Training dummies stand on the central plateau, spaced out like drops; everyone else uses spawn points. */
-  private pickSpawnFor(id: string, p: PlayerSchema, others: { x: number; z: number }[]): SpawnPoint {
+  /** Training dummies stand on the central plateau, spaced out like drops; everyone else uses spawn points not already stood on. */
+  private pickSpawnFor(id: string, p: PlayerSchema, enemies: { x: number; z: number }[], occupied: { x: number; z: number }[]): SpawnPoint {
     if (this.mode === 'training' && this.bots.has(id)) {
-      const spot = pickDropSpot(this.world, this.rng, others, this.spawnPoints, this.dropZone);
+      const spot = pickDropSpot(this.world, this.rng, occupied, this.spawnPoints, this.dropZone);
       if (spot) return spot;
     }
-    return pickSpawn(this.spawnsFor(p), others, this.rng);
+    return pickSpawn(unoccupiedSpawns(this.spawnsFor(p), occupied), enemies, this.rng);
   }
 
   private spawn(id: string, p: PlayerSchema): void {
     const enemies: { x: number; z: number }[] = [];
+    const occupied: { x: number; z: number }[] = [];
     for (const [sid, other] of this.state.players) {
-      if (sid !== id && other.alive && !this.sameTeam(p, other)) enemies.push({ x: other.x, z: other.z });
+      if (sid === id || !other.alive) continue;
+      occupied.push({ x: other.x, z: other.z });
+      if (!this.sameTeam(p, other)) enemies.push({ x: other.x, z: other.z });
     }
-    const s = this.pickSpawnFor(id, p, enemies);
+    const s = this.pickSpawnFor(id, p, enemies, occupied);
     p.x = s.x;
     p.y = s.y;
     p.z = s.z;
@@ -980,12 +1000,14 @@ export class ArenaRoom extends Room<RoomState> {
     p.pitch = 0;
     p.alive = true;
     p.hp = MAX_HP;
-    p.weapon = defaultWeapon(this.weaponMode);
+    p.weapon = spawnWeapon(this.mode, this.weaponMode);
     // Picked-up drops are lost on death: everyone comes back with the plain sword, an empty primary slot and fresh grenades.
+    // Team elimination spawns blade-only: no pistol (the fixed ground pistols fill the slot) and no grenades.
     p.melee = MELEE_SWORD;
+    p.pistol = this.td ? GUN_NONE : GUN_PISTOL;
     p.gun = GUN_NONE;
     p.taser = GUN_NONE;
-    p.grenades = GRENADE_START;
+    p.grenades = this.td ? 0 : GRENADE_START;
     p.shielded = this.spawnProtectMs > 0;
     const meta = this.meta.get(id);
     if (meta) {
@@ -1089,21 +1111,27 @@ export class ArenaRoom extends Room<RoomState> {
     this.broadcast(MSG.round, msg);
   }
 
-  /** Clear the ground and lay each side's fixed weapon row (same spots and kinds every round; they never expire). */
+  /** Clear the ground and lay each side's fixed weapon row plus the arm-mouth pistols (same spots and kinds every round; they never expire). */
   private layTdWeapons(): void {
     this.state.drops.clear();
     this.dropExpiry.clear();
     this.dropThrower.clear();
-    const loadout = tdWeaponLoadout(this.weaponMode);
-    for (const [i, s] of this.weaponSpots.entries()) {
-      const k = loadout[i % loadout.length];
+    const lay = (s: SpawnPoint, slot: number, kind: number): void => {
       const d = new DropSchema();
-      d.slot = k.slot;
-      d.kind = k.kind;
+      d.slot = slot;
+      d.kind = kind;
       d.x = s.x;
       d.y = s.y;
       d.z = s.z;
       this.state.drops.set(`d${++this.dropSeq}`, d);
+    };
+    const loadout = tdWeaponLoadout(this.weaponMode);
+    for (const [i, s] of this.weaponSpots.entries()) {
+      const k = loadout[i % loadout.length];
+      lay(s, k.slot, k.kind);
+    }
+    if (weaponAllowed(this.weaponMode, WEAPON_PISTOL)) {
+      for (const s of this.pistolSpots) lay(s, WEAPON_PISTOL, GUN_PISTOL);
     }
   }
 

@@ -24,6 +24,8 @@ export interface GeneratedWorld {
   bases: Record<Team, SpawnPoint>;
   /** Team elimination only: the fixed weapon spots, 8 red-side then their 8 blue-side mirrors (same order). */
   weaponSpots?: SpawnPoint[];
+  /** Team elimination only: fixed pistol drops at the east-west arm mouths (beside the border stubs). */
+  pistolSpots?: SpawnPoint[];
 }
 
 const BORDER_WALL_H = 6;
@@ -239,113 +241,122 @@ export function generateCtfWorld(seed: number): GeneratedWorld {
   };
 }
 
-// --- TD map layout (teams north/south; the map is mirrored across its z middle so both sides get the same ground) ---
-/** The two brick-paved roads whose crossing is the "ngã tư"; flattened to this height so they are always walkable. */
-const TD_ROAD_MIN = 28;
-const TD_ROAD_MAX = 35; // inclusive: 8 wide
-const TD_ROAD_H = 3;
-/** Hollow corner buildings framing the intersection (north pair; the south pair is the mirror). */
-const TD_BUILDINGS: readonly Rect[] = [
-  { minX: 15, maxX: 23, minZ: 15, maxZ: 23 },
-  { minX: 40, maxX: 48, minZ: 15, maxZ: 23 },
+// --- TD map layout (teams north/south) ---
+/** Flat ground level of the whole map; the cross sinks below it into the lake. */
+const TD_GROUND_H = 3;
+/** Cover blocks and border stubs: too tall to see or jump over. */
+const TD_WALL_H = 7;
+/** Quarter-round corner radius of the cover blocks. */
+const TD_BLOCK_CORNER_R = 6;
+/**
+ * The four solid cover blocks, one per quadrant. Deliberately offset from one
+ * another (NOT mirrored): the staggered corridor edges give every corner of
+ * the crossing its own off-angle peek.
+ */
+const TD_BLOCKS: readonly Rect[] = [
+  { minX: 9, maxX: 34, minZ: 12, maxZ: 34 }, // NW
+  { minX: 42, maxX: 67, minZ: 10, maxZ: 32 }, // NE: 2 north of NW
+  { minX: 11, maxX: 36, minZ: 41, maxZ: 63 }, // SW: 2 east of NW's mirror
+  { minX: 44, maxX: 66, minZ: 39, maxZ: 61 }, // SE: 2 north of SW's mirror-ish twin
 ];
-const TD_WALL_H = 4;
-const TD_DOOR_WIDTH = 3;
-/** Each team spawns in the band z 2..TD_SPAWN_BAND at its own end. */
-const TD_SPAWN_BAND = 11;
-const TD_TARGET_SPAWNS = 24;
-const TD_MIN_SPAWN_DIST = 6;
-/** Fixed weapon spots: this row of x columns at TD_WEAPON_Z (red) and its mirror (blue). */
-const TD_WEAPON_XS: readonly number[] = [12, 18, 24, 30, 34, 40, 46, 52];
-const TD_WEAPON_Z = 13;
+/**
+ * The cross-shaped water channel between the blocks (jogged like the blocks
+ * are). It spans only the ground the blocks frame — it stops short of the
+ * yards and the border lanes — and every channel cell is water, bank to bank:
+ * a one-block-deep trench whose surface sits flush with the flat ground, so
+ * you sink in wading and jump one block to climb out anywhere.
+ */
+const TD_ROADS: readonly Rect[] = [
+  { minX: 35, maxX: 41, minZ: 10, maxZ: 34 }, // north channel
+  { minX: 37, maxX: 43, minZ: 41, maxZ: 63 }, // south channel (jogged east)
+  { minX: 9, maxX: 34, minZ: 35, maxZ: 40 }, // west channel
+  { minX: 44, maxX: 67, minZ: 33, maxZ: 38 }, // east channel (jogged north)
+  { minX: 35, maxX: 43, minZ: 33, maxZ: 40 }, // the crossing
+];
+/** The crossing: also the drop zone and the bots' fallback goal. */
+const TD_CROSS: Rect = { minX: 35, maxX: 43, minZ: 33, maxZ: 40 };
+/** Border stubs: short walls poking in from the border at each corridor mouth (cover while entering). */
+const TD_STUBS: readonly Rect[] = [
+  { minX: 37, maxX: 39, minZ: 1, maxZ: 5 }, // north corridor mouth
+  { minX: 41, maxX: 43, minZ: 70, maxZ: 74 }, // south corridor mouth
+  { minX: 1, maxX: 5, minZ: 36, maxZ: 38 }, // west arm mouth
+  { minX: 70, maxX: 74, minZ: 34, maxZ: 36 }, // east arm mouth
+];
+/** Both bases (and the base-to-base walk) sit on this x column, between the mouth stubs. */
+const TD_BASE_X = 40;
+/** Each team spawns on two strips (these x ranges, z 2..TD_SPAWN_BAND) at its own end; the south side mirrors the north. */
+export const TD_SPAWN_BAND = 6;
+const TD_SPAWN_STRIPS: readonly [number, number][] = [
+  [12, 32],
+  [46, 66],
+];
+const TD_TARGET_SPAWNS_PER_SIDE = 16;
+const TD_MIN_SPAWN_DIST = 4;
+/** Fixed weapon spots: two rows of 4 (one per spawn strip) at TD_WEAPON_Z (red) and their mirrors (blue). */
+const TD_WEAPON_XS: readonly number[] = [15, 21, 27, 33, 45, 51, 57, 63];
+const TD_WEAPON_Z = 8;
+/** Fixed pistol drops: one on each side of the west and east arm-mouth stubs. */
+const TD_PISTOL_SPOTS: readonly [number, number][] = [
+  [3, 33],
+  [3, 41],
+  [72, 31],
+  [72, 39],
+];
 
 /**
  * Deterministic team-elimination map: a square crossroads ("ngã tư tử thần").
- * Two flat brick roads cross in the middle; four hollow corner buildings frame
- * the intersection, each with a doorway onto both roads. Each team spawns in
- * its own band at the north/south end behind a row of fixed weapon spots, with
- * a little cover. Everything is mirrored across the z middle so both teams
- * fight over identical ground, and the north-south road runs base to base so
- * the bots always have a route.
+ * The ground is flat; four solid rounded cover blocks — deliberately offset,
+ * not mirrored, so the corridor corners are staggered into off-angle peeks —
+ * leave a cross of corridors between them, and the whole cross sinks into a
+ * cross-shaped lake (brick banks stepping down into water). Short border
+ * stubs cover each corridor mouth. Each team spawns on two strips at its own
+ * end behind two rows of fixed weapon spots; spawn strips, weapon rows and
+ * bases mirror exactly (fairness lives in the yards, the angles live in the
+ * middle), and the north-south corridor runs base to base so the bots always
+ * have a route.
  */
 export function generateTdWorld(seed: number): GeneratedWorld {
   const world = createWorld(TD_WORLD_SX, WORLD_SY, TD_WORLD_SZ);
-  const rng = createRng(seed ^ 0x6a09e667);
-  const noise = createNoise2D(seed ^ 0xbb67ae85);
   const sz = world.sz;
   const mirrorZ = (z: number): number => sz - 1 - z;
-  const onRoad = (x: number, z: number): boolean => (x >= TD_ROAD_MIN && x <= TD_ROAD_MAX) || (z >= TD_ROAD_MIN && z <= TD_ROAD_MAX);
-  const buildings: Rect[] = [
-    ...TD_BUILDINGS,
-    ...TD_BUILDINGS.map((r) => ({ minX: r.minX, maxX: r.maxX, minZ: mirrorZ(r.maxZ), maxZ: mirrorZ(r.minZ) })),
-  ];
+  const onRoad = (x: number, z: number): boolean => TD_ROADS.some((r) => inRect(r, x, z));
 
-  // Gentle mirrored ground (3..4, so the flat roads never have a bank too tall to jump out over),
-  // brick-paved roads, flat building floors.
+  // Flat ground everywhere; the channel floor sinks one step, brick-paved.
   fillTerrain(world, (x, z) => {
-    const nz = z < sz / 2 ? z : mirrorZ(z);
-    let h = 3 + Math.floor(noise(x / 12, nz / 12) * 2);
-    let brick = false;
-    if (buildings.some((r) => inRect(r, x, z))) h = TD_ROAD_H;
-    if (onRoad(x, z)) {
-      h = TD_ROAD_H;
-      brick = true;
-    }
-    return { h, brick };
+    if (!onRoad(x, z)) return { h: TD_GROUND_H, brick: false };
+    return { h: TD_GROUND_H - 1, brick: true };
   });
   borderWall(world);
-
-  // Corner buildings: a doorway onto each road they face (the mirrored pair faces north instead of south).
-  for (const r of TD_BUILDINGS) {
-    const south = { minX: r.minX, maxX: r.maxX, minZ: mirrorZ(r.maxZ), maxZ: mirrorZ(r.minZ) };
-    const roadSide = r.maxX < TD_ROAD_MIN ? 'e' : 'w';
-    roomAt(world, r, [roadSide, 's']);
-    roomAt(world, south, [roadSide, 'n']);
-  }
-
-  // Spawn-zone cover: a short wall in front of each spawn band, mirrored.
-  for (const x0 of [10, 22, 42, 52]) {
-    wallCells(world, x0, 9, 4, 1);
-    wallCells(world, x0, mirrorZ(9), 4, 1);
-  }
-  // A few mirrored trees and pillars in the side strips between the buildings and the border.
-  const strip = (x: number, z: number): boolean => (x >= 3 && x <= 11 || x >= 52 && x <= 60) && z >= 15 && z <= 24;
-  for (let i = 0, tries = 0; i < 6 && tries < 36; tries++) {
-    const x = randInt(rng, 3, world.sx - 4);
-    const z = randInt(rng, 15, 24);
-    if (!strip(x, z)) continue;
-    if (rng() < 0.6) {
-      const trunk = randInt(rng, 3, 4);
-      treeAt(world, x, z, trunk);
-      treeAt(world, x, mirrorZ(z), trunk);
-    } else {
-      if (!strip(x + 1, z + 1)) continue;
-      const h = randInt(rng, 4, 6);
-      pillarAt(world, x, z, h);
-      pillarAt(world, x, mirrorZ(z + 1), h);
+  // Fill the whole channel with water, bank to bank, its surface flush with the flat ground.
+  for (let z = 0; z < sz; z++)
+    for (let x = 0; x < world.sx; x++) {
+      if (onRoad(x, z)) setBlock(world, x, TD_GROUND_H, z, Block.Water);
     }
-    i++;
-  }
 
-  const spawnPoints = computeSpawnPoints(
-    world,
-    createRng(seed ^ 0x3c6ef372),
-    TD_TARGET_SPAWNS,
-    TD_MIN_SPAWN_DIST,
-    (_x, z) => z <= TD_SPAWN_BAND || z >= sz - 1 - TD_SPAWN_BAND,
-  );
+  // The four cover blocks and the border stubs.
+  for (const r of TD_BLOCKS) solidBlockAt(world, r, TD_BLOCK_CORNER_R);
+  for (const s of TD_STUBS) wallCells(world, s.minX, s.minZ, s.maxX - s.minX + 1, s.maxZ - s.minZ + 1, TD_WALL_H);
+
+  // Spawn points: computed on the north strips, then mirrored south, so both teams get identical spots.
+  const acceptSpawn = (x: number, z: number): boolean =>
+    z <= TD_SPAWN_BAND && TD_SPAWN_STRIPS.some(([lo, hi]) => x >= lo && x <= hi);
+  const north = computeSpawnPoints(world, createRng(seed ^ 0x3c6ef372), TD_TARGET_SPAWNS_PER_SIDE, TD_MIN_SPAWN_DIST, acceptSpawn);
+  const spawnPoints = [
+    ...north,
+    ...north.map((s) => ({ x: s.x, y: columnTop(world, Math.floor(s.x), mirrorZ(Math.floor(s.z))) + 1, z: sz - s.z })),
+  ];
   const spotAt = (x: number, z: number): SpawnPoint => ({ x: x + 0.5, y: columnTop(world, x, z) + 1, z: z + 0.5 });
   const weaponSpots = [
     ...TD_WEAPON_XS.map((x) => spotAt(x, TD_WEAPON_Z)),
     ...TD_WEAPON_XS.map((x) => spotAt(x, mirrorZ(TD_WEAPON_Z))),
   ];
-  const baseX = Math.floor((TD_ROAD_MIN + TD_ROAD_MAX) / 2);
   return {
     world,
     spawnPoints,
-    dropZone: { minX: TD_ROAD_MIN, maxX: TD_ROAD_MAX, minZ: TD_ROAD_MIN, maxZ: TD_ROAD_MAX },
-    bases: { [TEAM_RED]: spotAt(baseX, 6), [TEAM_BLUE]: spotAt(baseX, mirrorZ(6)) },
+    dropZone: TD_CROSS,
+    bases: { [TEAM_RED]: spotAt(TD_BASE_X, 3), [TEAM_BLUE]: spotAt(TD_BASE_X, mirrorZ(3)) },
     weaponSpots,
+    pistolSpots: TD_PISTOL_SPOTS.map(([x, z]) => spotAt(x, z)),
   };
 }
 
@@ -444,37 +455,28 @@ function scatterPillars(world: World, rng: () => number, n: number, forbidden: (
   }
 }
 
-/** Brick cells over a w×d footprint from (x0, z0), 3 tall, each column following the ground. */
-function wallCells(world: World, x0: number, z0: number, w: number, d: number): void {
+/** Brick cells over a w×d footprint from (x0, z0), `h` tall (default 3), each column following the ground. */
+function wallCells(world: World, x0: number, z0: number, w: number, d: number, h = 3): void {
   for (let dx = 0; dx < w; dx++)
     for (let dz = 0; dz < d; dz++) {
       const base = columnTop(world, x0 + dx, z0 + dz) + 1;
-      for (let y = base; y < base + 3 && y < world.sy; y++) setBlock(world, x0 + dx, y, z0 + dz, Block.Brick);
+      for (let y = base; y < base + h && y < world.sy; y++) setBlock(world, x0 + dx, y, z0 + dz, Block.Brick);
     }
 }
 
 /**
- * A hollow, roofless brick room over `r`: walls TD_WALL_H tall on the rect
- * edge, with a TD_DOOR_WIDTH-wide, two-block-tall doorway centred on each
- * side named in `doors` ('n' = minZ, 's' = maxZ, 'w' = minX, 'e' = maxX).
+ * A solid brick mass over `r`, TD_WALL_H tall above the ground, with
+ * quarter-round corners of radius `cornerR` (cells outside the corner circle
+ * are left open, widening the corridor corners into peek angles).
  */
-function roomAt(world: World, r: Rect, doors: readonly ('n' | 's' | 'e' | 'w')[]): void {
-  const cx = Math.floor((r.minX + r.maxX) / 2);
-  const cz = Math.floor((r.minZ + r.maxZ) / 2);
-  const half = Math.floor(TD_DOOR_WIDTH / 2);
-  const inDoor = (x: number, z: number): boolean =>
-    doors.some((side) => {
-      if (side === 'n') return z === r.minZ && Math.abs(x - cx) <= half;
-      if (side === 's') return z === r.maxZ && Math.abs(x - cx) <= half;
-      if (side === 'w') return x === r.minX && Math.abs(z - cz) <= half;
-      return x === r.maxX && Math.abs(z - cz) <= half;
-    });
+function solidBlockAt(world: World, r: Rect, cornerR: number): void {
   for (let x = r.minX; x <= r.maxX; x++)
     for (let z = r.minZ; z <= r.maxZ; z++) {
-      if (!onRectEdge(r, x, z)) continue;
+      const dx = Math.max(0, r.minX + cornerR - x, x - (r.maxX - cornerR));
+      const dz = Math.max(0, r.minZ + cornerR - z, z - (r.maxZ - cornerR));
+      if (dx * dx + dz * dz > cornerR * cornerR) continue;
       const base = columnTop(world, x, z) + 1;
-      const from = inDoor(x, z) ? base + 2 : base;
-      for (let y = from; y < base + TD_WALL_H && y < world.sy; y++) setBlock(world, x, y, z, Block.Brick);
+      for (let y = base; y < base + TD_WALL_H && y < world.sy; y++) setBlock(world, x, y, z, Block.Brick);
     }
 }
 
@@ -586,13 +588,11 @@ function scatterTrees(world: World, rng: () => number, n: number, forbidden: (x:
   }
 }
 
-/** True if a player can stand with feet at (x, y, z) (block-centre). */
+/** True if a player can stand with feet at (x, y, z) (block-centre). Water is passable (wading) but never support. */
 export function isStandable(world: World, x: number, y: number, z: number): boolean {
-  return (
-    getBlock(world, x, y - 1, z) !== Block.Air &&
-    getBlock(world, x, y, z) === Block.Air &&
-    getBlock(world, x, y + 1, z) === Block.Air
-  );
+  const passable = (b: Block): boolean => b === Block.Air || b === Block.Water;
+  const below = getBlock(world, x, y - 1, z);
+  return below !== Block.Air && below !== Block.Water && passable(getBlock(world, x, y, z)) && passable(getBlock(world, x, y + 1, z));
 }
 
 /**

@@ -41,15 +41,20 @@ export function roundWinner(red: RoundSide, blue: RoundSide): Team | typeof TEAM
 }
 
 /**
- * The weapons laid on the ground on one team's side, in weapon-spot order
- * (worldgen's 8 spots per side): two of each primary gun, or two of each
- * blade in a sword-only room. No taser, no grenade packs — everyone spawns
- * with grenades already.
+ * The weapons laid on the ground, in weapon-spot order (worldgen's 8 north
+ * spots west→east, then their 8 south mirrors): the fixed north row is
+ * sniper, shotgun, SMG, rifle, SMG, shotgun, rifle, sniper, and the south row
+ * is its exact reverse, so each team reads the same order left-to-right from
+ * its own side. Sword-only rooms lay two of each blade instead. No taser and
+ * no grenade packs.
  */
 export function tdWeaponLoadout(weapons: WeaponMode): DropKind[] {
-  const kinds: readonly number[] = weapons === 'sword' ? DROP_KINDS : [GUN_RIFLE, GUN_SMG, GUN_SHOTGUN, GUN_SNIPER];
+  const row: readonly number[] =
+    weapons === 'sword'
+      ? [...DROP_KINDS, ...DROP_KINDS]
+      : [GUN_SNIPER, GUN_SHOTGUN, GUN_SMG, GUN_RIFLE, GUN_SMG, GUN_SHOTGUN, GUN_RIFLE, GUN_SNIPER];
   const slot = weapons === 'sword' ? WEAPON_MELEE : WEAPON_PRIMARY;
-  return [...kinds, ...kinds].map((kind) => ({ slot, kind }));
+  return [...row, ...[...row].reverse()].map((kind) => ({ slot, kind }));
 }
 
 /**

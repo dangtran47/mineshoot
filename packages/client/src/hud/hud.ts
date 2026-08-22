@@ -329,9 +329,9 @@ export class Hud {
     this.toastTimer = performance.now() + ms;
   }
 
-  /** Magazine readout under the weapon name ("7 / 10", or "RELOADING…"). */
-  setAmmo(ammo: number, mag: number, reloading: boolean): void {
-    this.ammo.textContent = reloading ? 'RELOADING…' : `${ammo} / ${mag}`;
+  /** Magazine readout under the weapon name ("7 / 10", or "RELOADING…"; per-shell guns keep the climbing count). */
+  setAmmo(ammo: number, mag: number, reloading: boolean, showCount = false): void {
+    this.ammo.textContent = reloading && !showCount ? 'RELOADING…' : `${ammo} / ${mag}`;
     this.ammo.classList.toggle('reloading', reloading);
     this.ammo.classList.toggle('low', !reloading && ammo <= Math.ceil(mag / 4));
   }

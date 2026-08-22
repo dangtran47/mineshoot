@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { DROP_KINDS, DROP_MIN_SPACING, MELEE_KATANA, MELEE_SWORD } from '../src/melee';
 import { autoPickUpAllowed, dropName, dropPool, pickDropKind, pickDropSpot } from '../src/drops';
 import { GRENADE_DROP_AMOUNT, GRENADE_MAX } from '../src/grenade';
-import { GUN_NONE, GUN_RIFLE, GUN_SHOTGUN, GUN_TASER, PRIMARY_KINDS } from '../src/guns';
-import { WEAPON_GRENADE, WEAPON_MELEE, WEAPON_PRIMARY, WEAPON_TASER } from '../src/protocol';
+import { GUN_NONE, GUN_PISTOL, GUN_RIFLE, GUN_SHOTGUN, GUN_TASER, PRIMARY_KINDS } from '../src/guns';
+import { WEAPON_GRENADE, WEAPON_MELEE, WEAPON_PISTOL, WEAPON_PRIMARY, WEAPON_TASER } from '../src/protocol';
 import { createRng } from '../src/rng';
 import { PLATEAU_MAX, PLATEAU_MIN, generateWorld, isStandable } from '../src/worldgen';
 
@@ -32,8 +32,11 @@ describe('drops', () => {
     for (let i = 0; i < 50; i++) expect(pickDropKind(rng, 'sword').slot).toBe(WEAPON_MELEE);
   });
   it('autoPickUpAllowed fills only an empty slot (grenades: only below the cap)', () => {
-    const bare = { gun: GUN_NONE, taser: GUN_NONE, melee: MELEE_SWORD, grenades: 0 };
+    const bare = { pistol: GUN_NONE, gun: GUN_NONE, taser: GUN_NONE, melee: MELEE_SWORD, grenades: 0 };
     expect(autoPickUpAllowed(bare, { slot: WEAPON_PRIMARY, kind: GUN_RIFLE })).toBe(true);
+    // The pistol slot works like the others: only an empty one takes a ground pistol (td blade-only spawns).
+    expect(autoPickUpAllowed(bare, { slot: WEAPON_PISTOL, kind: GUN_PISTOL })).toBe(true);
+    expect(autoPickUpAllowed({ ...bare, pistol: GUN_PISTOL }, { slot: WEAPON_PISTOL, kind: GUN_PISTOL })).toBe(false);
     expect(autoPickUpAllowed(bare, { slot: WEAPON_TASER, kind: GUN_TASER })).toBe(true);
     expect(autoPickUpAllowed(bare, { slot: WEAPON_MELEE, kind: MELEE_KATANA })).toBe(true);
     expect(autoPickUpAllowed(bare, { slot: WEAPON_GRENADE, kind: GRENADE_DROP_AMOUNT })).toBe(true);

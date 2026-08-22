@@ -19,6 +19,8 @@ export interface NetPlayer {
   weapon: number;
   /** Melee weapon in slot 3 (MeleeKind). */
   melee: number;
+  /** Pistol slot (key 2): GUN_PISTOL, or GUN_NONE while empty (td spawns blade-only). */
+  pistol: number;
   /** Primary gun in slot 1 (GunKind; GUN_NONE = empty). */
   gun: number;
   /** Taser slot (key 5): GUN_TASER while held, GUN_NONE when empty / spent. */

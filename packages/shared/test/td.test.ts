@@ -28,20 +28,22 @@ describe('roundWinner', () => {
 });
 
 describe('tdWeaponLoadout', () => {
-  it('lays two of each primary gun per side when guns are allowed', () => {
+  it('lays the fixed gun row north and its exact reverse south, two of each gun per side', () => {
     const loadout = tdWeaponLoadout('all');
-    expect(loadout).toHaveLength(8);
+    expect(loadout).toHaveLength(16);
     expect(loadout.every((d) => d.slot === WEAPON_PRIMARY)).toBe(true);
-    for (const kind of [GUN_RIFLE, GUN_SMG, GUN_SHOTGUN, GUN_SNIPER]) {
-      expect(loadout.filter((d) => d.kind === kind)).toHaveLength(2);
-    }
+    const row = [GUN_SNIPER, GUN_SHOTGUN, GUN_SMG, GUN_RIFLE, GUN_SMG, GUN_SHOTGUN, GUN_RIFLE, GUN_SNIPER];
+    expect(loadout.slice(0, 8).map((d) => d.kind)).toEqual(row);
+    // The south row reverses, so each team reads the same order left-to-right from its own side.
+    expect(loadout.slice(8).map((d) => d.kind)).toEqual([...row].reverse());
   });
   it('lays two of each blade per side in a sword-only room', () => {
     const loadout = tdWeaponLoadout('sword');
-    expect(loadout).toHaveLength(8);
+    expect(loadout).toHaveLength(16);
     expect(loadout.every((d) => d.slot === WEAPON_MELEE)).toBe(true);
     for (const kind of [MELEE_AXE, MELEE_KATANA, MELEE_SCYTHE, MELEE_PICKAXE]) {
-      expect(loadout.filter((d) => d.kind === kind)).toHaveLength(2);
+      expect(loadout.slice(0, 8).filter((d) => d.kind === kind)).toHaveLength(2);
+      expect(loadout.slice(8).filter((d) => d.kind === kind)).toHaveLength(2);
     }
   });
 });

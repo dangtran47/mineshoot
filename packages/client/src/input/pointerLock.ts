@@ -1,5 +1,16 @@
 const SENSITIVITY = 0.0022;
 export const PITCH_LIMIT = Math.PI / 2 - 0.01;
+const LOCK_SPIKE_WINDOW_MS = 200;
+const LOCK_SPIKE_DELTA = 300;
+
+/**
+ * Chrome can fire one bogus, huge movement right after the lock engages; only
+ * that short window is filtered. A permanent delta cap would eat legitimate
+ * fast flicks on high-DPI mice (they easily exceed 300 counts per event).
+ */
+export function isLockSpike(msSinceLock: number, dx: number, dy: number): boolean {
+  return msSinceLock < LOCK_SPIKE_WINDOW_MS && (Math.abs(dx) > LOCK_SPIKE_DELTA || Math.abs(dy) > LOCK_SPIKE_DELTA);
+}
 
 /**
  * Pointer-lock mouse look producing plain yaw/pitch numbers, plus mouse
@@ -9,6 +20,9 @@ export const PITCH_LIMIT = Math.PI / 2 - 0.01;
 export class PointerLook {
   yaw = 0;
   pitch = 0;
+  /** Extra multiplier on mouse sensitivity (sniper scope sets 1/zoom so aiming slows with the FOV). */
+  sensitivityScale = 1;
+  private lockedAt = -Infinity;
   onLockChange: ((locked: boolean) => void) | null = null;
   onMouseDown: ((button: number) => void) | null = null;
   onMouseUp: ((button: number) => void) | null = null;
@@ -18,16 +32,17 @@ export class PointerLook {
 
   private readonly onMove = (e: MouseEvent): void => {
     if (!this.locked) return;
-    // Ignore the occasional huge spike right after locking.
-    if (Math.abs(e.movementX) > 300 || Math.abs(e.movementY) > 300) return;
+    if (isLockSpike(performance.now() - this.lockedAt, e.movementX, e.movementY)) return;
+    const s = SENSITIVITY * this.sensitivityScale;
     const prevPitch = this.pitch;
-    this.yaw -= e.movementX * SENSITIVITY;
-    this.pitch -= e.movementY * SENSITIVITY;
+    this.yaw -= e.movementX * s;
+    this.pitch -= e.movementY * s;
     if (this.pitch > PITCH_LIMIT) this.pitch = PITCH_LIMIT;
     if (this.pitch < -PITCH_LIMIT) this.pitch = -PITCH_LIMIT;
-    this.onDelta?.(-e.movementX * SENSITIVITY, this.pitch - prevPitch);
+    this.onDelta?.(-e.movementX * s, this.pitch - prevPitch);
   };
   private readonly onChange = (): void => {
+    if (this.locked) this.lockedAt = performance.now();
     this.onLockChange?.(this.locked);
   };
   private readonly onDown = (e: MouseEvent): void => {

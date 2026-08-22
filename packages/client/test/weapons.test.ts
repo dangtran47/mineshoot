@@ -36,6 +36,7 @@ function make(allowed?: Weapon[]): { w: Weapons; log: string[] } {
       onMeleeChange: (k) => log.push(`melee:${k}`),
       onGunChange: (k) => log.push(`gun:${k}`),
       onTaserChange: (k) => log.push(`taser:${k}`),
+      onPistolChange: (k) => log.push(`pistol:${k}`),
       onGrenadesChange: (n) => log.push(`nades:${n}`),
     },
     allowed,
@@ -279,7 +280,7 @@ describe('Weapons', () => {
     expect(w.ammo).toBe(0);
     expect(w.reloadFraction(lastShotAt + s.reloadMs + 3)).not.toBeNull(); // empty again → auto-reload restarted
   });
-  it('sniper: the scope stays down while reloading and comes back once the reload ends', () => {
+  it('sniper: the scope stays up while reloading (the bolt cycle must not kick you out of the zoom)', () => {
     const { w } = make();
     w.setGun(GUN_SNIPER);
     w.select(WEAPON_PRIMARY);
@@ -287,13 +288,22 @@ describe('Weapons', () => {
     w.mouseDown(0);
     w.mouseUp(1);
     w.reload(100);
-    w.altDown(150); // RMB during the reload: no zoom
-    expect(w.zooming).toBe(false);
-    expect(w.zoomFactor).toBe(1);
-    w.update(100 + s.reloadMs); // reload done, RMB still held: the scope comes up
+    w.altDown(150); // RMB during the reload: the scope comes up anyway
+    expect(w.zooming).toBe(true);
+    expect(w.zoomFactor).toBe(s.zoom);
+    w.update(100 + s.reloadMs); // reload done, RMB still held
     expect(w.zooming).toBe(true);
     w.altUp(100 + s.reloadMs + 1);
     expect(w.zooming).toBe(false);
+  });
+  it('perShell: true only while holding a shell-by-shell gun (shotgun)', () => {
+    const { w } = make();
+    w.setGun(GUN_SHOTGUN);
+    expect(w.perShell).toBe(false); // still holding the pistol
+    w.select(WEAPON_PRIMARY);
+    expect(w.perShell).toBe(true);
+    w.setGun(GUN_RIFLE);
+    expect(w.perShell).toBe(false);
   });
   it('gun: manual reload tops up a partial magazine; a full one or a sword ignores it', () => {
     const { w, log } = make();

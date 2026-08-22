@@ -1,5 +1,5 @@
 import { MapSchema, Schema, type } from '@colyseus/schema';
-import { CTF_DEFAULT_CAPTURE_LIMIT, GRENADE_START, GUN_NONE, MAX_HP, MELEE_SWORD, TD_DEFAULT_ROUND_LIMIT, TEAM_NONE, WEAPON_MELEE } from '@mineshoot/shared';
+import { CTF_DEFAULT_CAPTURE_LIMIT, GRENADE_START, GUN_NONE, GUN_PISTOL, MAX_HP, MELEE_SWORD, TD_DEFAULT_ROUND_LIMIT, TEAM_NONE, WEAPON_MELEE } from '@mineshoot/shared';
 
 export class PlayerSchema extends Schema {
   @type('string') name = '';
@@ -17,6 +17,8 @@ export class PlayerSchema extends Schema {
   @type('uint8') weapon = 0;
   /** Melee weapon in slot 2 (MeleeKind): the sword, or a picked-up drop. Reset on every spawn. */
   @type('uint8') melee = MELEE_SWORD;
+  /** Pistol slot (key 2, GunKind): GUN_PISTOL everywhere except td, whose blade-only spawns leave it GUN_NONE until a ground pistol is lifted. */
+  @type('uint8') pistol = GUN_PISTOL;
   /** Primary gun in slot 1 (GunKind): GUN_NONE until a drop / training pick. Reset on every spawn. */
   @type('uint8') gun = GUN_NONE;
   /** Taser slot (key 5): GUN_TASER while held, GUN_NONE when empty / spent. Reset on every spawn. */

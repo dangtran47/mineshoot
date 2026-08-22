@@ -4,12 +4,14 @@ import { TEAM_BLUE, TEAM_RED } from '../src/protocol';
 import { Block } from '../src/types';
 import type { World } from '../src/types';
 import { columnTop, getBlock, hashWorld, isSolid } from '../src/world';
-import { PLATEAU_MAX, PLATEAU_MIN, generateCtfWorld, generateTdWorld, generateWorld, generateWorldFor, isStandable } from '../src/worldgen';
+import { PLATEAU_MAX, PLATEAU_MIN, TD_SPAWN_BAND, generateCtfWorld, generateTdWorld, generateWorld, generateWorldFor, isStandable } from '../src/worldgen';
 
-/** Feet height of a player standing on column (x, z), or -1 if it is not standable. */
+/** Feet height a player settles at in column (x, z) — sinking through water to its floor — or -1 if there is no footing. */
 function feetY(world: World, x: number, z: number): number {
-  const y = columnTop(world, x, z) + 1;
-  return isStandable(world, x, y, z) ? y : -1;
+  for (let y = columnTop(world, x, z) + 1; y >= 1; y--) {
+    if (isStandable(world, x, y, z)) return y;
+  }
+  return -1;
 }
 
 /**
@@ -232,7 +234,7 @@ describe('generateCtfWorld', () => {
 });
 
 describe('generateTdWorld', () => {
-  it('is deterministic per seed and mirrored across the z middle', () => {
+  it('is deterministic per seed; spawns mirror exactly even though the cover blocks are offset', () => {
     const a = generateTdWorld(42);
     const b = generateTdWorld(42);
     expect(hashWorld(a.world)).toBe(hashWorld(b.world));
@@ -240,14 +242,19 @@ describe('generateTdWorld', () => {
     expect(a.weaponSpots).toEqual(b.weaponSpots);
     expect(a.world.sx).toBe(TD_WORLD_SX);
     expect(a.world.sz).toBe(TD_WORLD_SZ);
-    expect(hashWorld(generateTdWorld(43).world)).not.toBe(hashWorld(a.world));
-    // Both halves are the same ground (mirror image), so neither team gets better cover.
-    const { world } = a;
-    for (let x = 0; x < world.sx; x++)
-      for (let z = 0; z < world.sz / 2; z++)
-        for (let y = 0; y < world.sy; y++) {
-          expect(getBlock(world, x, y, z), `block ${x},${y},${z}`).toBe(getBlock(world, x, y, world.sz - 1 - z));
-        }
+    // The blocks are fixed and the ground is flat, so only the spawn shuffle depends on the seed.
+    expect(generateTdWorld(43).spawnPoints).not.toEqual(a.spawnPoints);
+    // The middle of the map is deliberately asymmetric (offset blocks = shooting
+    // angles), but fairness lives in the yards: every north spawn point has an
+    // exact south mirror — same x, mirrored z, same footing.
+    const north = a.spawnPoints.filter((s) => s.z < a.world.sz / 2);
+    const south = a.spawnPoints.filter((s) => s.z >= a.world.sz / 2);
+    expect(south.length).toBe(north.length);
+    for (const s of north) {
+      const m = south.find((t) => t.x === s.x && Math.abs(t.z - (a.world.sz - s.z)) < 1e-9);
+      expect(m, `mirror of spawn ${s.x},${s.z}`).toBeTruthy();
+      expect(m!.y).toBe(s.y);
+    }
   });
 
   it('puts each base in its own spawn zone, standable, on the road axis', () => {
@@ -273,7 +280,7 @@ describe('generateTdWorld', () => {
       expect(blue.length).toBeGreaterThanOrEqual(8);
       for (const s of spawnPoints) {
         expect(isStandable(world, Math.floor(s.x), s.y, Math.floor(s.z))).toBe(true);
-        expect(s.z <= 11.5 || s.z >= world.sz - 12.5, `spawn at z ${s.z}`).toBe(true);
+        expect(s.z <= TD_SPAWN_BAND + 0.5 || s.z >= world.sz - TD_SPAWN_BAND - 1.5, `spawn at z ${s.z}`).toBe(true);
       }
     }
   });
@@ -304,6 +311,64 @@ describe('generateTdWorld', () => {
         expect(Math.abs(y - prev), `seed ${seed} z ${z}: ${prev} -> ${y}`).toBeLessThanOrEqual(1);
         prev = y;
       }
+    }
+  });
+
+  it('places the four offset cover blocks, the border stubs and the sunken lake', () => {
+    for (const seed of [1, 7, 42]) {
+      const { world, pistolSpots } = generateTdWorld(seed);
+      const wallTall = (x: number, z: number): void => {
+        // A TD_WALL_H block on ground 3..4 puts the column top at 10+; feetY -1 (no headroom) also counts as walled.
+        const y = feetY(world, x, z);
+        expect(y < 0 || y >= 10, `expected wall at ${x},${z} (feetY ${y})`).toBe(true);
+      };
+      const open = (x: number, z: number): void => {
+        const y = feetY(world, x, z);
+        expect(y, `expected walkable ground at ${x},${z}`).toBeGreaterThan(0);
+        expect(y, `expected walkable ground at ${x},${z}`).toBeLessThanOrEqual(6);
+      };
+      // The middle of each cover block is solid wall (they are offset, not mirrored).
+      wallTall(22, 23);
+      wallTall(54, 21);
+      wallTall(24, 52);
+      wallTall(55, 50);
+      // The staggered corridors between them are walkable (banks or water)…
+      for (const [x, z] of [
+        [38, 20],
+        [40, 55],
+        [20, 37],
+        [55, 35],
+      ]) open(x, z);
+      // …and so are the side lanes along the border.
+      open(4, 20);
+      open(71, 55);
+      // A border stub covers each corridor mouth.
+      wallTall(38, 3);
+      wallTall(42, 72);
+      wallTall(3, 37);
+      wallTall(72, 35);
+      // Four standable pistol spots sit at the east-west arm mouths, beside the stubs.
+      expect(pistolSpots).toHaveLength(4);
+      for (const s of pistolSpots!) expect(isStandable(world, Math.floor(s.x), s.y, Math.floor(s.z)), `pistol spot ${s.x},${s.z}`).toBe(true);
+      // The cross-shaped channel between the blocks is water bank to bank, one block
+      // deep, its surface flush with the flat ground. Water is not support — you sink
+      // through it to the channel floor and jump one block to climb out.
+      for (const [x, z] of [
+        [39, 36], // the crossing
+        [38, 20], // north channel
+        [40, 55], // south channel
+        [20, 37], // west channel
+        [55, 35], // east channel
+        [35, 36], // channel edge: water right up to the grass, no brick rim
+      ]) {
+        expect(getBlock(world, x, 3, z), `water at ${x},${z}`).toBe(Block.Water);
+        expect(feetY(world, x, z), `sunk to the floor at ${x},${z}`).toBe(3);
+        expect(isStandable(world, x, 4, z), `no standing ON the water at ${x},${z}`).toBe(false);
+      }
+      // The channel stops short of the yards: the approach in front of the spawn is dry.
+      expect(getBlock(world, 38, 3, 7)).not.toBe(Block.Water);
+      expect(feetY(world, 38, 7)).toBe(4);
+      expect(feetY(world, 33, 4)).toBe(4); // flat spawn yard
     }
   });
 

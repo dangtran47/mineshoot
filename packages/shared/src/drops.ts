@@ -3,7 +3,7 @@ import { GUN_NONE, GUN_TASER, PRIMARY_KINDS, gunSpec } from './guns';
 import type { GunKind } from './guns';
 import { DROP_KINDS, DROP_MIN_SPACING, MELEE_SWORD, meleeStats } from './melee';
 import type { MeleeKind } from './melee';
-import { WEAPON_GRENADE, WEAPON_MELEE, WEAPON_PRIMARY, WEAPON_TASER, weaponAllowed } from './protocol';
+import { WEAPON_GRENADE, WEAPON_MELEE, WEAPON_PISTOL, WEAPON_PRIMARY, WEAPON_TASER, weaponAllowed } from './protocol';
 import type { WeaponMode } from './protocol';
 import type { SpawnPoint, World } from './types';
 import { columnTop } from './world';
@@ -11,7 +11,7 @@ import { isStandable } from './worldgen';
 import type { Rect } from './worldgen';
 
 /** Slots a drop can fill. */
-export type DropSlot = typeof WEAPON_PRIMARY | typeof WEAPON_MELEE | typeof WEAPON_GRENADE | typeof WEAPON_TASER;
+export type DropSlot = typeof WEAPON_PISTOL | typeof WEAPON_PRIMARY | typeof WEAPON_MELEE | typeof WEAPON_GRENADE | typeof WEAPON_TASER;
 /** What a drop gives: a GunKind (primary), a MeleeKind (melee) or a grenade count (grenade). */
 export interface DropKind {
   slot: DropSlot;
@@ -27,6 +27,8 @@ export interface Drop extends DropKind {
 
 /** What a player already holds per slot, for the auto-pickup rule. */
 export interface DropHolder {
+  /** Pistol slot: GUN_PISTOL, or GUN_NONE while empty (td spawns blade-only). */
+  pistol: number;
   gun: number;
   taser: number;
   melee: number;
@@ -41,6 +43,7 @@ export interface DropHolder {
  */
 export function autoPickUpAllowed(holder: DropHolder, drop: DropKind): boolean {
   if (drop.slot === WEAPON_GRENADE) return holder.grenades < GRENADE_MAX;
+  if (drop.slot === WEAPON_PISTOL) return holder.pistol === GUN_NONE;
   if (drop.slot === WEAPON_PRIMARY) return holder.gun === GUN_NONE;
   if (drop.slot === WEAPON_TASER) return holder.taser === GUN_NONE;
   return holder.melee === MELEE_SWORD;
@@ -66,7 +69,7 @@ export function pickDropKind(rng: () => number, mode: WeaponMode = 'all'): DropK
 
 export function dropName(d: DropKind): string {
   if (d.slot === WEAPON_GRENADE) return `Grenades ×${d.kind}`;
-  if (d.slot === WEAPON_PRIMARY || d.slot === WEAPON_TASER) return gunSpec(d.kind as GunKind).name;
+  if (d.slot === WEAPON_PISTOL || d.slot === WEAPON_PRIMARY || d.slot === WEAPON_TASER) return gunSpec(d.kind as GunKind).name;
   return meleeStats(d.kind as MeleeKind).name;
 }
 

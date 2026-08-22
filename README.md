@@ -92,15 +92,16 @@ empty and is filled from drops.
   (throw the one you hold away with `G` to take another). In a **deathmatch**
   every (re)spawn also rolls a **random
   primary** (rifle / SMG / shotgun / sniper — never the taser) and you come
-  back holding it; team modes such as CTF keep the pistol-only spawn, and the
-  training range lets you pick your own.
+  back holding it; CTF keeps the pistol-only spawn, Team Elimination spawns
+  blade-only (even the pistol comes off the ground), and the training range
+  lets you pick your own.
 
   | Gun | Mag | Cooldown | Reload | Range | Dmg head/torso/legs | Twist |
   | --- | --- | --- | --- | --- | --- | --- |
   | Rifle | 25 | 150 ms | 2.0 s | 60 | 70 / 25 / 12 | full-auto, slight spread (1.5°); spray climbs ~1.3°/shot then S-drifts right, then left |
   | SMG | 35 | 80 ms | 1.8 s | 40 | 40 / 15 / 8 | full-auto, wide spread (3°); soft ~0.7°/shot climb with a gentle zigzag |
-  | Shotgun | 6 | 400 ms | 450 ms **per shell** | 18 | 45 / 25 / 12 **per pellet** | 8 pellets in a 6° cone — one-shots up close, useless far; 3° kick per shot; reloads shell by shell and **fires straight out of the reload** once a shell is in |
-  | Sniper | 4 | 1.2 s | 2.8 s | 60 | 100 / 100 / 60 | `RMB` opens the round scope (×3) — but not while reloading; no crosshair from the hip; body shots kill; 4° kick per shot |
+  | Shotgun | 6 | 400 ms | 450 ms **per shell** | 18 | 45 / 25 / 12 **per pellet** | 8 pellets in a 6° cone — one-shots up close, useless far; 3° kick per shot; reloads shell by shell (the ammo counter climbs as shells go in) and **fires straight out of the reload** once a shell is in |
+  | Sniper | 4 | 1.2 s | 2.8 s | 60 | 100 / 100 / 60 | `RMB` opens the round scope (×3), even mid-reload; mouse sensitivity drops ×3 while scoped; no crosshair from the hip; body shots kill; 4° kick per shot |
 
   **Recoil** — every shot kicks the camera along a **fixed per-gun pattern**
   (the pistol nudges 1° up; the taser doesn't kick), so the spray is
@@ -257,23 +258,34 @@ team modes.
 ### Team Elimination
 
 Create a room as **Team Elimination** (⚔️ TD in the lobby list) for round-based
-two-team play on a **dedicated 64×64 crossroads map** ("ngã tư tử thần"),
-mirrored so both teams fight over identical ground: two flat brick roads cross
-in the middle, four hollow corner buildings with doorways onto both roads frame
-the intersection, and each team spawns in its own zone at the north/south end.
+two-team play on a **dedicated 76×76 crossroads map** ("ngã tư tử thần") with
+a **flat floor**: four **solid rounded cover blocks** (7 tall — too high to
+see or jump over), one per quadrant, leave a cross of corridors between them.
+The blocks are **deliberately offset, not mirrored**, so the corridor corners
+are staggered into off-angle peeks; the ground they frame is a **cross-shaped
+water channel**, one block deep and water bank to bank, its surface flush
+with the ground — you don't walk on the water, you **sink in waist-deep**
+(jump to climb back out anywhere) and bullets pass straight through the
+surface. The channel stops short of the spawn yards and border lanes, and a
+short border stub covers each corridor mouth. Fairness lives
+in the yards: each team's two spawn strips, two weapon rows and base at the
+north/south end mirror the other team's exactly, and respawning teammates
+never stack — everyone gets their own spawn point.
 
-- **Rounds.** Everyone spawns at their own end with the default loadout
-  (pistol + sword + grenades; the deathmatch random-primary roll does not
-  apply), frozen behind a **3-2-1 countdown** (3 s: no moving or attacking —
+- **Rounds.** Everyone spawns at their own end **blade-only** — no pistol, no
+  grenades; every gun comes off the ground — frozen behind a **3-2-1 countdown** (3 s: no moving or attacking —
   the server drops attacks too, and bots hold still). **Dying takes you out
   for the round** — you spectate until it ends. Wiping the enemy team wins
   the round (a big banner announces the result); a simultaneous wipe is a
   drawn round (no point). Rounds have **no time limit**, and there is no
   match clock.
-- **Weapons on the ground.** Better weapons lie at **fixed spots** — a row of
-  8 in front of each spawn zone, two of each primary gun (rifle / SMG /
-  shotgun / sniper; blades ×2 in a sword-only room) — the **same spots and
-  kinds every round**, so you learn where your favourite gun waits. Walk over
+- **Weapons on the ground.** Every gun lies at a **fixed spot**: two rows of 4
+  in front of each spawn zone — west to east **sniper, shotgun, SMG, rifle |
+  SMG, shotgun, rifle, sniper**, and the far side's rows are the exact
+  reverse, so both teams read the same order left-to-right from their own end
+  (blades ×2 per side in a sword-only room). Four **pistols** hover at the
+  east/west arm mouths, beside the border stubs. The **same spots and kinds
+  every round**, so you learn where your favourite gun waits. Walk over
   one with an empty slot `1` to take it (`G` throws the one you hold away);
   the rows never expire — only thrown-away guns do (5 s) — and the random
   timed drops don't run.

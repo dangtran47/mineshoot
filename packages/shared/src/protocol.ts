@@ -102,6 +102,15 @@ export function meleeSelectable(mode: RoomMode, weapons: WeaponMode): boolean {
   return mode === 'training' && weaponAllowed(weapons, WEAPON_MELEE);
 }
 
+/**
+ * The slot a player holds right after a (re)spawn. Team elimination starts
+ * blade-only — the pistol slot is empty until one is lifted off the ground —
+ * so td spawns bring the melee out; everywhere else it is defaultWeapon.
+ */
+export function spawnWeapon(mode: RoomMode, weapons: WeaponMode): Weapon {
+  return mode === 'td' ? WEAPON_MELEE : defaultWeapon(weapons);
+}
+
 export interface CreateOptions {
   name: string;
   durationMin: number;

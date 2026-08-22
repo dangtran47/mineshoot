@@ -29,7 +29,9 @@ const air = (w: World, x: number, y: number, z: number): boolean => {
   if (x < 0 || z < 0 || x >= w.sx || z >= w.sz) return false;
   if (y < 0) return false;
   if (y >= w.sy) return true;
-  return w.blocks[(y * w.sz + z) * w.sx + x] === Block.Air;
+  const b = w.blocks[(y * w.sz + z) * w.sx + x];
+  // Water is passable (you wade through it) but not support (`solid` below stays false).
+  return b === Block.Air || b === Block.Water;
 };
 const solid = (w: World, x: number, y: number, z: number): boolean => x >= 0 && z >= 0 && x < w.sx && z < w.sz && y >= 0 && y < w.sy && !air(w, x, y, z);
 

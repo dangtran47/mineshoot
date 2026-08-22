@@ -7,8 +7,8 @@ export const CHUNK = 16;
 export const CTF_WORLD_SX = 96;
 export const CTF_WORLD_SZ = 48;
 /** Team-elimination map: a square crossroads, teams north/south. */
-export const TD_WORLD_SX = 64;
-export const TD_WORLD_SZ = 64;
+export const TD_WORLD_SX = 76;
+export const TD_WORLD_SZ = 76;
 
 // Player body
 export const PLAYER_HALF_W = 0.3;
@@ -80,6 +80,8 @@ export const CTF_BASE_ZONE_RADIUS = 4;
 export const CTF_TEAM_SPAWN_COUNT = 8;
 
 // Team elimination (td)
+/** Team spawn pool in td: whole squads respawn at once, so they need more points than ctf to never stack. */
+export const TD_TEAM_SPAWN_COUNT = 12;
 export const TD_ROUND_LIMIT_OPTIONS = [3, 5, 7, 10] as const;
 export const TD_DEFAULT_ROUND_LIMIT = 5;
 /** Pause between a round ending and the next one starting (survivors keep walking, nobody respawns). */

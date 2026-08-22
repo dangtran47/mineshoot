@@ -213,6 +213,9 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     onTaserChange() {
       hud.setWeapon(weapons.current, weapons.melee, weapons.gun);
     },
+    onPistolChange() {
+      hud.setWeapon(weapons.current, weapons.melee, weapons.gun);
+    },
     onGrenadesChange(n: number) {
       hud.setGrenades(n);
     },
@@ -352,6 +355,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
       }
       // Weapon slots follow the server (drop pickups arm them, death resets them).
       weapons.setMelee(me.melee as MeleeKind);
+      weapons.setPistol(me.pistol as GunKind);
       weapons.setGun(me.gun as GunKind);
       weapons.setTaser(me.taser as GunKind);
       weapons.setGrenades(me.grenades);
@@ -492,6 +496,10 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     } else if (m.slot === WEAPON_TASER) {
       weapons.setTaser(m.kind as GunKind);
       weapons.select(WEAPON_TASER);
+    } else if (m.slot === WEAPON_PISTOL) {
+      weapons.setPistol(m.kind as GunKind);
+      // Already holding a primary: pocket the pistol without switching to it.
+      if (weapons.gun === GUN_NONE) weapons.select(WEAPON_PISTOL);
     } else {
       weapons.setGrenades(Math.min(GRENADE_MAX, weapons.grenades + m.kind));
     }
@@ -606,7 +614,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     hud.setCharge(charge ?? weapons.throwChargeFraction(now));
     const reload = weapons.reloadFraction(now);
     viewModel.setReload(reload);
-    hud.setAmmo(weapons.ammo, weapons.magOf(weapons.current), reload !== null);
+    hud.setAmmo(weapons.ammo, weapons.magOf(weapons.current), reload !== null, weapons.perShell);
     const usable: Record<number, boolean> = {};
     for (const w of WEAPONS) usable[w] = weapons.canUse(w);
     hud.setSlots(usable, weapons.current);
@@ -616,6 +624,8 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
       camera.fov = baseFov / zoom;
       camera.updateProjectionMatrix();
     }
+    look.sensitivityScale = 1 / zoom; // scoped aim slows in step with the narrowed FOV
+
     hud.setScope(weapons.zooming, weapons.zoomCapable);
     viewModel.update(dt, moving && local.state.onGround);
     remotes.update(now, {

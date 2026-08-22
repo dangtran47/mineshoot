@@ -2,7 +2,7 @@ import { Block, getBlock } from '@mineshoot/shared';
 import type { World } from '@mineshoot/shared';
 
 /** Atlas layout: ATLAS_TILES square tiles in one row. */
-export const ATLAS_TILES = 8;
+export const ATLAS_TILES = 9;
 export const TILE_PX = 16;
 
 export const enum Tile {
@@ -14,6 +14,7 @@ export const enum Tile {
   Brick = 5,
   Bedrock = 6,
   Leaves = 7,
+  Water = 8,
 }
 
 /** 0:+X 1:-X 2:+Y 3:-Y 4:+Z 5:-Z */
@@ -35,6 +36,8 @@ export function tileFor(block: Block, face: Face): Tile {
       return Tile.Bedrock;
     case Block.Leaves:
       return Tile.Leaves;
+    case Block.Water:
+      return Tile.Water;
     default:
       return Tile.Stone;
   }
