@@ -275,6 +275,13 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     viewModel.setHidden(next !== null);
     const p = next ? room?.state.players.get(next) : undefined;
     hud.setSpectating(p ? displayName(p.name, p.isBot) : null);
+    // Spectating is a live view: full colors, no death banner — only the name label above.
+    // Back on the own death cam (nobody watchable) both come back.
+    if (!local.alive && epoch > 0) {
+      renderer.domElement.classList.toggle('dead', next === null);
+      if (next === null) hud.unhideDeath();
+      else hud.hideDeath();
+    }
   };
 
   // --- input wiring ---

@@ -398,6 +398,11 @@ export class Hud {
     this.centerMsg.classList.add('hidden');
   }
 
+  /** Re-show the banner built by showDeath (back from spectating to the own death cam). */
+  unhideDeath(): void {
+    this.centerMsg.classList.remove('hidden');
+  }
+
   /** Whose eyes we are watching through while dead; null leaves the death cam label off. */
   setSpectating(name: string | null): void {
     this.spectateEl.classList.toggle('hidden', name === null);
