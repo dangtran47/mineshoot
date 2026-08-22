@@ -200,7 +200,8 @@ packages/client/src/
                    spectateModel.ts (who a dead player may watch + cycling)
   render/          scene, atlas, mesher/worldMesh (per-chunk face culling meshes),
                    humanoid + humanoidAnim, viewmodel, meleeProps, gunProps,
-                   dropsView, grenadesView, flagsView, tracers, bloodFx, nametag
+                   dropsView, grenadesView, flagsView, tracers, bloodFx, nametag,
+                   bulletHoles (decal pool; re-walks each shot ray for the face)
   hud/             hud.ts (health/ammo/timer/scoreboard/overlays), killFeed,
                    damageFx, minimap.ts (canvas map + fog of war), icons
                    (inline SVG), style.css

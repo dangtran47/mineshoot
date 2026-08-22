@@ -39,6 +39,7 @@ import {
   otherTeam,
   rankCtf,
   rankPlayers,
+  raycastVoxels,
   recoilKick,
   respawnMsFor,
   teamName,
@@ -52,6 +53,7 @@ import { createScene } from '../render/scene';
 import { buildWorldMeshes } from '../render/worldMesh';
 import { Tracers } from '../render/tracers';
 import { BloodFx } from '../render/bloodFx';
+import { BulletHoles, bulletHoleAt } from '../render/bulletHoles';
 import { DropsView } from '../render/dropsView';
 import { GrenadesView } from '../render/grenadesView';
 import { ViewModel } from '../render/viewmodel';
@@ -112,6 +114,8 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
   scene.add(tracers.group);
   const blood = new BloodFx();
   scene.add(blood.mesh);
+  const bulletHoles = new BulletHoles();
+  scene.add(bulletHoles.mesh);
   const remotes = new RemotePlayers();
   scene.add(remotes.group);
   const drops = new DropsView();
@@ -180,9 +184,18 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
         const m: ShootMsg = { ...currentPose(), weapon: slot };
         room.send(MSG.shoot, m);
       } else {
+        // No server to hitscan for us: walk the ray locally so the tracer stops at the wall
+        // and leaves a hole there.
         const f = forwardVector(look.yaw, look.pitch);
         const m = muzzle();
-        tracers.spawn(m, { x: m.x + f.x * 40, y: m.y + f.y * 40, z: m.z + f.z * 40 });
+        const eye = { x: local.state.x, y: local.state.y + EYE_HEIGHT, z: local.state.z };
+        const voxel = raycastVoxels(world, eye, f, 40);
+        const to = voxel.hit ? voxel.point : { x: eye.x + f.x * 40, y: eye.y + f.y * 40, z: eye.z + f.z * 40 };
+        tracers.spawn(m, to);
+        if (voxel.hit) {
+          const hole = bulletHoleAt(world, eye, to);
+          if (hole) bulletHoles.spawn(hole.point, hole.normal, performance.now());
+        }
       }
       // Kick after the shot is on the wire: the recoil pattern bends the *next* bullet.
       recoil.kick(kind, performance.now());
@@ -505,6 +518,11 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
         hitOther = true;
         head ||= r.part === 'head';
         blood.burst(r.to, r.damage, { x: r.to.x - from.x, y: r.to.y - from.y, z: r.to.z - from.z });
+      } else {
+        // Nobody was hit: the ray may have ended on a wall. Re-walk it from the server's origin
+        // (not the cosmetic muzzle above) to recover the block face and mark it.
+        const hole = bulletHoleAt(world, m.from, r.to);
+        if (hole) bulletHoles.spawn(hole.point, hole.normal, performance.now());
       }
     }
     if (m.shooterId === meId && hitOther) hud.hitmark(head);
@@ -721,6 +739,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     }
     tracers.update(now);
     blood.update(now);
+    bulletHoles.update(now);
     // Minimap: my team is always drawn, enemies only where somebody on my side
     // has line of sight, and the enemy flag leaves a last-seen pin behind.
     const myTeam = meNet()?.team ?? TEAM_NONE;
@@ -792,6 +811,7 @@ export function startGame(opts: GameScreenOptions): { dispose(): void } {
     flags.dispose();
     tracers.dispose();
     blood.dispose();
+    bulletHoles.dispose();
     worldMesh.dispose();
     bundle.dispose();
   };

@@ -36,7 +36,8 @@ around, and shoot each other for 3–15 minutes. Then argue about the K/D table.
 - Blocky humanoids in eight colours with nametags, walk/attack animations,
   first-person view models for every gun, the grenade and every melee weapon.
 - HUD with health, ammo, timer, kill feed, crosshair, damage vignette,
-  floating damage numbers, voxel blood spray, and a Tab scoreboard.
+  floating damage numbers, voxel blood spray, bullet holes on the blocks you
+  shoot, and a Tab scoreboard.
 - Minimap in the top-left corner: your team and your own flag are always on it,
   while enemies only appear where you or a team-mate has line of sight, and a
   stolen enemy flag leaves a dimmed last-seen marker behind.
